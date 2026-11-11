@@ -3,6 +3,9 @@
 Night machine (RTX 5070, 12 GB):
     python -m training.train --data data/intents --tokenizer checkpoints/tokenizer.json --out checkpoints/intent.pt
 
+Bigger model if OOD accuracy plateaus (still fits 12 GB easily):
+    python -m training.train --d-model 384 --layers 6 --steps 60000
+
 Laptop smoke test (CPU or the small GPU):
     python -m training.train --steps 200 --batch 32 --eval-every 100
 """
@@ -93,11 +96,11 @@ def main():
     ap.add_argument("--data", type=Path, default=Path("data/intents"))
     ap.add_argument("--tokenizer", type=Path, default=Path("checkpoints/tokenizer.json"))
     ap.add_argument("--out", type=Path, default=Path("checkpoints/intent.pt"))
-    ap.add_argument("--steps", type=int, default=15000)
+    ap.add_argument("--steps", type=int, default=40000)
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--lr", type=float, default=6e-4)
     ap.add_argument("--warmup", type=int, default=800)
-    ap.add_argument("--eval-every", type=int, default=1000)
+    ap.add_argument("--eval-every", type=int, default=2000)
     ap.add_argument("--d-model", type=int, default=256)
     ap.add_argument("--layers", type=int, default=4)
     ap.add_argument("--compile", action="store_true", help="torch.compile (needs Triton; skip on Windows if it errors)")
@@ -116,7 +119,9 @@ def main():
                       d_ff=3 * args.d_model)
     train_rows = load_split(args.data / "train.jsonl", tok, cfg)
     val_rows = load_split(args.data / "val.jsonl", tok, cfg)
-    print(f"train={len(train_rows)} val={len(val_rows)}")
+    ood_path = args.data / "test_ood.jsonl"
+    ood_rows = load_split(ood_path, tok, cfg) if ood_path.exists() else []
+    print(f"train={len(train_rows)} val={len(val_rows)} test_ood={len(ood_rows)}")
 
     model = IntentTransformer(cfg).to(device)
     print(f"params: {model.n_params() / 1e6:.2f}M")
@@ -157,6 +162,9 @@ def main():
             if step % args.eval_every == 0 or step == args.steps:
                 m = evaluate(model, val_rows, tok, device)
                 print(f"  eval  loss {m['loss']:.4f}  exact {m['exact']:.4f}  valid {m['valid']:.4f}")
+                if ood_rows:
+                    o = evaluate(model, ood_rows, tok, device)
+                    print(f"  ood   loss {o['loss']:.4f}  exact {o['exact']:.4f}  valid {o['valid']:.4f}")
                 if m["exact"] > best:
                     best = m["exact"]
                     torch.save({"config": cfg.to_dict(), "model": model.state_dict(), "step": step,

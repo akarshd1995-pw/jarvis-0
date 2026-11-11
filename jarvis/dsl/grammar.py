@@ -67,6 +67,7 @@ SCHEMA: dict[str, dict] = {
                       "enum": {"action": ["lock", "mute", "volume_up", "volume_down", "sleep_display"]}},
     "search_memory": {"args": {"query": "str"}, "required": ["query"]},
     "undo":          {"args": {}, "required": []},
+    "unknown":       {"args": {}, "required": []},   # out-of-scope request: decline, never guess
 }
 
 
@@ -105,7 +106,7 @@ _TOKEN_RE = re.compile(r"""
   | (?P<TIME>\d{1,2}:\d{2})
   | (?P<DUR>\d+[mhdw])(?![A-Za-z0-9_])
   | (?P<NUM>\d+)(?![A-Za-z_])
-  | (?P<IDENT>[A-Za-z_][A-Za-z0-9_.\-]*)
+  | (?P<IDENT>[A-Za-z_][A-Za-z0-9_.\-]*|\d+[A-Za-z_][A-Za-z0-9_.\-]*)
   | (?P<PUNCT>[(),=;])
 """, re.VERBOSE)
 

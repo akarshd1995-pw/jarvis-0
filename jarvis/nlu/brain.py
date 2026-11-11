@@ -29,11 +29,16 @@ class Brain:
             return parse(text), "dsl"
         except DSLError:
             pass
+        model_unknown = None
         if self.model is not None:
-            prog = self.model.parse(text)
+            prog, conf = self.model.parse(text)
             if prog is not None:
-                return prog, "model"
+                if str(prog) != "unknown()":
+                    return prog, f"model {conf:.0%}"
+                model_unknown = (prog, f"model {conf:.0%}")
         prog = rule_parse(text)
         if prog is not None:
             return prog, "rules"
+        if model_unknown:
+            return model_unknown       # model is confident this is out of scope -> polite decline
         return None, "unparsed"

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import math
+
 import torch
 
 from training.model import IntentTransformer, ModelConfig
@@ -17,24 +19,29 @@ from ..dsl.grammar import DSLError, Program, parse
 
 
 class ModelParser:
-    def __init__(self, checkpoint: Path, tokenizer: Path, beam: int = 4):
+    def __init__(self, checkpoint: Path, tokenizer: Path, beam: int = 4, min_confidence: float = 0.55):
         self.tok = BPETokenizer.load(tokenizer)
         ckpt = torch.load(checkpoint, map_location="cpu", weights_only=True)
         self.model = IntentTransformer(ModelConfig(**ckpt["config"]))
         self.model.load_state_dict(ckpt["model"])
         self.model.eval()
         self.beam = beam
+        # geometric-mean token probability below this -> treat as "not sure" and fall back
+        self.min_confidence = min_confidence
         torch.set_num_threads(max(1, min(4, torch.get_num_threads())))
 
-    def parse(self, text: str) -> Program | None:
+    def parse(self, text: str) -> tuple[Program | None, float]:
+        """Returns (program or None, confidence in 0..1)."""
         ids = self.tok.encode(text)[: self.model.cfg.max_src]
         if not ids:
-            return None
+            return None, 0.0
         src = torch.tensor([ids])
         pad = src == PAD
-        for _score, out in self.model.beam(src, pad, BOS, EOS, k=self.beam):
+        for score, out in self.model.beam(src, pad, BOS, EOS, k=self.beam):
+            conf = math.exp(score / max(1, len(out) + 1))
             try:
-                return parse(self.tok.decode(out))
+                prog = parse(self.tok.decode(out))
             except DSLError:
                 continue
-        return None
+            return (prog if conf >= self.min_confidence else None), conf
+        return None, 0.0

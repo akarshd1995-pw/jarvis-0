@@ -18,6 +18,7 @@ ACTION_TIERS: dict[str, Tier] = {
     "list_files": Tier.SAFE,
     "remind": Tier.SAFE,
     "search_memory": Tier.SAFE,
+    "unknown": Tier.SAFE,
     "undo": Tier.CONFIRM,
     "move_files": Tier.CONFIRM,
     "copy_files": Tier.CONFIRM,

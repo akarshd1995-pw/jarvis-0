@@ -103,3 +103,8 @@ def system(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
 
 def search_memory(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     return ActionResult("Memory search arrives in phase 3 (own embeddings + HNSW).")
+
+
+def unknown(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
+    return ActionResult("I can't do that yet. I can manage files (move/copy/delete/list), open apps, "
+                        "websites and folders, set reminders, and lock/mute/change volume.")

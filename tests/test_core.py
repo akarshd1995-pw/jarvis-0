@@ -124,14 +124,50 @@ def test_reminder_scheduled(env):
 
 # ------------------------------------------------------------------ datagen + tokenizer
 def test_generated_programs_are_valid_and_slots_intact():
+    from datagen.lexicon import KNOWN_SITES
     rng = random.Random(7)
-    for _ in range(3000):
-        ex = sample(rng)
-        prog = parse(ex["program"])
-        for call in prog.calls:
-            for key in ("text", "query", "name_contains"):
-                if key in call.args:
-                    assert call.args[key] in ex["text"], (ex, key)
+    for split in ("train", "ood"):
+        for _ in range(4000):
+            ex = sample(rng, split)
+            prog = parse(ex["program"])
+            for call in prog.calls:
+                for key in ("text", "query", "name_contains", "name", "src", "dest", "path", "url"):
+                    v = call.args.get(key)
+                    if isinstance(v, str) and not (key == "url" and v in KNOWN_SITES.values()):
+                        assert v in ex["text"], (ex, key)
+
+
+def test_splits_disjoint_and_ood_templates_held_out():
+    from datagen.generate_intents import _norm, build
+    splits, _ = build(3000, 500, seed=1, extra=None)
+    train = {_norm(e["text"]) for e in splits["train"]}
+    for name in ("val", "test_iid", "test_ood"):
+        assert not train & {_norm(e["text"]) for e in splits[name]}, name
+    assert any(e["program"] == "unknown()" for e in splits["train"])
+
+
+def test_unknown_is_declined_politely(env):
+    cfg, store, dl, arc = env
+    rep = Executor(cfg, store, lambda *a: True).run(parse("unknown()"))
+    assert "can't do that" in rep.text()
+
+
+def test_brain_prefers_rules_over_model_unknown():
+    from jarvis.nlu.brain import Brain
+
+    class FakeModel:
+        def __init__(self, out):
+            self.out = out
+
+        def parse(self, text):
+            return (parse(self.out), 0.9) if self.out else (None, 0.2)
+
+    b = Brain()
+    b.model = FakeModel("unknown()")
+    assert str(b.resolve("open chrome")[0]) == "open_app(name=chrome)"       # rules rescue
+    assert str(b.resolve("write me a poem")[0]) == "unknown()"               # polite decline
+    b.model = FakeModel(None)                                                # low confidence
+    assert b.resolve("write me a poem") == (None, "unparsed")
 
 
 def test_tokenizer_roundtrip():

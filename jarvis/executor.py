@@ -21,6 +21,7 @@ REGISTRY: dict[str, Handler] = {
     "remind": system.remind,
     "system": system.system,
     "search_memory": system.search_memory,
+    "unknown": system.unknown,
     "list_files": files.list_files,
     "move_files": files.move_files,
     "copy_files": files.copy_files,

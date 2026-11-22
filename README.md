@@ -65,9 +65,9 @@ directly, for example `list_files(src=Downloads, ext=pdf)`. Type `undo` to rever
 train_night.bat
 ```
 That script runs four steps:
-1. `python -m datagen.generate_intents --n 1000000` builds 1M training examples plus `val`, `val_ood`, `test_iid` and `test_ood` sets (about 90 s).
+1. `python -m datagen.generate_intents --n 2000000` builds 2M training examples plus `val`, `val_ood`, `test_iid` and `test_ood` sets (about 3 min).
 2. `python -m training.tokenizer --vocab 2048` trains the BPE tokenizer (under a minute).
-3. `python -m training.train --steps 40000` trains the model from random weights. Expect roughly 1–2 hours on a 5070.
+3. `python -m training.train` trains the model (~27M parameters: 6+6 layers, d_model 384) from random weights for up to 60,000 steps. Expect roughly 1–1.5 hours on a 5070.
    The best checkpoint goes to `checkpoints/intent.pt`. It is picked by the average of accuracy on familiar phrasing (`val`) and on unseen sentence structures (`val_ood`). Training stops early if neither improves for 6 checks in a row.
 4. `python -m training.evaluate` writes `checkpoints/eval_report.txt` and every mistake to `checkpoints/errors_*.jsonl`.
 
@@ -82,9 +82,28 @@ That script runs four steps:
 - **Held-out sentence structures:** 1 in 8 sentence frames is reserved for `val_ood` (used to pick the checkpoint) and another 1 in 8 for `test_ood` (the final score, never touched during training). Only the structure is held out. Every meaningful phrase ("last modified more than X ago", "throw away", "khali karo", "A -> B") is in shared lists that training sees, and a test fails if a held-out frame contains any word training never shows.
 - **Ambiguity filter:** if the same text ever maps to two different programs, it is dropped everywhere.
 - **Confidence gate:** at runtime, outputs below 55% confidence are not executed. Jarvis falls back to the rules or asks you to rephrase.
+- **Grammar-constrained decoding:** during beam search, any token that would make the output an invalid program is discarded, so the model can only produce well-formed commands.
+- **Safety data:** negations ("don't delete…", "mat hatao") and lone or garbled words always map to `unknown()`.
+
+## Commands it understands
+| Say | Program |
+|---|---|
+| "move pdfs older than a month from downloads to archive" | `move_files(...)` (with preview + confirm) |
+| "play dear god on youtube" / "open youtube and play X" | `search_web(query="dear god", site=youtube)` |
+| "google best biryani near me", "search amazon for a usb c hub" | `search_web(..., site=google/amazon/...)` |
+| "open chrome and send an email to Rahul" | `open_app(name=chrome) ; unsupported(request="send an email to Rahul")`: does what it can, tells you what it skipped |
+| "don't delete my pdfs" | `unknown()`: never acts on a negation |
+
+Supported search sites: google, youtube, amazon, flipkart, swiggy, zomato, github, stackoverflow, wikipedia, spotify, maps, reddit, linkedin.
 
 ## Teaching it your own phrasing
-When Jarvis gets something wrong, add a line to `data/user_corrections.jsonl`:
+The fastest way: right in the command bar, after Jarvis gets something wrong, type
+```
+/fix move_files(src=Downloads, dest=Archive, ext=pdf, older_than=30d)
+```
+That saves your last command with the correct program. `/good` confirms a correct result, `/wrong` flags one to label later, `/help` lists these.
+You can also edit the file directly:
+`data/user_corrections.jsonl`:
 ```json
 {"text": "dl ki saari purani pdf archive me", "program": "move_files(src=Downloads, dest=Archive, ext=pdf, older_than=30d)"}
 ```
@@ -120,7 +139,8 @@ python -m pytest -q
 ## Roadmap
 - [x] Phase 1: daemon, collectors, executors, safety layer, command bar
 - [x] Phase 2: synthetic data engine, BPE tokenizer, transformer, training loop (train it tonight)
-- [ ] Phase 2.5: grammar-constrained decoding (mask invalid tokens during beam search), ONNX export, test-set breakdown by action
+- [x] Phase 2.5: web search, skipped-step reporting, grammar-constrained decoding, /fix corrections, negation safety data, 2M examples and a bigger model
+- [ ] ONNX export (run without PyTorch on the laptop)
 - [ ] Phase 3: memory index (contrastive embedding model, hand-written HNSW, CRNN OCR for screenshots)
 - [ ] Phase 4: routine model (causal transformer over the focus and file event log) and proactive suggestions
 - [ ] Phase 5: notification triage (online classifier with contextual-bandit exploration)

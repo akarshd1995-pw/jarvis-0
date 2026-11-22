@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from array import array
 import math
 import random
 import time
@@ -34,7 +35,8 @@ def load_split(path: Path, tok: BPETokenizer, cfg: ModelConfig):
             src = tok.encode(ex["text"])[: cfg.max_src]
             tgt = tok.encode(ex["program"], bos=True, eos=True)
             if len(tgt) <= cfg.max_tgt:
-                rows.append((src, tgt, ex["program"]))
+                # uint16 arrays: ~15x less RAM than Python int lists, so 2M+ examples fit easily
+                rows.append((array("H", src), array("H", tgt), ex["program"]))
     return rows
 
 
@@ -44,8 +46,8 @@ def collate(batch, device):
     src = torch.full((len(batch), s_len), PAD, dtype=torch.long)
     tgt = torch.full((len(batch), t_len), PAD, dtype=torch.long)
     for i, (s, t, _) in enumerate(batch):
-        src[i, : len(s)] = torch.tensor(s)
-        tgt[i, : len(t)] = torch.tensor(t)
+        src[i, : len(s)] = torch.tensor(s.tolist() if isinstance(s, array) else s)
+        tgt[i, : len(t)] = torch.tensor(t.tolist() if isinstance(t, array) else t)
     src, tgt = src.to(device, non_blocking=True), tgt.to(device, non_blocking=True)
     return src, src == PAD, tgt[:, :-1], tgt[:, 1:]
 
@@ -96,15 +98,15 @@ def main():
     ap.add_argument("--data", type=Path, default=Path("data/intents"))
     ap.add_argument("--tokenizer", type=Path, default=Path("checkpoints/tokenizer.json"))
     ap.add_argument("--out", type=Path, default=Path("checkpoints/intent.pt"))
-    ap.add_argument("--steps", type=int, default=40000)
+    ap.add_argument("--steps", type=int, default=60000)
     ap.add_argument("--batch", type=int, default=256)
-    ap.add_argument("--lr", type=float, default=6e-4)
+    ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--warmup", type=int, default=800)
     ap.add_argument("--eval-every", type=int, default=2000)
     ap.add_argument("--patience", type=int, default=6,
                     help="stop after this many evals without improvement (0 = never stop early)")
-    ap.add_argument("--d-model", type=int, default=256)
-    ap.add_argument("--layers", type=int, default=4)
+    ap.add_argument("--d-model", type=int, default=384)
+    ap.add_argument("--layers", type=int, default=6)
     ap.add_argument("--compile", action="store_true", help="torch.compile (needs Triton; skip on Windows if it errors)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()

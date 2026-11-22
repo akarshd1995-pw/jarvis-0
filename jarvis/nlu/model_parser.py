@@ -1,8 +1,8 @@
 """Runs the trained intent model inside the daemon.
 
-Decoding = beam search + validation: candidates are tried best-first and the first one
-that parses and type-checks against the DSL schema wins. Invalid output never executes.
-(Next step: true grammar-constrained decoding that masks invalid tokens during search.)
+Decoding = grammar-constrained beam search: at every step, tokens that would make the
+output impossible to complete as a valid program are discarded (jarvis.dsl.grammar.viable_prefix),
+and <eos> is only accepted for complete programs. Invalid output can never be produced.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import torch
 from training.model import IntentTransformer, ModelConfig
 from training.tokenizer import BOS, EOS, PAD, BPETokenizer
 
-from ..dsl.grammar import DSLError, Program, parse
+from ..dsl.grammar import DSLError, Program, is_complete, parse, viable_prefix
 
 
 class ModelParser:
@@ -37,7 +37,11 @@ class ModelParser:
             return None, 0.0
         src = torch.tensor([ids])
         pad = src == PAD
-        for score, out in self.model.beam(src, pad, BOS, EOS, k=self.beam):
+        decode = self.tok.decode
+        results = self.model.beam(src, pad, BOS, EOS, k=self.beam,
+                                  prefix_ok=lambda ids: viable_prefix(decode(ids)),
+                                  complete_ok=lambda ids: is_complete(decode(ids)))
+        for score, out in results:
             conf = math.exp(score / max(1, len(out) + 1))
             try:
                 prog = parse(self.tok.decode(out))

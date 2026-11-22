@@ -177,20 +177,32 @@ SYSTEM = {
 }
 
 # ---------------------------------------------------------------- out of scope -> unknown()
-UNKNOWN_TEMPLATES = [
+UNKNOWN_TEMPLATES = [  # chit-chat, questions, unclear or incomplete requests -> unknown()
     "what's the weather {when}", "write a poem about {topic}", "tell me a joke", "who are you",
-    "how are you", "what is {topic}", "explain {topic}", "send an email to {name}", "order {food} from swiggy",
-    "book a cab to {place}", "play {song}", "what time is it", "translate {topic} to hindi",
-    "write python code for {topic}", "summarize this article", "call {name}", "text {name} that i'm late",
-    "buy {thing} on amazon", "turn on the lights", "set the ac to 24", "how much is bitcoin",
+    "how are you", "what is {topic}", "explain {topic}", "what time is it", "translate {topic} to hindi",
+    "write python code for {topic}", "summarize this article", "how much is bitcoin",
     "who won the match {when}", "recommend a movie", "what should i eat", "do my homework",
-    "hack my neighbor's wifi", "format the c drive", "delete system32", "shut down everyone's pc",
     "make me a website", "what's on my calendar {when}", "how do i {topic}", "i love you", "thanks",
     "hello", "good morning", "good night", "ok", "hmm", "nothing", "never mind", "asdfgh", "?",
     "kya haal hai", "mausam kaisa hai", "ek joke sunao", "mera homework kar do", "{topic} kya hai",
-    "khana order karo", "{name} ko call karo", "gaana bajao", "tum kaun ho", "kuch nahi",
-    "move my stuff", "delete it", "put them somewhere", "remind me", "open", "copy", "do the thing",
+    "gaana bajao", "tum kaun ho", "kuch nahi", "move my stuff", "delete it", "put them somewhere",
+    "remind me", "open", "copy", "do the thing", "play", "search", "play something",
+    "what can you do", "can you delete files", "are you able to move files", "do you know {topic}",
+    "help", "what are your features", "tum kya kya kar sakte ho", "test", "testing 123", "lol", "bruh",
 ]
+# Clear actions Jarvis cannot do yet -> unsupported(request="...") (also inside multi-step commands)
+UNSUPPORTED_TEMPLATES = [
+    "send an email to {name}", "email {name} the report", "call {name}", "text {name} that i'm late",
+    "message {name} on whatsapp", "book a cab to {place}", "order {food} from swiggy", "buy {thing} on amazon",
+    "turn on the lights", "set the ac to 24", "pay the electricity bill", "post this on instagram",
+    "record my screen", "take a screenshot", "shut down the pc", "restart the computer", "connect to wifi",
+    "turn on bluetooth", "install {app}", "uninstall {app}", "update windows", "empty the recycle bin",
+    "format the c drive", "delete system32", "hack my neighbor's wifi", "shut down everyone's pc",
+    "{name} ko call karo", "{name} ko message bhejo", "khana order karo", "cab book karo",
+    "light on karo", "screenshot le lo", "pc restart karo", "{app} install karo", "wifi connect karo",
+    "share this file with {name}", "print the document", "zip the downloads folder", "rename the file",
+]
+U_FILL_APP = ["discord", "vlc", "steam", "python", "node", "zoom", "figma"]
 U_FILL = {
     "when": ["today", "tomorrow", "this weekend", "in delhi", "right now", "yesterday", "tonight"],
     "topic": ["the moon", "machine learning", "quantum physics", "love", "chai", "black holes", "recursion",
@@ -202,11 +214,83 @@ U_FILL = {
 }
 
 
-def unknown_text(rng: random.Random) -> str:
-    t = rng.choice(UNKNOWN_TEMPLATES)
-    for k, vals in U_FILL.items():
+def _fill(t: str, rng: random.Random) -> str:
+    for k, vals in {**U_FILL, "app": U_FILL_APP}.items():
         t = t.replace("{" + k + "}", rng.choice(vals))
     return t
+
+
+def unknown_text(rng: random.Random) -> str:
+    return _fill(rng.choice(UNKNOWN_TEMPLATES), rng)
+
+
+def unsupported_text(rng: random.Random) -> str:
+    return _fill(rng.choice(UNSUPPORTED_TEMPLATES), rng)
+
+
+# ---------------------------------------------------------------- web search (open queries)
+SEARCH_SITES = {
+    "youtube": ["youtube", "YouTube", "yt", "you tube"],
+    "google": ["google", "Google", "the web", "the internet"],
+    "amazon": ["amazon", "Amazon"],
+    "flipkart": ["flipkart", "Flipkart"],
+    "swiggy": ["swiggy", "Swiggy"],
+    "zomato": ["zomato", "Zomato"],
+    "github": ["github", "GitHub"],
+    "stackoverflow": ["stack overflow", "stackoverflow", "Stack Overflow"],
+    "wikipedia": ["wikipedia", "wiki", "Wikipedia"],
+    "spotify": ["spotify", "Spotify"],
+    "maps": ["google maps", "maps", "Maps"],
+    "reddit": ["reddit", "Reddit"],
+    "linkedin": ["linkedin", "LinkedIn"],
+}
+SONGS = ["dear god", "lofi beats", "tum hi ho", "kesariya", "shape of you", "believer", "blinding lights",
+         "night changes", "perfect", "bohemian rhapsody", "chaiyya chaiyya", "apna bana le", "heeriye",
+         "calm down", "starboy", "photograph", "levitating", "the nights", "faded", "senorita"]
+ARTISTS = ["arijit singh", "ap dhillon", "coldplay", "taylor swift", "the weeknd", "ed sheeran", "pritam",
+           "diljit dosanjh", "shreya ghoshal", "imagine dragons", "linkin park", "avicii", "badshah", "anuv jain"]
+GENRES = ["lofi", "chill", "workout", "study", "bollywood", "punjabi", "jazz", "rain sounds", "focus", "90s hindi"]
+HOWTO = ["fix wifi on windows", "make biryani", "tie a tie", "learn python", "train a transformer", "solve a rubik's cube",
+         "use git rebase", "improve handwriting", "make cold coffee", "set up a react app", "center a div"]
+TOPICS = ["black holes", "transformers", "the french revolution", "quantum computing", "gst rules", "photosynthesis",
+          "the mughal empire", "kubernetes", "inflation", "ipl 2026 schedule", "rtx 5070 benchmarks"]
+PRODUCTS = ["wireless mouse", "mechanical keyboard", "usb c hub", "laptop stand", "noise cancelling headphones",
+            "ssd 1tb", "monitor 27 inch", "phone case", "water bottle", "running shoes", "power bank", "webcam"]
+FOODS = ["biryani", "pizza", "masala dosa", "momos", "paneer tikka", "chole bhature", "burger", "shawarma",
+         "pav bhaji", "ice cream", "thali"]
+CODE = ["python list comprehension", "pytorch cuda out of memory", "react useEffect cleanup", "rust borrow checker",
+        "git merge conflict", "numpy broadcasting error", "fastapi cors", "docker compose example",
+        "typescript generics", "sql join example", "beam search implementation"]
+PLACES = ["petrol pump near me", "cafes near me", "atm near me", "hospital near me", "metro station near me",
+          "koramangala", "india gate", "nearest pharmacy", "gyms in indiranagar", "pune railway station"]
+
+
+def web_query(rng: random.Random, site: str) -> str:
+    r = rng.random()
+    if site in ("youtube", "spotify"):
+        if site == "youtube" and r < 0.25:
+            return rng.choice([f"how to {rng.choice(HOWTO)}", f"{rng.choice(TOPICS)} explained",
+                               f"{rng.choice(TOPICS)} tutorial", "cricket highlights", "funny cat videos"])
+        if r < 0.55:
+            return rng.choice(SONGS) + rng.choice(["", "", " song", " lyrics", " live", " remix"])
+        if r < 0.8:
+            return rng.choice([f"{rng.choice(ARTISTS)} songs", rng.choice(ARTISTS), f"{rng.choice(SONGS)} {rng.choice(ARTISTS)}"])
+        return rng.choice([f"{rng.choice(GENRES)} music", f"{rng.choice(GENRES)} mix", f"{rng.choice(GENRES)} playlist",
+                           pseudo_word(rng) + " song"])
+    if site in ("amazon", "flipkart"):
+        p = rng.choice(PRODUCTS)
+        return rng.choice([p, f"{p} under {rng.choice([500, 999, 1500, 2000, 5000])}", f"best {p}", f"{pseudo_word(rng)} {p}"])
+    if site in ("swiggy", "zomato"):
+        return rng.choice(FOODS) + rng.choice(["", "", " near me", " delivery", " under 200"])
+    if site in ("github", "stackoverflow"):
+        return rng.choice(CODE) if r < 0.8 else f"{pseudo_word(rng).lower()} {rng.choice(['library', 'repo', 'error'])}"
+    if site == "maps":
+        return rng.choice(PLACES)
+    if site in ("wikipedia",):
+        return rng.choice(TOPICS)
+    pool = [rng.choice(TOPICS), f"how to {rng.choice(HOWTO)}", rng.choice(CODE), rng.choice(PRODUCTS) + " price",
+            f"{rng.choice(FOODS)} recipe", rng.choice(PLACES), f"what is {pseudo_word(rng).lower()}"]
+    return rng.choice(pool)
 
 # ---------------------------------------------------------------- numbers
 EN_NUM = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",

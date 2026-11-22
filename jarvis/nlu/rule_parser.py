@@ -62,8 +62,16 @@ def _filters(text: str) -> str:
     return ", ".join(parts)
 
 
+_SITES = "youtube|google|amazon|flipkart|spotify|github|wikipedia|reddit"
+
 RULES: list[tuple[re.Pattern, callable]] = [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
+    (re.compile(rf"^(?:open (?:{_SITES}) and )?(?:play|search(?: for)?|find|look up) (.+?) on ({_SITES})$", re.I),
+     lambda m, t: f'search_web(query="{m.group(1)}", site={m.group(2).lower()})'),
+    (re.compile(rf"^open ({_SITES}) and (?:play|search(?: for)?|find|look up) (.+)$", re.I),
+     lambda m, t: f'search_web(query="{m.group(2)}", site={m.group(1).lower()})'),
+    (re.compile(r"^(?:google|search(?: google)? for) (.+)$", re.I),
+     lambda m, t: f'search_web(query="{m.group(1)}", site=google)'),
     (re.compile(r"^(?:open|launch|start) (?:the )?(?:website |site )?((?:https?://)?[\w\-]+\.[\w.\-/]+)$", re.I),
      lambda m, t: f'open_url(url="{m.group(1)}")'),
     (re.compile(rf"^(?:open|show) (?:my )?{_FOLDER}(?: folder)?$", re.I),
@@ -93,8 +101,15 @@ RULES: list[tuple[re.Pattern, callable]] = [
 
 def rule_parse(text: str) -> Program | None:
     text = text.strip().rstrip(".!")
+    for pattern, build in RULES[:4]:   # whole-sentence search rules ("open youtube and play X") go first
+        m = pattern.search(text)
+        if m:
+            try:
+                return parse(build(m, text))
+            except DSLError:
+                break
     # Compound commands: split on ' and then ' / ' then ' / ' and '
-    pieces = re.split(r"\s+(?:and then|then|and)\s+(?=(?:open|launch|start|remind|move|copy|delete|remove|list|show|lock|mute)\b)",
+    pieces = re.split(r"\s+(?:and then|then|and)\s+(?=(?:open|launch|start|remind|move|copy|delete|remove|list|show|lock|mute|play|search)\b)",
                       text, flags=re.I)
     dsl = []
     for piece in pieces:

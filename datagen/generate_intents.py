@@ -16,7 +16,7 @@ meaning ("last modified more than X ago", "throw away", "bring up", "khali karo"
 lives in shared phrase lists used in training, and tests enforce that held-out frames
 contain no word that training never shows.
 
-    python -m datagen.generate_intents --n 1000000 --out data/intents
+    python -m datagen.generate_intents --n 2000000 --out data/intents
 """
 from __future__ import annotations
 
@@ -544,6 +544,93 @@ def gen_search(c: Ctx):
     return f"search_memory(query={q(query)})", tpl.format(q=slot(query), v=c.rng.choice(SEARCH_V)), {}
 
 
+# ---------------------------------------------------------------- web search ("play X on youtube")
+WEB_V = {"music": ["play", "put on", "stream", "search for", "find", "look up", "start playing"],
+         "other": ["search for", "look up", "find", "search", "check", "look for"]}
+WEB_EN = frames("WEB_EN", [
+    "{v} {qs} on {site}",
+    "open {site} and {v} {qs}",
+    "can you {v} {qs} on {site}",
+    "{v} {qs} on {site} please",
+    "go to {site} and {v} {qs}",
+    "search {site} for {qs}",
+    "could you {v} {qs} on {site}",                                       # val_ood
+    "open {site} and then {v} {qs}",                                      # test_ood
+    "i want to {v} {qs} on {site}",
+    "{site}: {v} {qs}",
+    "use {site} to {v} {qs}",
+    "quickly {v} {qs} on {site}",
+    "{v} {qs} using {site}",
+    "please open {site} and {v} {qs}",
+    "go to {site} and then {v} {qs}",                                     # val_ood
+    "can you open {site} and {v} {qs}",                                   # test_ood
+    "open {site}, then {v} {qs}",
+    "on {site}, {v} {qs}",
+    "could you please {v} {qs} on {site}",
+])
+WEB_HI = ["{site} pe {qs} {hv}", "{site} kholo aur {qs} {hv}", "{qs} {site} pe {hv}", "{site} khol ke {qs} {hv}",
+          "zara {site} pe {qs} {hv}", "{site} me {qs} {hv}"]
+WEB_HV = {"music": ["chalao", "bajao", "lagao", "play karo", "chala do"],
+          "other": ["search karo", "dhundo", "dhoondho", "search kar do", "dekho"]}
+NOSITE_MUSIC = ["play {qs}", "put on {qs}", "play the song {qs}", "{qs} chalao", "{qs} bajao", "can you play {qs}",
+                "play {qs} for me", "i want to listen to {qs}", "{qs} gaana lagao"]
+NOSITE_GOOGLE = ["google {qs}", "search the web for {qs}", "search online for {qs}", "look up {qs} online",
+                 "{qs} google karo", "do a google search for {qs}", "web search {qs}"]
+
+
+def gen_search_web(c: Ctx):
+    rng = c.rng
+    site = rng.choice(list(LX.SEARCH_SITES))
+    r = rng.random()
+    if r < 0.15:                                  # "play X" with no site -> YouTube
+        site, query = "youtube", LX.web_query(rng, "youtube")
+        return f"search_web(query={q(query)}, site=youtube)", rng.choice(NOSITE_MUSIC).format(qs=slot(query)), {}
+    if r < 0.25:                                  # "google X" -> Google
+        query = LX.web_query(rng, "google")
+        return f"search_web(query={q(query)}, site=google)", rng.choice(NOSITE_GOOGLE).format(qs=slot(query)), {}
+    query = LX.web_query(rng, site)
+    kind = "music" if site in ("youtube", "spotify") else "other"
+    tpl = c.T(WEB_HI if c.hing else WEB_EN)
+    text = tpl.format(v=rng.choice(WEB_V[kind]), hv=rng.choice(WEB_HV[kind]), qs=slot(query),
+                      site=slot(rng.choice(LX.SEARCH_SITES[site])))
+    return f"search_web(query={q(query)}, site={site})", text, {}
+
+# ---------------------------------------------------------------- safety data: negations and fragments -> unknown()
+
+NEG_EN = ["don't {verb} {what} in {src}", "do not {verb} {what} from {src}", "never {verb} {what} in {src}",
+          "please don't {verb} anything in {src}", "don't {verb} my files", "do not {verb} anything",
+          "wait, don't {verb} {what}", "stop, don't {verb} {what} from {src}", "make sure you don't {verb} {what} in {src}",
+          "you shouldn't {verb} {what} in {src}", "i said don't {verb} {what}"]
+NEG_HI = ["{src} se {what} mat {hverb}", "{src} ki files mat {hverb}", "kuch bhi mat {hverb}", "{what} mat {hverb}",
+          "ruko, {src} se kuch mat {hverb}"]
+NEG_HVERB = ["hatao", "delete karna", "move karna", "chhedna", "copy karna", "udana"]
+
+
+def gen_negation(c: Ctx):
+    rng = c.rng
+    op = rng.choice(["delete", "delete", "move", "copy"])
+    src_v, S = folder(c)
+    what = what_phrase(c, {})
+    if c.hing:
+        text = rng.choice(NEG_HI).format(src=S, what=what, hverb=rng.choice(NEG_HVERB))
+    else:
+        text = rng.choice(NEG_EN).format(verb=rng.choice(VERBS[op][0]), what=what, src=S)
+    return "unknown()", text
+
+
+def gen_fragment(c: Ctx):
+    """One or two words that are not a full command (often typo'd) -> unknown()."""
+    from .noise import typo
+    rng = c.rng
+    w = rng.choice(["open", "delete", "move", "copy", "show", "list", "remind", "play", "search", "lock", "find",
+                    "launch", "start", "remove", "send", "kholo", "hatao", "dikhao", "files", "folder", "the", "it"])
+    if rng.random() < 0.5:
+        w = typo(w, rng)
+    if rng.random() < 0.3:
+        w += " " + rng.choice(["it", "that", "this", "please", "now", "pls", "yaar", "the", "kar do"])
+    return "unknown()", w
+
+
 UNDO = ["undo", "undo that", "revert the last command", "undo the last thing", "go back", "cancel what you just did",
         "revert that", "undo last action", "oops undo", "put it back", "reverse that", "wapas kar do",
         "undo kar do", "pehle jaisa kar do", "galti ho gayi, undo karo"]
@@ -557,7 +644,7 @@ GENERATORS = [
     (lambda c: gen_file_op(c, "move"), 14), (lambda c: gen_file_op(c, "copy"), 7),
     (lambda c: gen_file_op(c, "delete"), 8), (lambda c: gen_file_op(c, "list"), 6),
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
-    (gen_system, 7), (gen_search, 6),
+    (gen_system, 7), (gen_search, 6), (gen_search_web, 9),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",
@@ -592,9 +679,16 @@ def coref(c: Ctx, prev_dsl: str, meta: dict):
 
 def sample(rng: random.Random, split: str = "train") -> dict:
     c = Ctx(rng, split)
-    if rng.random() < 0.08:                                     # out of scope
+    r = rng.random()
+    if r < 0.06:                                                # chit-chat / unclear
         return {"text": apply_noise(LX.unknown_text(rng), rng), "program": "unknown()"}
-    if rng.random() < 0.015:
+    if r < 0.08:                                                # "don't delete ..." -> never act
+        d, t = gen_negation(c)
+        return {"text": apply_noise(t, rng), "program": d}
+    if r < 0.095:                                               # lone / garbled words
+        d, t = gen_fragment(c)
+        return {"text": apply_noise(t, rng), "program": d}
+    if r < 0.11:
         d, t, _ = gen_undo(c)
         return {"text": apply_noise(t, rng), "program": d}
     n_calls = rng.choices([1, 2, 3, 4], weights=[60, 26, 10, 4])[0]
@@ -603,6 +697,9 @@ def sample(rng: random.Random, split: str = "train") -> dict:
         out = None
         if i > 0 and rng.random() < 0.35:
             out = coref(c, dsls[-1], meta)
+        if out is None and rng.random() < (0.08 if n_calls > 1 else 0.04):
+            req = LX.unsupported_text(rng)                      # clear action we can't do: report, don't drop
+            out = (f"unsupported(request={q(req)})", slot(req), {})
         if out is None:
             c.hing = rng.random() < (0.7 if c.hing else 0.15)  # code-switching tends to persist
             out = rng.choices(_FNS, weights=_WEIGHTS)[0](c)
@@ -685,7 +782,7 @@ def build(n_train: int, n_eval: int, seed: int, extra: Path | None = None, extra
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--n", type=int, default=1_000_000, help="training examples")
+    ap.add_argument("--n", type=int, default=2_000_000, help="training examples")
     ap.add_argument("--n-eval", type=int, default=10_000, help="examples per eval split")
     ap.add_argument("--out", type=Path, default=Path("data/intents"))
     ap.add_argument("--extra", type=Path, default=Path("data/user_corrections.jsonl"),

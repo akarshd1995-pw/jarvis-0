@@ -164,20 +164,36 @@ class IntentTransformer(nn.Module):
         return out[:, 1:]
 
     @torch.no_grad()
-    def beam(self, src, src_pad, bos: int, eos: int, k: int = 4, max_len: int = 128):
-        """Beam search for a single example; returns list of (logprob, ids) best-first."""
+    def beam(self, src, src_pad, bos: int, eos: int, k: int = 4, max_len: int = 128,
+             prefix_ok=None, complete_ok=None):
+        """Beam search for a single example; returns list of (logprob, ids) best-first.
+
+        prefix_ok(ids) -> bool   : reject tokens that make the output impossible to complete (grammar)
+        complete_ok(ids) -> bool : only accept <eos> when the output is a complete, valid program
+        """
         mem, mem_mask = self.encode(src, src_pad)
         beams = [(0.0, [bos])]
         finished = []
+        width = k * 4 if prefix_ok else k
         for _ in range(min(max_len, self.cfg.max_tgt - 1)):
             seqs = torch.tensor([b[1] for b in beams], device=src.device)
             logp = self.decode(seqs, mem.expand(len(beams), -1, -1),
-                               mem_mask.expand(len(beams), -1, -1, -1))[:, -1].log_softmax(-1)
+                               mem_mask.expand(len(beams), -1, -1, -1))[:, -1].float().log_softmax(-1)
             cand = []
             for bi, (score, ids) in enumerate(beams):
-                top = logp[bi].topk(k)
+                top = logp[bi].topk(width)
+                kept = 0
                 for lp, tok in zip(top.values.tolist(), top.indices.tolist()):
-                    cand.append((score + lp, ids + [tok]))
+                    new = ids + [tok]
+                    if tok == eos:
+                        if complete_ok and not complete_ok(new[1:-1]):
+                            continue
+                    elif prefix_ok and not prefix_ok(new[1:]):
+                        continue
+                    cand.append((score + lp, new))
+                    kept += 1
+                    if kept == k:
+                        break
             cand.sort(key=lambda c: c[0], reverse=True)
             beams = []
             for score, ids in cand:

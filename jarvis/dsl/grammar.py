@@ -66,6 +66,10 @@ SCHEMA: dict[str, dict] = {
     "system":        {"args": {"action": "ident"}, "required": ["action"],
                       "enum": {"action": ["lock", "mute", "volume_up", "volume_down", "sleep_display"]}},
     "search_memory": {"args": {"query": "str"}, "required": ["query"]},
+    "search_web":    {"args": {"query": "str", "site": "ident"}, "required": ["query"],
+                      "enum": {"site": ["google", "youtube", "amazon", "flipkart", "swiggy", "zomato", "github",
+                                        "stackoverflow", "wikipedia", "spotify", "maps", "reddit", "linkedin"]}},
+    "unsupported":   {"args": {"request": "str"}, "required": ["request"]},  # part of a command Jarvis can't do
     "undo":          {"args": {}, "required": []},
     "unknown":       {"args": {}, "required": []},   # out-of-scope request: decline, never guess
 }
@@ -225,3 +229,139 @@ def parse(src: str) -> Program:
 def canonical(src: str) -> str:
     """Round-trip to the canonical form (sorted args, normalized spacing)."""
     return str(parse(src))
+
+
+# ---------------------------------------------------------------- prefix checking (constrained decoding)
+# viable_prefix(s) is True iff s can still be extended into a valid program. The decoder uses it to
+# discard impossible tokens during beam search, so the model can only ever emit well-formed commands.
+
+_PARTIAL_STRING = re.compile(r'"(?:[^"\\]|\\.)*\\?\Z')
+_PARTIAL_TIME = re.compile(r"\d{1,2}:\d?\Z")
+
+
+def _lex_prefix(src: str):
+    """Lex a prefix. Returns list of (kind, text, open) or None if invalid. 'open' = may still grow."""
+    pos, out = 0, []
+    while pos < len(src):
+        rest = src[pos:]
+        if _PARTIAL_TIME.match(rest):          # "17:" / "17:3" -> an unfinished time
+            out.append(("TIME", rest, True))
+            return out
+        m = _TOKEN_RE.match(src, pos)
+        if m and m.end() == len(src) and m.lastgroup in ("IDENT", "NUM", "DUR", "TIME"):
+            # last token touches the end: it might still be extended ("mov" -> "move_files", "3" -> "30d")
+            out.append((m.lastgroup, m.group(), True))
+            return out
+        if m:
+            if m.lastgroup != "WS":
+                out.append((m.lastgroup, m.group(), False))
+            pos = m.end()
+            continue
+        if _PARTIAL_STRING.match(rest):
+            out.append(("STRING", rest, True))
+            return out
+        if _PARTIAL_TIME.match(rest):
+            out.append(("TIME", rest, True))
+            return out
+        return None
+    return out
+
+
+def _value_ok(arg_type: str, enum: list[str] | None, kind: str, text: str, is_open: bool) -> bool:
+    allowed = set(arg_type.split("|"))
+    if kind == "STRING":
+        return "str" in allowed
+    if kind == "TIME":
+        return "time" in allowed
+    if kind == "DUR":
+        return "dur" in allowed or (is_open and "ident" in allowed)
+    if kind == "NUM":
+        if is_open:
+            return bool(allowed & {"int", "dur", "time", "ident"})
+        return "int" in allowed
+    if kind == "IDENT":
+        if "ident" not in allowed:
+            return False
+        if enum:
+            return any(e.startswith(text) for e in enum) if is_open else text in enum
+        return True
+    return False
+
+
+def viable_prefix(src: str) -> bool:
+    toks = _lex_prefix(src)
+    if toks is None:
+        return False
+    state, action, key, used = "action", None, None, set()
+    for i, (kind, text, is_open) in enumerate(toks):
+        if state == "action":
+            if kind != "IDENT":
+                return False
+            if is_open:
+                return any(a.startswith(text) for a in SCHEMA)
+            if text not in SCHEMA:
+                return False
+            action, used, state = text, set(), "lparen"
+        elif state == "lparen":
+            if (kind, text) != ("PUNCT", "("):
+                return False
+            state = "key_or_rparen"
+        elif state in ("key_or_rparen", "key"):
+            spec = SCHEMA[action]
+            if state == "key_or_rparen" and (kind, text) == ("PUNCT", ")"):
+                if not _call_complete(action, used):
+                    return False
+                state = "sep"
+                continue
+            if kind != "IDENT":
+                return False
+            free = [k for k in spec["args"] if k not in used]
+            if is_open:
+                return any(k.startswith(text) for k in free)
+            if text not in free:
+                return False
+            for group in spec.get("one_of", []):
+                if text in group and any(g in used for g in group):
+                    return False
+            key, state = text, "eq"
+        elif state == "eq":
+            if (kind, text) != ("PUNCT", "="):
+                return False
+            state = "value"
+        elif state == "value":
+            spec = SCHEMA[action]
+            if not _value_ok(spec["args"][key], spec.get("enum", {}).get(key), kind, text, is_open):
+                return False
+            if is_open:
+                return True
+            used.add(key)
+            state = "comma_or_rparen"
+        elif state == "comma_or_rparen":
+            if (kind, text) == ("PUNCT", ","):
+                state = "key"
+            elif (kind, text) == ("PUNCT", ")"):
+                if not _call_complete(action, used):
+                    return False
+                state = "sep"
+            else:
+                return False
+        elif state == "sep":
+            if (kind, text) != ("PUNCT", ";"):
+                return False
+            state = "action"
+    return True
+
+
+def _call_complete(action: str, used: set[str]) -> bool:
+    spec = SCHEMA[action]
+    if any(k not in used for k in spec["required"]):
+        return False
+    return all(sum(k in used for k in g) == 1 for g in spec.get("one_of", []))
+
+
+def is_complete(src: str) -> bool:
+    try:
+        parse(src)
+        return True
+    except DSLError:
+        return False

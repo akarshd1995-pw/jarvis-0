@@ -131,7 +131,7 @@ def test_generated_programs_are_valid_and_slots_intact():
             ex = sample(rng, split)
             prog = parse(ex["program"])
             for call in prog.calls:
-                for key in ("text", "query", "name_contains", "name", "src", "dest", "path", "url"):
+                for key in ("text", "query", "name_contains", "name", "src", "dest", "path", "url", "request"):
                     v = call.args.get(key)
                     if isinstance(v, str) and not (key == "url" and v in KNOWN_SITES.values()):
                         assert v in ex["text"], (ex, key)
@@ -198,3 +198,62 @@ def test_frames_without_file_type_never_label_one():
 def test_jpg_and_jpeg_not_conflated():
     from datagen.lexicon import EXT_NICKNAMES
     assert "jpegs" not in EXT_NICKNAMES["jpg"]
+
+
+# ------------------------------------------------------------------ phase 2.5
+def test_search_web_and_unsupported(env):
+    from jarvis.actions.system import search_url
+    cfg, store, dl, arc = env
+    assert search_url("dear god", "youtube") == "https://www.youtube.com/results?search_query=dear+god"
+    ex = Executor(cfg, store, lambda *a: True)
+    rep = ex.run(parse('unsupported(request="send an email to Rahul")'))
+    assert "send an email to Rahul" in rep.text() and "can't" in rep.text()
+    with pytest.raises(DSLError):
+        parse('search_web(query="x", site=bing)')
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("open youtube and play dear god", 'search_web(query="dear god", site=youtube)'),
+    ("play dear god on youtube", 'search_web(query="dear god", site=youtube)'),
+    ("google best biryani near me", 'search_web(query="best biryani near me", site=google)'),
+])
+def test_rule_parser_web(text, expected):
+    assert str(rule_parse(text)) == expected
+
+
+def test_viable_prefix_accepts_every_prefix_of_valid_programs():
+    from jarvis.dsl.grammar import viable_prefix
+    rng = random.Random(21)
+    for _ in range(400):
+        p = sample(rng)["program"]
+        assert all(viable_prefix(p[:i]) for i in range(len(p) + 1)), p
+
+
+@pytest.mark.parametrize("bad", ["open_ap(", "move_files(src=Downloads)", "system(action=format",
+                                 'list_files(ext="pdf"', "open_app(name=chrome) open", "unknown(x",
+                                 'search_web(query="a", site=bing', 'remind(text="x", at=10:00, after='])
+def test_viable_prefix_rejects_impossible(bad):
+    from jarvis.dsl.grammar import viable_prefix
+    assert not viable_prefix(bad)
+
+
+def test_negations_never_map_to_actions():
+    from datagen.generate_intents import Ctx, gen_negation
+    rng = random.Random(5)
+    for _ in range(200):
+        d, t = gen_negation(Ctx(rng, "train"))
+        assert d == "unknown()"
+
+
+def test_corrections_are_saved(env, tmp_path):
+    from jarvis.daemon import Jarvis
+    cfg, store, dl, arc = env
+    j = Jarvis(cfg, lambda *a: True, data_root=tmp_path / "d")
+    assert "No previous" in j.handle("/fix undo()")
+    j.handle("list files in downloads")          # safe command: nothing is launched during tests
+    assert "isn't valid" in j.handle("/fix open_app(")
+    assert "Saved" in j.handle("/fix list_files(src=Downloads, ext=pdf)")
+    j.handle("/good")
+    rows = (tmp_path / "d" / "user_corrections.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(rows) == 2
+    assert "ext=pdf" in rows[0] and '"list_files(src=Downloads)"' in rows[1]

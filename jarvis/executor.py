@@ -22,6 +22,8 @@ REGISTRY: dict[str, Handler] = {
     "system": system.system,
     "search_memory": system.search_memory,
     "unknown": system.unknown,
+    "unsupported": system.unsupported,
+    "search_web": system.search_web,
     "list_files": files.list_files,
     "move_files": files.move_files,
     "copy_files": files.copy_files,

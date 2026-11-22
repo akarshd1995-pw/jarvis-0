@@ -19,6 +19,8 @@ ACTION_TIERS: dict[str, Tier] = {
     "remind": Tier.SAFE,
     "search_memory": Tier.SAFE,
     "unknown": Tier.SAFE,
+    "unsupported": Tier.SAFE,
+    "search_web": Tier.SAFE,
     "undo": Tier.CONFIRM,
     "move_files": Tier.CONFIRM,
     "copy_files": Tier.CONFIRM,

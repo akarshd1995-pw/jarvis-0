@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import webbrowser
+from urllib.parse import quote, quote_plus
 
 from ..dsl.grammar import ClockTime, Duration
 from ..safety import check_path
@@ -108,3 +109,36 @@ def search_memory(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
 def unknown(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     return ActionResult("I can't do that yet. I can manage files (move/copy/delete/list), open apps, "
                         "websites and folders, set reminders, and lock/mute/change volume.")
+
+
+SEARCH_URLS = {
+    "google": "https://www.google.com/search?q={qp}",
+    "youtube": "https://www.youtube.com/results?search_query={qp}",
+    "amazon": "https://www.amazon.in/s?k={qp}",
+    "flipkart": "https://www.flipkart.com/search?q={qp}",
+    "swiggy": "https://www.swiggy.com/search?query={qp}",
+    "zomato": "https://www.google.com/search?q={qp}+site%3Azomato.com",
+    "github": "https://github.com/search?q={qp}",
+    "stackoverflow": "https://stackoverflow.com/search?q={qp}",
+    "wikipedia": "https://en.wikipedia.org/w/index.php?search={qp}",
+    "spotify": "https://open.spotify.com/search/{qpath}",
+    "maps": "https://www.google.com/maps/search/{qp}",
+    "reddit": "https://www.reddit.com/search/?q={qp}",
+    "linkedin": "https://www.linkedin.com/search/results/all/?keywords={qp}",
+}
+
+
+def search_url(query: str, site: str = "google") -> str:
+    return SEARCH_URLS[site].format(qp=quote_plus(query), qpath=quote(query))
+
+
+def search_web(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
+    site = str(args.get("site", "google"))
+    url = search_url(args["query"], site)
+    if not dry_run:
+        webbrowser.open(url)
+    return ActionResult(f'Searching {site} for "{args["query"]}"')
+
+
+def unsupported(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
+    return ActionResult(f'Skipped "{args["request"]}": I can\'t do that yet.')

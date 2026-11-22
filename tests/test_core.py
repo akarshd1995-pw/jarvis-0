@@ -126,7 +126,7 @@ def test_reminder_scheduled(env):
 def test_generated_programs_are_valid_and_slots_intact():
     from datagen.lexicon import KNOWN_SITES
     rng = random.Random(7)
-    for split in ("train", "ood"):
+    for split in ("train", "val_ood", "test_ood"):
         for _ in range(4000):
             ex = sample(rng, split)
             prog = parse(ex["program"])
@@ -141,7 +141,7 @@ def test_splits_disjoint_and_ood_templates_held_out():
     from datagen.generate_intents import _norm, build
     splits, _ = build(3000, 500, seed=1, extra=None)
     train = {_norm(e["text"]) for e in splits["train"]}
-    for name in ("val", "test_iid", "test_ood"):
+    for name in ("val", "val_ood", "test_iid", "test_ood"):
         assert not train & {_norm(e["text"]) for e in splits[name]}, name
     assert any(e["program"] == "unknown()" for e in splits["train"])
 
@@ -177,3 +177,24 @@ def test_tokenizer_roundtrip():
     tok = BPETokenizer.train(texts, 600, verbose=False)
     for t in texts[:200] + ["Downloads se saari pdf hata do 🙂"]:
         assert tok.decode(tok.encode(t)) == t
+
+
+def test_held_out_frames_only_use_trained_words():
+    from datagen.generate_intents import unseen_frame_words
+    assert unseen_frame_words() == {}
+
+
+def test_frames_without_file_type_never_label_one():
+    from datagen.generate_intents import Ctx, gen_file_op
+    rng = random.Random(0)
+    for _ in range(300):
+        c = Ctx(rng, "train")
+        c.hing = False
+        c.T = lambda templates: "what's in {src}{filt}"
+        dsl, text, _ = gen_file_op(c, "list")
+        assert "ext=" not in dsl, (dsl, text)
+
+
+def test_jpg_and_jpeg_not_conflated():
+    from datagen.lexicon import EXT_NICKNAMES
+    assert "jpegs" not in EXT_NICKNAMES["jpg"]

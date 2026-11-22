@@ -1,16 +1,22 @@
-"""Synthetic (text -> program) data engine, v2.
+"""Synthetic (text -> program) data engine, v3.
 
 Program-first generation: sample a valid DSL program, then render it as English or
-Hinglish using many templates, number words, time expressions, open-vocabulary slots,
-coreference ("move them", "open it"), out-of-scope requests (-> unknown()) and noise.
+Hinglish using sentence frames, shared phrase lists, number words, time expressions,
+open-vocabulary slots, coreference ("move them", "open it"), out-of-scope requests
+(-> unknown()) and noise.
 
 Splits:
   train / val   : in-distribution
-  test_iid      : same templates, unseen examples
-  test_ood      : HELD-OUT templates never seen in training -> measures robustness to new phrasing
+  test_iid      : same frames, unseen examples
+  val_ood       : HELD-OUT sentence frames (group A) -> used to pick the best checkpoint
+  test_ood      : HELD-OUT sentence frames (group B) -> final, untouched robustness score
+
+Only sentence FRAMES (word order / structure) are held out. Every phrase that carries
+meaning ("last modified more than X ago", "throw away", "bring up", "khali karo", "A -> B")
+lives in shared phrase lists used in training, and tests enforce that held-out frames
+contain no word that training never shows.
 
     python -m datagen.generate_intents --n 1000000 --out data/intents
-    python -m datagen.generate_intents --n 1000000 --extra data/user_corrections.jsonl
 """
 from __future__ import annotations
 
@@ -34,19 +40,36 @@ def q(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-HOLDOUT_EVERY = 6   # every 6th template is reserved for test_ood
+HOLDOUT_EVERY = 8          # frame index % 8 == 6 -> val_ood, == 7 -> test_ood
+SPLIT_SLOT = {"val_ood": HOLDOUT_EVERY - 2, "test_ood": HOLDOUT_EVERY - 1}
+ALL_FRAME_LISTS: dict[str, list[str]] = {}   # registry, used by tests for the vocabulary check
+
+
+def frames(name: str, items: list[str]) -> list[str]:
+    ALL_FRAME_LISTS[name] = items
+    return items
+
+
+def frame_split(i: int) -> str:
+    r = i % HOLDOUT_EVERY
+    for split, k in SPLIT_SLOT.items():
+        if r == k:
+            return split
+    return "train"
 
 
 class Ctx:
     def __init__(self, rng: random.Random, split: str):
-        self.rng, self.split = rng, split
+        self.rng, self.split = rng, split   # split: train | val_ood | test_ood
         self.hing = rng.random() < 0.3
 
     def T(self, templates: list[str]) -> str:
-        """Pick a template; held-out ones only appear in the OOD split."""
-        ood = self.split == "ood"
-        pool = [t for i, t in enumerate(templates) if (i % HOLDOUT_EVERY == HOLDOUT_EVERY - 1) == ood]
+        """Pick a sentence frame belonging to this split (lists shorter than 8 are never held out)."""
+        if len(templates) < HOLDOUT_EVERY:
+            return self.rng.choice(templates)
+        pool = [t for i, t in enumerate(templates) if frame_split(i) == self.split]
         return self.rng.choice(pool or templates)
+
 
 # ---------------------------------------------------------------- durations and times
 
@@ -149,31 +172,44 @@ def folder(c: Ctx, exclude: str | None = None) -> tuple[str, str]:
     return key, slot(rng.choice(LX.FOLDERS[key]))
 
 
+GENERIC_WHAT_EN = ["files", "everything", "all files", "the files", "all the stuff", "stuff", "all items",
+                   "all the files", "whatever is there"]
+GENERIC_WHAT_HI = ["saari files", "sab kuch", "files", "saara saman", "sab files"]
+
+
 def what_phrase(c: Ctx, args: dict) -> str:
     rng = c.rng
     if rng.random() < 0.72:
         e = rng.choice(LX.EXTS)
         args["ext"] = e
         forms = [f"{e} files", f"{e}s", f".{e} files", f"{e.upper()} files", f"all {e} files", f"all the {e}s",
-                 f"every {e} file", f"*.{e} files"] + LX.EXT_NICKNAMES.get(e, [])
+                 f"every {e} file", f"*.{e} files", f"{e} documents" if e in ("pdf", "docx", "doc") else f"{e} files"]
+        forms += LX.EXT_NICKNAMES.get(e, [])
         if c.hing:
             forms += [f"saari {e} files", f"{e} wali files", f"sab {e}", f"saare {e}"]
         return slot(rng.choice(forms))
-    generic = ["files", "everything", "all files", "the files", "all the stuff", "stuff", "all items"]
-    if c.hing:
-        generic += ["saari files", "sab kuch", "files"]
-    return rng.choice(generic)
+    return rng.choice(GENERIC_WHAT_HI if c.hing else GENERIC_WHAT_EN)
 
 
+# Shared filter phrases: never held out, so every way of saying "older"/"newer" is trained.
 OLDER_EN = ["older than {d}", "more than {d} old", "from over {d} ago", "that are over {d} old",
-            "not touched in {d}", "last modified more than {d} ago", "aged over {d}", "that haven't changed in {d}"]
+            "not touched in {d}", "last modified more than {d} ago", "last modified over {d} ago",
+            "aged over {d}", "that haven't changed in {d}", "untouched for {d}", "created more than {d} ago",
+            "downloaded more than {d} ago", "at least {d} old", "not opened in {d}", "from before {d} ago",
+            "sitting there for over {d}", "that are older than {d}", "over {d} old", "modified more than {d} ago"]
 NEWER_EN = ["newer than {d}", "from the last {d}", "less than {d} old", "added in the past {d}",
-            "created within {d}", "downloaded in the last {d}"]
+            "created within {d}", "downloaded in the last {d}", "from the past {d}", "modified in the last {d}",
+            "within the last {d}", "added less than {d} ago", "created in the last {d}", "downloaded within {d}",
+            "that are under {d} old", "under {d} old", "modified less than {d} ago", "from the recent {d}",
+            "last modified less than {d} ago", "that are newer than {d}"]
 NAME_EN = ['with "{w}" in the name', "named {w}", "containing {w} in the filename", "that have {w} in their name",
-           "whose name has {w}", "matching {w}", "called {w}"]
-OLDER_HI = ["{d} se purani", "jo {d} se purani hain", "{d} se zyada purani", "{d} pehle ki"]
-NEWER_HI = ["pichhle {d} ki", "{d} se nayi", "last {d} wali", "{d} ke andar ki"]
-NAME_HI = ["jinke naam me {w} hai", "{w} naam wali", "jinme {w} likha hai"]
+           "whose name has {w}", "matching {w}", "called {w}", "with {w} in the filename", "whose names contain {w}",
+           "having {w} in the name"]
+OLDER_HI = ["{d} se purani", "jo {d} se purani hain", "{d} se zyada purani", "{d} pehle ki", "{d} se pehle ki",
+            "{d} se zyada time se padi", "kam se kam {d} purani", "{d} se purane", "jo {d} se zyada purani hain"]
+NEWER_HI = ["pichhle {d} ki", "{d} se nayi", "last {d} wali", "{d} ke andar ki", "pichhle {d} me aayi",
+            "{d} se kam purani", "jo pichhle {d} me aayi hain", "{d} ke andar wali"]
+NAME_HI = ["jinke naam me {w} hai", "{w} naam wali", "jinme {w} likha hai", "jiske naam me {w} ho", "{w} wali"]
 
 
 def filters(c: Ctx, args: dict) -> str:
@@ -181,15 +217,15 @@ def filters(c: Ctx, args: dict) -> str:
     if rng.random() < 0.45:
         d, txt = duration(c, "age")
         args["older_than"] = d
-        parts.append(c.T(OLDER_HI if c.hing else OLDER_EN).format(d=txt))
-    elif rng.random() < 0.15:
+        parts.append(rng.choice(OLDER_HI if c.hing else OLDER_EN).format(d=txt))
+    elif rng.random() < 0.2:
         d, txt = duration(c, "age")
         args["newer_than"] = d
-        parts.append(c.T(NEWER_HI if c.hing else NEWER_EN).format(d=txt))
+        parts.append(rng.choice(NEWER_HI if c.hing else NEWER_EN).format(d=txt))
     if rng.random() < 0.2:
         w = LX.name_fragment(rng)
         args["name_contains"] = q(w)
-        parts.append(c.T(NAME_HI if c.hing else NAME_EN).format(w=slot(w)))
+        parts.append(rng.choice(NAME_HI if c.hing else NAME_EN).format(w=slot(w)))
     rng.shuffle(parts)
     if not parts:
         return ""
@@ -199,76 +235,191 @@ def filters(c: Ctx, args: dict) -> str:
 def dsl_call(action: str, args: dict) -> str:
     return f"{action}({', '.join(f'{k}={v}' for k, v in args.items())})"
 
-# ---------------------------------------------------------------- actions
+# ---------------------------------------------------------------- verbs (shared, never held out)
 
-MOVE_EN = ["{verb} {what}{filt} from {src} to {dest}", "{verb} {what} from {src}{filt} into {dest}",
-           "{verb} {what}{filt} in {src} over to {dest}", "can you {verb} {what}{filt} from {src} to {dest}",
-           "i want to {verb} {what}{filt} from {src} to {dest}", "{src} is a mess, {verb} {what}{filt} to {dest}",
-           "from {src}, {verb} {what}{filt} to {dest}", "{verb} {what}{filt} to {dest} from {src}",
-           "need {what}{filt} from {src} {pp} to {dest}", "get {what}{filt} out of {src} and {verb} them to {dest}",
-           "{verb} over {what}{filt} from {src} into {dest}", "could you {verb} {what}{filt} sitting in {src} to {dest}",
-           "{what}{filt} in {src} should be {pp} to {dest}", "quickly {verb} {what}{filt} from {src} to {dest}",
-           "{verb} {what}{filt} out of {src} into {dest}", "help me {verb} {what}{filt} from {src} to {dest}",
-           "i'd like {what}{filt} from {src} {pp} into {dest}", "{verb} {what}{filt}: {src} -> {dest}"]
-MOVE_HI = ["{src} se {what}{filt} {dest} me {hverb}", "{what}{filt} {src} se {dest} me {hverb}",
-           "{src} wali {what}{filt} {dest} me {hverb}", "{dest} me {src} se {what}{filt} {hverb}",
-           "{src} se {dest} me {what}{filt} {hverb}", "{src} ki {what}{filt} ko {dest} me {hverb}",
-           "bhai {src} se {what}{filt} {dest} me {hverb}"]
-DELETE_EN = ["{verb} {what}{filt} from {src}", "{verb} {what} in {src}{filt}", "clear out {what}{filt} from {src}",
-             "get rid of {what}{filt} in {src}", "i don't need {what}{filt} in {src} anymore, delete them",
-             "{verb} {what}{filt} sitting in {src}", "can you {verb} {what}{filt} in {src}",
-             "{src} is full, {verb} {what}{filt}", "free up space by deleting {what}{filt} from {src}",
-             "{verb} all {what}{filt} from {src}", "wipe {what}{filt} from {src}", "throw away {what}{filt} in {src}"]
-DELETE_HI = ["{src} se {what}{filt} delete kar do", "{src} me {what}{filt} hata do", "{what}{filt} {src} se uda do",
-             "{src} ki {what}{filt} saaf kar do", "{src} me jo {what}{filt} hai unko delete karo",
-             "{src} khali karo, {what}{filt} hata do"]
-LIST_EN = ["{verb} {what}{filt} in {src}", "what {what} are in {src}{filt}", "which {what}{filt} do i have in {src}",
-           "how many {what}{filt} are in {src}", "show me {what} from {src}{filt}", "{verb} {what}{filt} from {src}",
-           "any {what}{filt} in {src}", "give me a list of {what}{filt} in {src}", "what's in {src}{filt}",
-           "check {src} for {what}{filt}", "find {what}{filt} in {src}", "{src}: {verb} {what}{filt}"]
-LIST_HI = ["{src} me {what}{filt} dikhao", "{src} ki {what}{filt} list karo", "{src} me kaunsi {what}{filt} hai",
-           "{src} me kitni {what}{filt} hai", "{src} ka {what}{filt} batao"]
+VERBS = {
+    "move": (["move", "shift", "transfer", "put", "relocate", "send", "drag", "move over", "carry", "push"],
+             "moved", ["move kar do", "shift karo", "daal do", "move karo", "bhej do", "rakh do", "shift kar do",
+                       "le jao", "daal de", "move kardo"]),
+    "copy": (["copy", "duplicate", "back up", "clone", "make a copy of", "replicate", "copy over"],
+             "copied", ["copy kar do", "copy karo", "ki copy bana do", "copy bana do", "copy kardo", "duplicate karo"]),
+    "delete": (["delete", "remove", "trash", "erase", "clean up", "nuke", "throw away", "get rid of", "wipe",
+                "clear out", "purge", "bin", "dump", "discard", "wipe out"],
+               "deleted", ["delete kar do", "hata do", "uda do", "saaf kar do", "delete karo", "mita do", "hatao",
+                           "nikaal do", "delete kardo", "fenk do"]),
+    "list": (["list", "show", "show me", "display", "tell me", "give me", "find", "check", "get me", "list out"],
+             "listed", ["dikhao", "list karo", "batao", "dikha do", "list kar do", "dikhana"]),
+}
 
-VERBS = {"move": (["move", "shift", "transfer", "put", "relocate", "send", "drag"], "moved",
-                  ["move kar do", "shift karo", "daal do", "move karo", "bhej do", "rakh do"]),
-         "copy": (["copy", "duplicate", "back up", "clone", "make a copy of"], "copied",
-                  ["copy kar do", "copy karo", "ki copy bana do"])}
+# ---------------------------------------------------------------- sentence frames (held out per split)
+
+MOVE_EN = frames("MOVE_EN", [
+    "{verb} {what}{filt} from {src} to {dest}",
+    "{verb} {what} from {src}{filt} into {dest}",
+    "{verb} {what}{filt} in {src} over to {dest}",
+    "can you {verb} {what}{filt} from {src} to {dest}",
+    "i want to {verb} {what}{filt} from {src} to {dest}",
+    "{src} is a mess, {verb} {what}{filt} to {dest}",
+    "could you {verb} {what}{filt} in {src} to {dest}",                 # val_ood
+    "please {verb} {what}{filt} out of {src} into {dest}",              # test_ood
+    "from {src}, {verb} {what}{filt} to {dest}",
+    "could you {verb} {what}{filt} sitting in {src} to {dest}",
+    "get {what}{filt} out of {src} and {verb} them to {dest}",
+    "need {what}{filt} from {src} {pp} to {dest}",
+    "please {verb} {what}{filt} from {src} into {dest}",
+    "{what}{filt} in {src} should be {pp} to {dest}",
+    "{verb} {what}{filt} to {dest} from {src}",                          # val_ood
+    "{src}: {verb} {what}{filt} to {dest}",                              # test_ood
+    "{verb} {what}{filt}: {src} -> {dest}",
+    "help me {verb} {what}{filt} from {src} to {dest}",
+    "i'd like {what}{filt} from {src} {pp} into {dest}",
+    "quickly {verb} {what}{filt} out of {src} into {dest}",
+    "{verb} {what}{filt} from {src} -> {dest}",
+    "{src} -> {dest}: {verb} {what}{filt}",
+    "can you {verb} {what}{filt} out of {src} and into {dest}",          # val_ood
+    "i need {what}{filt} in {src} {pp} over to {dest}",                  # test_ood
+])
+MOVE_HI = frames("MOVE_HI", [
+    "{src} se {what}{filt} {dest} me {hverb}",
+    "{what}{filt} {src} se {dest} me {hverb}",
+    "{src} wali {what}{filt} {dest} me {hverb}",
+    "{dest} me {src} se {what}{filt} {hverb}",
+    "{src} se {dest} me {what}{filt} {hverb}",
+    "{src} ki {what}{filt} ko {dest} me {hverb}",
+    "{src} ki {what}{filt} {dest} me {hverb}",                           # val_ood
+    "bhai {what}{filt} ko {src} se {dest} me {hverb}",                   # test_ood
+    "bhai {src} se {what}{filt} {dest} me {hverb}",
+    "{what}{filt} ko {src} se nikaal ke {dest} me {hverb}",
+    "{src} me jo {what}{filt} hai unko {dest} me {hverb}",
+    "{src} se {dest} me {what}{filt} ko {hverb}",
+    "zara {src} se {what}{filt} {dest} me {hverb}",
+    "{what}{filt} {src} se uthake {dest} me {hverb}",
+    "zara {src} me jo {what}{filt} hai unko {dest} me {hverb}",         # val_ood
+    "{src} se nikaal ke {what}{filt} {dest} me {hverb}",                 # test_ood
+])
+DELETE_EN = frames("DELETE_EN", [
+    "{verb} {what}{filt} from {src}",
+    "{verb} {what} in {src}{filt}",
+    "{verb} {what}{filt} in {src}",
+    "can you {verb} {what}{filt} in {src}",
+    "i don't need {what}{filt} in {src} anymore, {verb} them",
+    "{src} is full, {verb} {what}{filt}",
+    "could you {verb} {what}{filt} from {src}",                          # val_ood
+    "{src} is a mess, {verb} {what}{filt}",                              # test_ood
+    "{verb} {what}{filt} sitting in {src}",
+    "free up space by deleting {what}{filt} from {src}",
+    "please {verb} all {what}{filt} from {src}",
+    "{src}: {verb} {what}{filt}",
+    "{src} is a mess, please {verb} {what}{filt} in it",
+    "could you please {verb} {what}{filt} in {src}",
+    "i don't need {what}{filt} from {src}, {verb} them",                 # val_ood
+    "please {verb} {what}{filt} sitting in {src}",                       # test_ood
+    "go ahead and {verb} {what}{filt} in {src}",
+    "{verb} {what}{filt} in {src} for good",
+])
+DELETE_HI = frames("DELETE_HI", [
+    "{src} se {what}{filt} {hverb}",
+    "{src} me {what}{filt} {hverb}",
+    "{what}{filt} {src} se {hverb}",
+    "{src} ki {what}{filt} {hverb}",
+    "{src} me jo {what}{filt} hai unko {hverb}",
+    "{src} khali karo, {what}{filt} {hverb}",
+    "{src} ki saari {what}{filt} {hverb}",                               # val_ood
+    "{src} me jo {what}{filt} hai {hverb}",                              # test_ood
+    "bhai {src} se {what}{filt} {hverb}",
+    "{src} ki saari {what}{filt} ko {hverb}",
+    "{src} khali kar do, {what}{filt} {hverb}",
+    "{what}{filt} ko {src} se {hverb}",
+    "zara {src} me {what}{filt} {hverb}",
+    "{src} saaf karna hai, {what}{filt} {hverb}",
+    "zara {src} khali karo, {what}{filt} {hverb}",                       # val_ood
+    "bhai {what}{filt} ko {src} me se {hverb}",                          # test_ood
+])
+LIST_EN = frames("LIST_EN", [
+    "{verb} {what}{filt} in {src}",
+    "what {what} are in {src}{filt}",
+    "which {what}{filt} do i have in {src}",
+    "how many {what}{filt} are in {src}",
+    "{verb} {what} from {src}{filt}",
+    "any {what}{filt} in {src}",
+    "what {what}{filt} do i have in {src}",                              # val_ood
+    "how many {what} are there in {src}{filt}",                          # test_ood
+    "give me a list of {what}{filt} in {src}",
+    "what's in {src}{filt}",
+    "check {src} for {what}{filt}",
+    "{src}: {verb} {what}{filt}",
+    "are there any {what}{filt} in {src}",
+    "can you {verb} {what}{filt} in {src}",
+    "which {what} are in {src}{filt}",                                   # val_ood
+    "what's inside {src}{filt}",                                         # test_ood
+    "{verb} {what}{filt} inside {src}",
+    "do i have any {what}{filt} in {src}",
+])
+LIST_HI = frames("LIST_HI", [
+    "{src} me {what}{filt} {hverb}",
+    "{src} ki {what}{filt} {hverb}",
+    "{src} me kaunsi {what}{filt} hai",
+    "{src} me kitni {what}{filt} hai",
+    "{src} ka {what}{filt} {hverb}",
+    "{src} me kya kya hai{filt}",
+    "{src} me kitni {what}{filt} hain",                                  # val_ood
+    "{src} ki kaunsi {what}{filt} hai",                                  # test_ood
+    "zara {src} me {what}{filt} {hverb}",
+    "{src} me konsi {what}{filt} hain",
+    "{what}{filt} {src} me {hverb}",
+    "bhai {src} ki {what}{filt} {hverb}",
+])
+FILE_FRAMES = {"move": (MOVE_EN, MOVE_HI), "copy": (MOVE_EN, MOVE_HI),
+               "delete": (DELETE_EN, DELETE_HI), "list": (LIST_EN, LIST_HI)}
 
 
 def gen_file_op(c: Ctx, op: str):
     rng = c.rng
+    en, hi = FILE_FRAMES[op]
+    tpl = c.T(hi if c.hing else en)
     args: dict = {}
     src_v, S = folder(c)
     args["src"] = src_v
-    what = what_phrase(c, args)
-    filt = filters(c, args)
+    # Only describe a file type if the sentence frame actually mentions one (fixes label leakage).
+    what = what_phrase(c, args) if "{what}" in tpl else ""
+    filt = filters(c, args) if "{filt}" in tpl else ""
     meta = {"src_args": dict(args)}
+    verbs, pp, hverbs = VERBS[op]
+    fill = dict(verb=rng.choice(verbs), pp=pp, hverb=rng.choice(hverbs), what=what, filt=filt, src=S)
     if op in ("move", "copy"):
         dest_v, D = folder(c, exclude=src_v)
         if dest_v == src_v:
             dest_v, D = ("Archive", slot("archive")) if src_v != "Archive" else ("Documents", slot("documents"))
         args["dest"] = dest_v
         meta["dest"] = dest_v
-        verbs, pp, hverbs = VERBS[op]
-        tpl = c.T(MOVE_HI if c.hing else MOVE_EN)
-        text = tpl.format(verb=rng.choice(verbs), pp=pp, hverb=rng.choice(hverbs), what=what, filt=filt, src=S, dest=D)
-    elif op == "delete":
-        tpl = c.T(DELETE_HI if c.hing else DELETE_EN)
-        text = tpl.format(verb=rng.choice(["delete", "remove", "trash", "erase", "clean up", "nuke"]),
-                          what=what, filt=filt, src=S)
-    else:
-        tpl = c.T(LIST_HI if c.hing else LIST_EN)
-        text = tpl.format(verb=rng.choice(["list", "show", "show me", "display", "tell me"]), what=what, filt=filt, src=S)
-    return dsl_call(f"{op}_files", args), text, meta
+        fill["dest"] = D
+    return dsl_call(f"{op}_files", args), tpl.format(**fill), meta
 
 
-REMIND_EN = ["remind me to {task} {when}", "{when} remind me to {task}", "set a reminder to {task} {when}",
-             "ping me {when} to {task}", "don't let me forget to {task} {when}", "can you remind me {when} to {task}",
-             "i need to {task} {when}, remind me", "nudge me {when} to {task}", "add a reminder {when}: {task}",
-             "remind me {when} to {task}", "reminder to {task} {when}", "make sure i {task} {when}",
-             "set an alarm {when} to {task}", "tell me to {task} {when}", "{when}, remind me: {task}",
-             "please remind me that i have to {task} {when}", "schedule a reminder {when} to {task}",
-             "i have to {task} {when}, don't let me forget"]
+REMIND_EN = frames("REMIND_EN", [
+    "remind me to {task} {when}",
+    "{when} remind me to {task}",
+    "set a reminder to {task} {when}",
+    "ping me {when} to {task}",
+    "don't let me forget to {task} {when}",
+    "can you remind me {when} to {task}",
+    "nudge me {when} to {task}",                                         # val_ood
+    "please set a reminder {when} to {task}",                            # test_ood
+    "i need to {task} {when}, nudge me",
+    "add a reminder {when}: {task}",
+    "remind me {when} to {task}",
+    "reminder to {task} {when}",
+    "make sure i {task} {when}",
+    "please remind me that i have to {task} {when}",
+    "i have to {task} {when}, remind me",                                # val_ood
+    "don't let me forget {when}: {task}",                                # test_ood
+    "set an alarm {when} to {task}",
+    "tell me to {task} {when}",
+    "schedule a reminder {when} to {task}",
+    "{when}, remind me: {task}",
+    "i have to {task} {when}, don't let me forget",
+    "alert me {when} to {task}",
+])
 REMIND_HI = ["{when} yaad dilana {task}", "{when} mujhe {task} yaad dila dena", "{task} ke liye {when} remind karna",
              "{when} remind kar dena ki {task}", "{when} bata dena {task}", "yaad dilana {when}: {task}",
              "{when} reminder laga do {task}"]
@@ -293,10 +444,18 @@ def gen_remind(c: Ctx):
     return dsl, tpl.format(task=slot(task), when=when), {}
 
 
-APP_EN = ["open {a}", "launch {a}", "start {a}", "fire up {a}", "run {a}", "bring up {a}", "can you open {a}",
-          "i need {a}", "get {a} running", "open up {a}", "boot up {a}", "load {a}", "please start {a}",
-          "pull up {a}", "{a} please", "open the {a} app", "start the {a} application", "i want to use {a}"]
-APP_HI = ["{a} khol do", "{a} open karo", "{a} chalu karo", "{a} start kar do", "{a} kholo", "zara {a} khol do"]
+APP_V = ["open", "launch", "start", "fire up", "run", "bring up", "boot up", "load", "pull up", "open up"]
+APP_EN = frames("APP_EN", [
+    "{v} {a}", "can you {v} {a}", "please {v} {a}", "i need {a}", "{v} the {a} app", "{a} please",
+    "could you {v} {a}",                                                 # val_ood
+    "i want to {v} {a}",                                                 # test_ood
+    "i want to use {a}", "could you please {v} {a}", "{v} {a} for me", "quickly {v} {a}",
+    "{v} the {a} application", "get {a} running",
+    "please {v} the {a} app",                                            # val_ood
+    "can you quickly {v} {a}",                                           # test_ood
+])
+APP_HV = ["khol do", "open karo", "chalu karo", "start kar do", "kholo", "open kar do"]
+APP_HI = ["{a} {hv}", "zara {a} {hv}", "{a} ko {hv}", "bhai {a} {hv}", "{a} jaldi {hv}", "mujhe {a} chahiye"]
 
 
 def gen_open_app(c: Ctx):
@@ -307,18 +466,24 @@ def gen_open_app(c: Ctx):
     else:
         surface = rng.choice(LX.OTHER_APPS)
         val = q(surface)
-    return f"open_app(name={val})", c.T(APP_HI if c.hing else APP_EN).format(a=slot(surface)), {}
+    tpl = c.T(APP_HI if c.hing else APP_EN)
+    return f"open_app(name={val})", tpl.format(a=slot(surface), v=rng.choice(APP_V), hv=rng.choice(APP_HV)), {}
 
 
-URL_EN = ["open {u}", "go to {u}", "take me to {u}", "browse {u}", "visit {u}", "pull up {u}", "load {u}",
-          "open the website {u}", "navigate to {u}", "show me {u}", "head over to {u}", "can you open {u}"]
-URL_HI = ["{u} kholo", "{u} pe le chalo", "{u} open karo", "{u} wali site kholo"]
+URL_V = ["open", "go to", "take me to", "browse", "visit", "pull up", "load", "navigate to", "head over to",
+         "show me", "bring up"]
+URL_EN = frames("URL_EN", [
+    "{v} {u}", "can you {v} {u}", "please {v} {u}", "{v} the website {u}", "{v} {u} for me", "i want to {v} {u}",
+    "could you {v} {u}",                                                 # val_ood
+    "please {v} the website {u}",                                        # test_ood
+    "could you please {v} {u}", "{v} the site {u}", "quickly {v} {u}", "i need {u}",
+])
+URL_HI = ["{u} kholo", "{u} pe le chalo", "{u} open karo", "{u} wali site kholo", "zara {u} kholo"]
 
 
 def gen_open_url(c: Ctx):
     rng = c.rng
-    r = rng.random()
-    if r < 0.45:
+    if rng.random() < 0.45:
         name = rng.choice(list(LX.KNOWN_SITES))
         url, surface = LX.KNOWN_SITES[name], name
         if rng.random() < 0.4:
@@ -332,17 +497,25 @@ def gen_open_url(c: Ctx):
         if rng.random() < 0.15:
             dom = rng.choice(["https://", "http://"]) + dom
         url = surface = dom
-    return f"open_url(url={q(url)})", c.T(URL_HI if c.hing else URL_EN).format(u=slot(surface)), {}
+    tpl = c.T(URL_HI if c.hing else URL_EN)
+    return f"open_url(url={q(url)})", tpl.format(u=slot(surface), v=rng.choice(URL_V)), {}
 
 
-FOLDER_EN = ["open {f}", "show {f}", "open up {f}", "take me to {f}", "go to {f}", "bring up {f}",
-             "open {f} in explorer", "i want to see {f}", "pop open {f}", "navigate to {f}"]
-FOLDER_HI = ["{f} kholo", "{f} dikhao", "{f} open karo", "{f} khol do"]
+FOLDER_V = ["open", "show", "open up", "take me to", "go to", "bring up", "pull up", "navigate to", "pop open"]
+FOLDER_EN = frames("FOLDER_EN", [
+    "{v} {f}", "can you {v} {f}", "please {v} {f}", "{v} {f} in explorer", "i want to see {f}", "{v} {f} for me",
+    "could you {v} {f}",                                                 # val_ood
+    "please {v} {f} in explorer",                                        # test_ood
+    "quickly {v} {f}", "could you please {v} {f}",
+])
+FOLDER_HV = ["kholo", "dikhao", "open karo", "khol do"]
+FOLDER_HI = ["{f} {hv}", "zara {f} {hv}", "bhai {f} {hv}", "{f} ko {hv}"]
 
 
 def gen_open_folder(c: Ctx):
     v, F = folder(c)
-    return f"open_folder(path={v})", c.T(FOLDER_HI if c.hing else FOLDER_EN).format(f=F), {}
+    tpl = c.T(FOLDER_HI if c.hing else FOLDER_EN)
+    return f"open_folder(path={v})", tpl.format(f=F, v=c.rng.choice(FOLDER_V), hv=c.rng.choice(FOLDER_HV)), {}
 
 
 def gen_system(c: Ctx):
@@ -353,15 +526,21 @@ def gen_system(c: Ctx):
     return f"system(action={key})", pre + phrase, {}
 
 
-SEARCH_EN = ["find {q}", "search for {q}", "where is {q}", "look up {q}", "where did i save {q}", "find me {q}",
-             "i'm looking for {q}", "search my files for {q}", "locate {q}", "dig up {q}", "can you find {q}",
-             "do you remember {q}", "pull up {q} from my files", "search memory for {q}"]
+SEARCH_V = ["find", "search for", "look up", "locate", "dig up", "find me", "search my files for", "track down"]
+SEARCH_EN = frames("SEARCH_EN", [
+    "{v} {q}", "can you {v} {q}", "where is {q}", "where did i save {q}", "i'm looking for {q}", "please {v} {q}",
+    "could you {v} {q}",                                                 # val_ood
+    "please help me {v} {q}",                                            # test_ood
+    "do you remember {q}", "{v} {q} in my files", "help me {v} {q}", "search memory for {q}",
+    "could you please {v} {q}",
+])
 SEARCH_HI = ["{q} dhundo", "{q} kahan hai", "{q} search karo", "{q} dhoondh ke do", "mera {q} kahan rakha hai"]
 
 
 def gen_search(c: Ctx):
     query = LX.search_query(c.rng)
-    return f"search_memory(query={q(query)})", c.T(SEARCH_HI if c.hing else SEARCH_EN).format(q=slot(query)), {}
+    tpl = c.T(SEARCH_HI if c.hing else SEARCH_EN)
+    return f"search_memory(query={q(query)})", tpl.format(q=slot(query), v=c.rng.choice(SEARCH_V)), {}
 
 
 UNDO = ["undo", "undo that", "revert the last command", "undo the last thing", "go back", "cancel what you just did",
@@ -375,8 +554,8 @@ def gen_undo(c: Ctx):
 
 GENERATORS = [
     (lambda c: gen_file_op(c, "move"), 14), (lambda c: gen_file_op(c, "copy"), 7),
-    (lambda c: gen_file_op(c, "delete"), 7), (lambda c: gen_file_op(c, "list"), 6),
-    (gen_remind, 16), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
+    (lambda c: gen_file_op(c, "delete"), 8), (lambda c: gen_file_op(c, "list"), 6),
+    (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
@@ -387,9 +566,11 @@ PRE = ["", "", "", "", "hey jarvis ", "jarvis ", "jarvis, ", "please ", "can you
 POST = ["", "", "", "", " please", " thanks", " asap", " na", " yaar", " thx", " right now", " for me"]
 
 CO_OPEN = ["open it", "open that folder", "show it to me", "then open it", "open the folder", "usse kholo",
-           "woh folder khol do"]
-CO_MOVE = ["move them to {d}", "put them in {d}", "send those to {d}", "unhe {d} me daal do", "shift them to {d}"]
-CO_DELETE = ["delete them", "remove those", "get rid of them", "unhe delete kar do", "trash them"]
+           "woh folder khol do", "take me there", "open it up"]
+CO_MOVE = ["move them to {d}", "put them in {d}", "send those to {d}", "unhe {d} me daal do", "shift them to {d}",
+           "move those into {d}"]
+CO_DELETE = ["delete them", "remove those", "get rid of them", "unhe delete kar do", "trash them", "delete those",
+             "unhe hata do"]
 
 
 def coref(c: Ctx, prev_dsl: str, meta: dict):
@@ -433,6 +614,25 @@ def sample(rng: random.Random, split: str = "train") -> dict:
     text = rng.choice(PRE) + text + rng.choice(POST)
     return {"text": apply_noise(text, rng), "program": canonical(" ; ".join(dsls))}
 
+# ---------------------------------------------------------------- vocabulary check for held-out frames
+
+def frame_words(t: str) -> set[str]:
+    return set(re.findall(r"[a-z']+", re.sub(r"\{\w+\}", " ", t.lower())))
+
+
+def unseen_frame_words() -> dict[str, set[str]]:
+    """Words that appear in held-out frames but in no training frame of the same list. Should be empty."""
+    out = {}
+    for name, items in ALL_FRAME_LISTS.items():
+        if len(items) < HOLDOUT_EVERY:
+            continue
+        train = set().union(*(frame_words(t) for i, t in enumerate(items) if frame_split(i) == "train"))
+        held = set().union(*(frame_words(t) for i, t in enumerate(items) if frame_split(i) != "train"))
+        if held - train:
+            out[name] = held - train
+    return out
+
+# ---------------------------------------------------------------- dataset build
 
 def _norm(t: str) -> str:
     return re.sub(r"\s+", " ", t.strip().lower())
@@ -464,12 +664,13 @@ def build(n_train: int, n_eval: int, seed: int, extra: Path | None = None, extra
             out.append(ex)
         return out
 
-    test_ood = take("ood", n_eval, set())
+    test_ood = take("test_ood", n_eval, set())
+    val_ood = take("val_ood", n_eval, set())
     test_iid = take("train", n_eval, set())
     val = take("train", n_eval, set())
-    held = {_norm(e["text"]) for e in test_ood + test_iid + val}
+    held = {_norm(e["text"]) for e in test_ood + val_ood + test_iid + val}
     train = take("train", n_train, held)
-    splits = {"train": train, "val": val, "test_iid": test_iid, "test_ood": test_ood}
+    splits = {"train": train, "val": val, "val_ood": val_ood, "test_iid": test_iid, "test_ood": test_ood}
     for name in splits:  # drop any text that later turned out ambiguous
         splits[name] = [e for e in splits[name] if _norm(e["text"]) not in conflicts]
     if extra and extra.exists():
@@ -490,6 +691,9 @@ def main():
                     help="your own (text, program) corrections; oversampled")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
+    bad = unseen_frame_words()
+    if bad:
+        raise SystemExit(f"held-out frames use words training never shows: {bad}")
     splits, n_conf = build(args.n, args.n_eval, args.seed, args.extra)
     args.out.mkdir(parents=True, exist_ok=True)
     for name, data in splits.items():

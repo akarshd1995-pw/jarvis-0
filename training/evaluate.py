@@ -1,6 +1,6 @@
 """Detailed evaluation of a trained intent model.
 
-    python -m training.evaluate --split test_ood
+    python -m training.evaluate --split test_ood     (final robustness score; never used during training)
     python -m training.evaluate --split test_iid --errors checkpoints/errors_iid.jsonl
 
 Reports exact match, valid-DSL rate, per-action accuracy, and the two error types that

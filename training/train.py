@@ -101,6 +101,8 @@ def main():
     ap.add_argument("--lr", type=float, default=6e-4)
     ap.add_argument("--warmup", type=int, default=800)
     ap.add_argument("--eval-every", type=int, default=2000)
+    ap.add_argument("--patience", type=int, default=6,
+                    help="stop after this many evals without improvement (0 = never stop early)")
     ap.add_argument("--d-model", type=int, default=256)
     ap.add_argument("--layers", type=int, default=4)
     ap.add_argument("--compile", action="store_true", help="torch.compile (needs Triton; skip on Windows if it errors)")
@@ -119,9 +121,11 @@ def main():
                       d_ff=3 * args.d_model)
     train_rows = load_split(args.data / "train.jsonl", tok, cfg)
     val_rows = load_split(args.data / "val.jsonl", tok, cfg)
-    ood_path = args.data / "test_ood.jsonl"
+    # val_ood = held-out sentence frames used ONLY for picking the checkpoint.
+    # test_ood is never touched here; it is reported by training.evaluate.
+    ood_path = args.data / "val_ood.jsonl"
     ood_rows = load_split(ood_path, tok, cfg) if ood_path.exists() else []
-    print(f"train={len(train_rows)} val={len(val_rows)} test_ood={len(ood_rows)}")
+    print(f"train={len(train_rows)} val={len(val_rows)} val_ood={len(ood_rows)}")
 
     model = IntentTransformer(cfg).to(device)
     print(f"params: {model.n_params() / 1e6:.2f}M")
@@ -140,7 +144,7 @@ def main():
         return args.lr * (0.05 + 0.95 * 0.5 * (1 + math.cos(math.pi * p)))
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    best, step, t0 = -1.0, 0, time.time()
+    best, step, t0, stale = -1.0, 0, time.time(), 0
     model.train()
     while step < args.steps:
         for batch in batches(train_rows, args.batch):
@@ -162,17 +166,25 @@ def main():
             if step % args.eval_every == 0 or step == args.steps:
                 m = evaluate(model, val_rows, tok, device)
                 print(f"  eval  loss {m['loss']:.4f}  exact {m['exact']:.4f}  valid {m['valid']:.4f}")
+                score = m["exact"]
                 if ood_rows:
                     o = evaluate(model, ood_rows, tok, device)
-                    print(f"  ood   loss {o['loss']:.4f}  exact {o['exact']:.4f}  valid {o['valid']:.4f}")
-                if m["exact"] > best:
-                    best = m["exact"]
+                    print(f"  vood  loss {o['loss']:.4f}  exact {o['exact']:.4f}  valid {o['valid']:.4f}")
+                    m["val_ood_exact"] = o["exact"]
+                    score = (m["exact"] + o["exact"]) / 2   # reward familiar AND unseen phrasing
+                if score > best:
+                    best, stale = score, 0
                     torch.save({"config": cfg.to_dict(), "model": model.state_dict(), "step": step,
                                 "metrics": m}, args.out)
-                    print(f"  saved {args.out} (exact={best:.4f})")
+                    print(f"  saved {args.out} (score={best:.4f})")
+                else:
+                    stale += 1
+                    if args.patience and stale >= args.patience:
+                        print(f"  no improvement for {stale} evals, stopping early")
+                        step = args.steps
             if step >= args.steps:
                 break
-    print(f"done. best exact-match = {best:.4f}")
+    print(f"done. best score = {best:.4f}")
 
 
 if __name__ == "__main__":

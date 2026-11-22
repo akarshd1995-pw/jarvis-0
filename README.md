@@ -65,10 +65,10 @@ directly, for example `list_files(src=Downloads, ext=pdf)`. Type `undo` to rever
 train_night.bat
 ```
 That script runs four steps:
-1. `python -m datagen.generate_intents --n 1000000` builds 1M training examples plus validation, `test_iid` and `test_ood` sets (about 90 s).
+1. `python -m datagen.generate_intents --n 1000000` builds 1M training examples plus `val`, `val_ood`, `test_iid` and `test_ood` sets (about 90 s).
 2. `python -m training.tokenizer --vocab 2048` trains the BPE tokenizer (under a minute).
 3. `python -m training.train --steps 40000` trains the model from random weights. Expect roughly 1–2 hours on a 5070.
-   The best checkpoint goes to `checkpoints/intent.pt`, selected by exact match on the validation set.
+   The best checkpoint goes to `checkpoints/intent.pt`. It is picked by the average of accuracy on familiar phrasing (`val`) and on unseen sentence structures (`val_ood`). Training stops early if neither improves for 6 checks in a row.
 4. `python -m training.evaluate` writes `checkpoints/eval_report.txt` and every mistake to `checkpoints/errors_*.jsonl`.
 
 ## How the data engine keeps errors low
@@ -79,7 +79,7 @@ That script runs four steps:
 - **Follow-ups:** "move pdfs to archive **and open it**", "list zips in downloads **then delete them**".
 - **Out of scope:** about 8% of examples are chit-chat, questions or unsupported requests, labeled `unknown()`. The agent politely declines instead of guessing an action.
 - **Messy input:** keyboard-adjacent typos, dropped letters, chat-speak (`pls`, `u`, `kro`), missing spaces, casing changes, emoji.
-- **Held-out phrasings:** every 6th template only appears in `test_ood`, so you can measure how the model handles wording it never saw.
+- **Held-out sentence structures:** 1 in 8 sentence frames is reserved for `val_ood` (used to pick the checkpoint) and another 1 in 8 for `test_ood` (the final score, never touched during training). Only the structure is held out. Every meaningful phrase ("last modified more than X ago", "throw away", "khali karo", "A -> B") is in shared lists that training sees, and a test fails if a held-out frame contains any word training never shows.
 - **Ambiguity filter:** if the same text ever maps to two different programs, it is dropped everywhere.
 - **Confidence gate:** at runtime, outputs below 55% confidence are not executed. Jarvis falls back to the rules or asks you to rephrase.
 

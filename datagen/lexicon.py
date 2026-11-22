@@ -30,7 +30,7 @@ PATH_PARTS = ["projects", "college", "notes", "invoices", "screenshots", "photos
 EXTS = ["pdf", "png", "jpg", "jpeg", "zip", "rar", "7z", "exe", "msi", "docx", "doc", "xlsx", "csv", "pptx",
         "mp4", "mkv", "mov", "mp3", "wav", "txt", "md", "json", "py", "ipynb", "iso", "svg", "gif", "webp",
         "apk", "torrent", "html", "log"]
-EXT_NICKNAMES = {"pdf": ["pdfs", "PDFs", "pdf docs"], "jpg": ["jpgs", "jpegs"], "png": ["pngs"],
+EXT_NICKNAMES = {"pdf": ["pdfs", "PDFs", "pdf docs"], "jpg": ["jpgs"], "jpeg": ["jpegs"], "png": ["pngs"],
                  "mp4": ["mp4 videos"], "mp3": ["mp3 songs"], "zip": ["zips", "zip archives"],
                  "exe": ["installers", "exes", "setup files"], "docx": ["word docs", "word files"],
                  "xlsx": ["excel files", "spreadsheets"], "pptx": ["ppts", "powerpoints"],

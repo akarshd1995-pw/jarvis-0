@@ -78,7 +78,8 @@ def duration(c: Ctx, kind: str) -> tuple[str, str]:
     rng, h = c.rng, c.hing
     unit = rng.choices(["m", "h", "d", "w", "mo"], weights=[0, 2, 6, 3, 3] if kind == "age" else [7, 4, 1, 0.5, 0])[0]
     if unit == "m":
-        n = rng.choice([1, 2, 5, 10, 15, 20, 25, 30, 40, 45, 90])
+        # half round numbers, half arbitrary -> the model must copy digits, not snap to 15/30/45
+        n = rng.choice([1, 2, 5, 10, 15, 20, 25, 30, 40, 45, 90]) if rng.random() < 0.5 else rng.randint(1, 120)
         special = {30: ["half an hour", "aadha ghanta" if h else "30 mins"], 90: ["an hour and a half",
                    "dedh ghanta" if h else "90 minutes"], 15: ["quarter of an hour", "15 min"]}
         if n in special and rng.random() < 0.35:
@@ -89,7 +90,7 @@ def duration(c: Ctx, kind: str) -> tuple[str, str]:
             forms += [f"{N} minute", f"{N} min"]
         return f"{n}m", slot(rng.choice(forms) if n != 1 else rng.choice(["a minute", "1 min", "one minute"]))
     if unit == "h":
-        n = rng.randint(1, 12)
+        n = rng.randint(1, 12) if rng.random() < 0.8 else rng.randint(13, 72)
         N = LX.num_surface(rng, n, h)
         if n == 1:
             forms = ["an hour", "1 hour", "one hour", "1 hr"] + (["ek ghanta", "ek ghante"] if h else [])
@@ -97,7 +98,7 @@ def duration(c: Ctx, kind: str) -> tuple[str, str]:
             forms = [f"{N} hours", f"{N} hrs", f"{n}h", f"{n} hours"] + ([f"{N} ghante"] if h else [])
         return f"{n}h", slot(rng.choice(forms))
     if unit == "d":
-        n = rng.randint(1, 60)
+        n = rng.randint(1, 60) if rng.random() < 0.8 else rng.randint(61, 400)
         N = LX.num_surface(rng, n, h)
         if n == 1:
             forms = ["a day", "1 day", "one day"] + (["ek din"] if h else [])
@@ -133,7 +134,7 @@ def clock(c: Ctx) -> tuple[str, str]:
     if r < 0.1:
         return "00:00", (slot("raat 12 baje") if c.hing else f"at {slot('midnight')}")
     hh = rng.randint(0, 23)
-    mm = rng.choice([0, 0, 0, 15, 30, 45, 10, 20, 40, 50, rng.randint(0, 59)])
+    mm = rng.choice([0, 0, 15, 30, 45]) if rng.random() < 0.35 else rng.randint(0, 59)
     h12, ampm = (hh % 12 or 12), ("am" if hh < 12 else "pm")
     if c.hing and rng.random() < 0.7:
         part = "subah" if 4 <= hh < 12 else "dopahar" if 12 <= hh < 16 else "shaam" if 16 <= hh < 20 else "raat"
@@ -163,7 +164,7 @@ def folder(c: Ctx, exclude: str | None = None) -> tuple[str, str]:
     """Returns (dsl value, slot surface). 12% of the time a literal custom path."""
     rng = c.rng
     if rng.random() < 0.12:
-        parts = [rng.choice(LX.PATH_ROOTS)] + rng.sample(LX.PATH_PARTS, rng.randint(1, 2))
+        parts = [rng.choice(LX.PATH_ROOTS)] + [LX.path_part(rng) for _ in range(rng.randint(1, 3))]
         path = "/".join(parts)
         if rng.random() < 0.3:
             path = path.replace("/", "\\")
@@ -489,7 +490,7 @@ def gen_open_url(c: Ctx):
         if rng.random() < 0.4:
             surface = url
     else:
-        dom = "".join(rng.sample(LX.URL_WORDS, rng.choice([1, 2]))) + rng.choice(LX.TLDS)
+        dom = LX.url_name(rng) + rng.choice(LX.TLDS)
         if rng.random() < 0.2:
             dom = rng.choice(["www.", "app.", "docs."]) + dom
         if rng.random() < 0.15:
@@ -596,7 +597,7 @@ def sample(rng: random.Random, split: str = "train") -> dict:
     if rng.random() < 0.015:
         d, t, _ = gen_undo(c)
         return {"text": apply_noise(t, rng), "program": d}
-    n_calls = rng.choices([1, 2, 3, 4], weights=[65, 25, 8, 2])[0]
+    n_calls = rng.choices([1, 2, 3, 4], weights=[60, 26, 10, 4])[0]
     dsls, texts, meta = [], [], {}
     for i in range(n_calls):
         out = None

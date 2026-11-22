@@ -71,6 +71,39 @@ URL_WORDS = ["pixel", "nova", "byte", "cloud", "green", "kite", "lotus", "metro"
              "bright", "urban", "spice", "chai", "desi", "maker", "lab", "hub"]
 TLDS = [".com", ".in", ".io", ".dev", ".ai", ".org", ".net", ".app", ".co", ".co.in"]
 
+# ---------------------------------------------------------------- made-up words
+# Random pronounceable words force the model to COPY names character by character instead of
+# recalling a familiar word (it used to turn D:/jarvis/reports into D:/reports/jarvis).
+_ONSETS = ["b", "ch", "d", "f", "g", "h", "j", "k", "l", "m", "n", "p", "r", "s", "sh", "t", "v", "y", "z",
+           "br", "kr", "tr", "pr", "st", "bh", "dh", "gh", "kh", "th"]
+_VOWELS = ["a", "e", "i", "o", "u", "aa", "ee", "oo", "ai", "ou"]
+_CODAS = ["", "", "", "n", "r", "l", "s", "t", "k", "m", "x"]
+
+
+def pseudo_word(rng: random.Random) -> str:
+    w = "".join(rng.choice(_ONSETS) + rng.choice(_VOWELS) for _ in range(rng.randint(1, 3))) + rng.choice(_CODAS)
+    r = rng.random()
+    if r < 0.12:
+        w += str(rng.randint(1, 2099))
+    elif r < 0.2:
+        w += rng.choice(["_", "-"]) + rng.choice(["v2", "final", "old", "new", "x", "pro", str(rng.randint(1, 99))])
+    if rng.random() < 0.1:
+        w = w.capitalize()
+    return w
+
+
+def path_part(rng: random.Random) -> str:
+    return rng.choice(PATH_PARTS) if rng.random() < 0.5 else pseudo_word(rng)
+
+
+def url_name(rng: random.Random) -> str:
+    r = rng.random()
+    if r < 0.35:
+        return "".join(rng.sample(URL_WORDS, rng.choice([1, 2])))
+    if r < 0.8:
+        return pseudo_word(rng).lower().replace("_", "-")
+    return rng.choice(URL_WORDS) + pseudo_word(rng).lower().replace("_", "-")
+
 # ---------------------------------------------------------------- reminders (open)
 R_VERBS = ["call", "text", "email", "message", "meet", "pay", "submit", "review", "finish", "start", "check",
            "book", "buy", "order", "return", "renew", "cancel", "send", "push", "deploy", "backup", "clean",
@@ -105,6 +138,9 @@ NAME_WORDS = ["invoice", "resume", "screenshot", "report", "bill", "ticket", "dr
 
 
 def name_fragment(rng: random.Random) -> str:
+    r = rng.random()
+    if r < 0.2:
+        return pseudo_word(rng)
     r = rng.random()
     if r < 0.6:
         return rng.choice(NAME_WORDS)

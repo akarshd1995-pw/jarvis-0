@@ -71,7 +71,7 @@ def apply_noise(text: str, rng: random.Random, level: float | None = None) -> st
     """level 0 = clean, 1 = typical, 2 = very messy. Random per example by default."""
     if level is None:
         level = rng.choices([0.0, 1.0, 2.0], weights=[25, 55, 20])[0]
-    casing = rng.choices(["keep", "lower", "upper", "title"], weights=[45, 45, 3, 7])[0]
+    casing = rng.choices(["keep", "lower", "upper", "title"], weights=[44, 44, 5, 7])[0]
     out = []
     first_is_slot = None
     for seg in re.split(f"({L}.*?{R})", text):

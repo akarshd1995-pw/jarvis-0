@@ -895,3 +895,16 @@ def test_mood_flow_plays_and_offers(env, tmp_path):
     j.handle("yes")
     assert len(ran) == 2
     assert "14416" in j.handle("i want to die") and len(ran) == 2         # never a playlist
+
+
+def test_mood_in_training_data():
+    import random
+    from datagen.generate_intents import gen_mood, Ctx
+    from jarvis.persona import mood
+    rng = random.Random(0)
+    for _ in range(500):
+        d, t = gen_mood(Ctx(rng, "train"))
+        prog = parse(d)                                                    # valid DSL
+        assert mood.detect(t) is None or mood.detect(t).kind != "crisis"  # never self-harm text in the data
+    m = mood.from_program(parse("mood(kind=stressed, music=yes)"), "bahut tension hai, kuch gaana lagao")
+    assert m.wants_music and m.hindi and m.playlist == "soothing hindi songs"

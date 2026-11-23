@@ -182,12 +182,13 @@ class Jarvis:
             raise
         return reply
 
-    def _mood(self, text: str) -> str | None:
-        """How you feel -> a kind reply, and music that fits (now, or after you say yes)."""
+    def _mood(self, text: str, prog=None) -> str | None:
+        """How you feel -> a kind reply, and music that fits (now, or after you say yes).
+        Fixed rules first (they alone handle crisis words), then the intent model's mood(...) reading."""
         offer, self._mood_offer = getattr(self, "_mood_offer", None), None
         if offer is not None and mood.YES.match(text.strip()):
             return self._play_mood(offer, empathy_first=False)
-        m = mood.detect(text)
+        m = mood.detect(text) or mood.from_program(prog, text)
         if m is None:
             return None
         self.store.log_event("mood", {"kind": m.kind})       # only the kind, never the text
@@ -219,12 +220,14 @@ class Jarvis:
         prog, source = self.brain.resolve(text)
         # Feelings win only when the sentence isn't a real command ("i'm tired of these pdfs, delete them" stays a delete);
         # crisis words always win.
-        is_command = prog is not None and any(c.action not in ("unknown", "unsupported", "play_media", "search_web")
+        is_command = prog is not None and any(c.action not in ("unknown", "unsupported", "play_media", "search_web", "mood")
                                               for c in prog.calls)
         if not is_command or mood.detect(text) is not None and mood.detect(text).kind == "crisis":
-            moody = self._mood(text)
+            moody = self._mood(text, prog)
             if moody is not None:
                 return moody
+            if prog is not None and any(c.action == "mood" for c in prog.calls):
+                prog = None                                     # a mood call never reaches the executor
         else:
             self._mood_offer = None
         self.last_text, self.last_program = text.strip(), (str(prog) if prog else None)

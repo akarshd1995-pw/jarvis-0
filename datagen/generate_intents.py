@@ -854,6 +854,85 @@ def gen_training(c: Ctx):
     return f"training(action={a})", c.rng.choice(TRAINING_PHRASES[a]), {}
 
 
+# ---------------------------------------------------------------- mood: how the user feels (+ maybe music)
+# Self-harm language is deliberately NOT generated: it is caught by fixed rules (jarvis/persona/mood.py), never the model.
+
+FEEL_EN = {
+    "low": ["i'm feeling low", "i am feeling sad", "my mood is bad", "i'm in a bad mood", "i feel down", "i had a bad day",
+            "today was rough", "i'm not feeling good", "i'm upset", "feeling a bit blue", "i'm heartbroken",
+            "i'm really sad today", "my mood is off", "i feel like crying", "i'm not okay", "worst day ever honestly",
+            "i feel miserable", "i'm so done with today", "i feel empty today", "kind of feeling down rn",
+            "my day was terrible", "i got bad news today", "i failed my exam and feel awful", "my mood is low",
+            "i'm feeling gloomy", "nothing is going right today", "i feel unhappy", "i'm having a rough day"],
+    "stressed": ["i'm so stressed", "i'm stressed out", "i feel anxious", "i'm really tense", "so much pressure right now",
+                 "i'm overwhelmed", "work is killing me", "i'm worried about tomorrow", "deadlines are stressing me out",
+                 "i'm nervous about the interview", "too much on my plate", "i'm panicking a bit", "my head is spinning"],
+    "tired": ["i'm so tired", "i'm exhausted", "i feel drained", "i'm worn out", "long day, i'm beat", "i'm burnt out",
+              "i'm sleepy", "totally drained after work", "i'm dead tired", "i have no energy left"],
+    "bored": ["i'm bored", "i'm so bored", "nothing to do", "this is boring", "bored out of my mind", "i'm getting bored",
+              "so bored right now"],
+    "angry": ["i'm so angry", "i'm frustrated", "i'm irritated", "i'm pissed off", "i'm annoyed", "everything is annoying me",
+              "i'm furious right now", "this bug is making me mad"],
+    "lonely": ["i feel lonely", "i'm all alone", "i'm missing home", "i feel so alone", "nobody is around", "i'm missing someone"],
+    "happy": ["i'm so happy", "i'm in a great mood", "feeling awesome today", "i got the job", "i'm excited", "best day ever",
+              "i passed my exam", "i'm feeling great", "good mood today"],
+    "focus": ["i need to focus", "i have to study", "time for deep work", "i can't concentrate", "i want to get some work done",
+              "exam tomorrow, need to study", "help me focus"],
+    "sleep": ["i can't sleep", "i need to sleep", "help me sleep", "trying to fall asleep", "can't fall asleep tonight"],
+}
+FEEL_HI = {
+    "low": ["mood kharab hai", "mera mood off hai", "main bahut udaas hoon", "aaj ka din bura tha", "dil toota hua hai",
+            "mood theek nahi hai", "bahut dukhi hoon", "kuch accha nahi lag raha", "man nahi lag raha", "mood low hai yaar"],
+    "stressed": ["bahut tension hai", "bahut stress hai", "main pareshaan hoon", "kaam ka bahut pressure hai", "tension ho rahi hai"],
+    "tired": ["bahut thak gaya hoon", "thak gayi hoon", "aaj bahut thakaan hai", "energy nahi hai"],
+    "bored": ["bore ho raha hoon", "bahut bore ho rahi hoon", "kuch karne ko nahi hai"],
+    "angry": ["bahut gussa aa raha hai", "dimaag kharab ho gaya hai", "bahut irritate ho raha hoon"],
+    "lonely": ["akela feel ho raha hai", "main akeli hoon", "ghar ki yaad aa rahi hai"],
+    "happy": ["aaj bahut khush hoon", "mood mast hai", "aaj ka din accha tha"],
+    "focus": ["padhai karni hai", "focus karna hai", "kaam pe dhyan nahi lag raha"],
+    "sleep": ["neend nahi aa rahi", "sona hai par neend nahi aa rahi"],
+}
+MOOD_MUSIC_EN = frames("MOOD_MUSIC_EN", [
+    "play some music", "play something to lift my mood", "put on some songs", "play something nice", "play some music for me",
+    "can you play something", "play some songs to cheer me up", "put on something to make me feel better",
+    "play something relaxing", "play some good music", "throw on some music", "play some tunes", "put some music on",
+    "play a few songs", "some music please", "play something to help", "play music that fits", "play me something good",
+    "play songs to cheer me up please", "help me feel better with some music, make it up beat",
+])
+MOOD_MUSIC_HI = frames("MOOD_MUSIC_HI", [
+    "kuch gaana lagao", "koi gaana chalao", "kuch music bajao", "kuch accha sunao", "gaane lagao", "koi song chala do",
+    "music chalao", "kuch songs bajao", "kuch accha chalao", "koi accha gaana sunao", "songs chalao",
+])
+MOOD_LIFT = {"low": ["cheer me up", "lift my mood", "play something to cheer me up", "i need a mood booster",
+                     "make me feel better", "play some feel good music", "mood fresh kar do", "mood accha kar do",
+                     "brighten my day", "i need some good vibes"],
+             "stressed": ["help me relax", "calm me down", "play something to calm me down", "i need to relax"],
+             "focus": ["play something to help me focus", "help me focus with some music"],
+             "sleep": ["play something to help me sleep", "help me fall asleep"]}
+MOOD_JOIN = [", ", " ", ". ", " so ", ", can you ", " yaar ", "... ", ", please ", " and ", " - "]
+
+
+def gen_mood(c: Ctx):
+    rng = c.rng
+    r = rng.random()
+    if r < 0.15:                                                   # asks to change the mood, no feeling stated
+        kind = rng.choice(["low", "low", "low", "stressed", "focus", "sleep"])
+        return f"mood(kind={kind}, music=yes)", rng.choice(MOOD_LIFT[kind])
+    if r < 0.27:                                                   # hard negatives: a genre is a song request, not a feeling
+        g = rng.choice(["sad", "happy", "romantic", "relaxing", "calm", "motivational", "party", "lonely", "breakup"])
+        g += rng.choice([" songs", " music"])
+        return f"play_media(query={q(g)}, site=youtube)", rng.choice(["play {g}", "{g} chalao", "put on {g}",
+                                                                      "{g} bajao", "play me {g}"]).format(g=slot(g))
+    kind = rng.choice(list(FEEL_EN))
+    hindi = c.hing and kind in FEEL_HI
+    feel = rng.choice(FEEL_HI[kind] if hindi else FEEL_EN[kind])
+    if rng.random() < 0.55:                                        # feeling + asks for music
+        music = c.T(MOOD_MUSIC_HI if hindi or rng.random() < 0.15 else MOOD_MUSIC_EN)
+        text = feel + rng.choice(MOOD_JOIN) + music if rng.random() < 0.8 else music + rng.choice([", ", " because ", " - "]) + feel
+        return f"mood(kind={kind}, music=yes)", text
+    return f"mood(kind={kind}, music=no)", feel
+
+
 GENERATORS = [
     (lambda c: gen_file_op(c, "move"), 14), (lambda c: gen_file_op(c, "copy"), 7),
     (lambda c: gen_file_op(c, "delete"), 8), (lambda c: gen_file_op(c, "list"), 6),
@@ -907,6 +986,10 @@ def sample(rng: random.Random, split: str = "train") -> dict:
     if r < 0.11:
         d, t, _ = gen_undo(c)
         return {"text": apply_noise(t, rng), "program": d}
+    if r < 0.14:                                                # how the user feels (always its own sentence)
+        d, t = gen_mood(c)
+        t = rng.choice(["", "", "", "jarvis ", "hey jarvis, ", "yaar ", "bro "]) + t
+        return {"text": apply_noise(t, rng), "program": canonical(d)}
     n_calls = rng.choices([1, 2, 3, 4], weights=[60, 26, 10, 4])[0]
     dsls, texts, meta = [], [], {}
     for i in range(n_calls):

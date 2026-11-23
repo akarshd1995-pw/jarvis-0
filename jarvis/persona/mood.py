@@ -150,3 +150,11 @@ def crisis_reply(m: Mood, p) -> str:
     return ("I'm really sorry you're feeling this way" + (f",{name}" if name else "") + ". You don't have to go through it alone. "
             "Please talk to someone right now: in India you can call Tele-MANAS on 14416 (free, 24x7), "
             "or reach out to a friend or family member you trust. If you're in immediate danger, call 112.")
+
+
+def from_program(prog, text: str) -> Mood | None:
+    """The intent model's reading: a single mood(kind=..., music=...) call."""
+    if prog is None or len(prog.calls) != 1 or prog.calls[0].action != "mood":
+        return None
+    a = prog.calls[0].args
+    return Mood(str(a["kind"]), str(a.get("music", "no")) == "yes", bool(_HINDI.search(text)))

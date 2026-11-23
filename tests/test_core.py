@@ -749,3 +749,16 @@ def test_persona_alerts(tone):
         out = p.alert(a)
         assert out and "{" not in out and "  " not in out, (tone, a.kind, out)
     assert "99.8 percent" in p.alert(alerts[5])
+
+
+def test_linearize_keeps_every_fact_the_persona_can_produce():
+    from datagen.generate_replies import make_example
+    from jarvis.nlg.checker import FIELD_ORDER
+    from jarvis.persona import Persona
+    import datagen.generate_replies as G
+    rng = random.Random(2)
+    p = Persona(seed=0)
+    for _ in range(3000):
+        key, fields = G.random_case(rng, p)
+        missing = {k for k in fields if k[:1].islower() and k not in FIELD_ORDER and k != "summary"}
+        assert not missing, (key, missing)

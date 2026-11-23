@@ -595,3 +595,70 @@ def test_upcoming_reminders_and_hud_state_hooks(env):
     j.handle("list_files(src=D:/nowhere)")
     assert "error" in events
     assert "needs the command bar" in j.handle("/hud")
+
+
+# ------------------------------------------------------------------ phase 5: system control
+@pytest.mark.parametrize("text,expected", [
+    ("take a screenshot", "screenshot(mode=full)"), ("next song", "media(action=next)"),
+    ("set brightness to 60", "brightness(level=60)"), ("set volume to 30", "set_volume(level=30)"),
+    ("turn off wifi", "radio(kind=wifi, state=off)"), ("shut down in 10 minutes", "power(action=shutdown, after=10m)"),
+    ("cancel shutdown", "power(action=cancel)"), ("new desktop", "desktop(action=new)"),
+    ("snap chrome to the left", "window(action=snap_left, app=chrome)"), ("minimize this", "window(action=minimize)"),
+    ("close spotify", "window(action=close, app=spotify)"), ("show desktop", "window(action=minimize_all)"),
+])
+def test_rules_system_control(text, expected):
+    assert str(rule_parse(text)) == expected
+
+
+def test_system_control_confirmation_policy():
+    from jarvis.safety import needs_confirmation as n
+    assert n("power", None, {"action": "shutdown"}) and n("power", [], {"action": "restart"})   # always asks
+    assert not n("power", None, {"action": "cancel"})
+    assert n("window", None, {"action": "close"}) and not n("window", None, {"action": "snap_left"})
+    assert n("radio", None, {"state": "off"}) and not n("radio", None, {"state": "on"})
+    assert not n("media", None, {"action": "next"}) and not n("screenshot", None, {})
+
+
+def test_brain_uses_rules_first_for_system_control():
+    from jarvis.nlu.brain import Brain
+
+    class Wrong:
+        def parse(self, text):
+            return parse('play_media(query="next song", site=youtube)'), 0.95
+
+    b = Brain()
+    b.model = Wrong()
+    assert str(b.resolve("next song")[0]) == "media(action=next)"
+    assert str(b.resolve("play dear god")[0]).startswith("play_media")
+
+
+def test_system_control_on_non_windows_reports_politely(env):
+    import sys
+    from jarvis.daemon import Jarvis
+    cfg, store, dl, arc = env
+    reply = Jarvis(cfg, lambda *a: True).handle("media(action=next)")
+    if sys.platform != "win32":
+        assert "Windows" in reply
+
+
+@pytest.mark.parametrize("tone", ["butler", "friendly", "minimal"])
+def test_persona_system_control_replies(tone):
+    from jarvis.actions.base import ActionResult as AR
+    from jarvis.persona import Persona
+    p = Persona(tone=tone, seed=0)
+    rs = [AR("", kind="window", data={"action": a, "app": app}) for a in
+          ("snap_left", "snap_right", "maximize", "minimize", "restore", "close", "minimize_all") for app in ("", "vscode")]
+    rs += [AR("", kind="desktop", data={"action": a}) for a in ("new", "next", "previous", "close")]
+    rs += [AR("", kind="media", data={"action": a}) for a in ("play_pause", "next", "previous", "stop")]
+    rs += [AR("", kind="brightness", data={"level": 40, "action": a}) for a in ("set", "up", "down")]
+    rs += [AR("", kind="volume_set", data={"level": 30}), AR("", kind="radio", data={"kind": "wifi", "state": "on"}),
+           AR("", kind="radio", data={"kind": "bluetooth", "state": "off"})]
+    rs += [AR("", kind="screenshot", data={"mode": m}) for m in ("full", "window", "region")]
+    rs += [AR("", kind="record", data={"action": a}) for a in ("start", "stop")]
+    rs += [AR("", kind="power", data={"action": a, "seconds": 600}) for a in ("shutdown", "restart", "sleep", "sign_out", "cancel")]
+    for r in rs:
+        out = p.result(r)
+        assert out and "{" not in out and "  " not in out, (tone, r.kind, r.data, out)
+    assert "VS Code" in p.result(AR("", kind="window", data={"action": "maximize", "app": "vscode"})) or tone == "minimal"
+    q = p.confirm_question(AR("", kind="power", data={"action": "shutdown", "seconds": 600, "dry": True}))
+    assert q.endswith("?") and ("ten minutes" in q or "10 minutes" in q)

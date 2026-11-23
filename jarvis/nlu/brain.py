@@ -17,6 +17,8 @@ from .rule_parser import rule_parse
 
 log = logging.getLogger(__name__)
 
+RULES_FIRST = {"window", "desktop", "media", "brightness", "set_volume", "radio", "screenshot", "screen_record",
+               "power"}
 PLAY_WORDS = re.compile(r"\b(play|put on|stream|start playing|chalao|chala do|bajao|lagao|sunao|play karo)\b", re.I)
 
 
@@ -66,10 +68,22 @@ class Brain:
             return parse(text), "dsl"
         except DSLError:
             pass
+        # System-control actions (phase 5) are matched by precise rules first, so they work even with a
+        # model trained before they existed. After retraining, the model and the rules agree.
+        ruled_first = rule_parse(text)
+        if ruled_first is not None and any(c.action in RULES_FIRST for c in ruled_first.calls):
+            return ruled_first, "rules"
         model_unknown = None
         if self.model is not None:
             prog, conf = self.model.parse(text)
             if prog is not None:
+                gave_up = any(c.action in ("unknown", "unsupported") for c in prog.calls)
+                if not gave_up:
+                    return upgrade_play(prog, text), f"model {conf:.0%}"
+                # The model says it can't: a newer rule may know better (e.g. actions added after it was trained)
+                ruled = rule_parse(text)
+                if ruled is not None and not any(c.action in ("unknown", "unsupported") for c in ruled.calls):
+                    return ruled, "rules"
                 if str(prog) != "unknown()":
                     return upgrade_play(prog, text), f"model {conf:.0%}"
                 model_unknown = (prog, f"model {conf:.0%}")

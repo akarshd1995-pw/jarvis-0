@@ -53,7 +53,7 @@ class Config:
     show_details: bool = True           # also show the technical program under each reply
     persona_model: bool = True          # use the trained reply model (fact-checked) when it's available
     min_confidence: float = 0.55        # below this the model's answer is not executed
-    confirm_actions: list[str] = field(default_factory=lambda: ["move_files", "undo"])  # delete always asks
+    confirm_actions: list[str] = field(default_factory=lambda: ["move_files", "undo", "window_close", "radio_off"])
     encrypt_logs: bool = True           # DPAPI-encrypt the activity log (Windows)
     keep_window_titles: bool = False    # store full window titles (off: only app name + hash)
     model_backend: str = "auto"         # auto | onnx | torch

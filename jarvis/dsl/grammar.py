@@ -71,7 +71,24 @@ SCHEMA: dict[str, dict] = {
                                         "stackoverflow", "wikipedia", "spotify", "maps", "reddit", "linkedin"]}},
     "unsupported":   {"args": {"request": "str"}, "required": ["request"]},
     "play_media":    {"args": {"query": "str", "site": "ident"}, "required": ["query"],   # play, not just search
-                      "enum": {"site": ["youtube", "spotify"]}},  # part of a command Jarvis can't do
+                      "enum": {"site": ["youtube", "spotify"]}},
+    # ---- phase 5: full system control
+    "window":        {"args": {"action": "ident", "app": "ident|str"}, "required": ["action"],
+                      "enum": {"action": ["snap_left", "snap_right", "maximize", "minimize", "restore", "close",
+                                          "minimize_all"]}},
+    "desktop":       {"args": {"action": "ident"}, "required": ["action"],
+                      "enum": {"action": ["new", "next", "previous", "close"]}},
+    "media":         {"args": {"action": "ident"}, "required": ["action"],
+                      "enum": {"action": ["play_pause", "next", "previous", "stop"]}},
+    "brightness":    {"args": {"level": "int", "action": "ident"}, "required": [], "one_of": [["level", "action"]],
+                      "enum": {"action": ["up", "down"]}},
+    "set_volume":    {"args": {"level": "int"}, "required": ["level"]},
+    "radio":         {"args": {"kind": "ident", "state": "ident"}, "required": ["kind", "state"],
+                      "enum": {"kind": ["wifi", "bluetooth"], "state": ["on", "off"]}},
+    "screenshot":    {"args": {"mode": "ident"}, "required": [], "enum": {"mode": ["full", "window", "region"]}},
+    "screen_record": {"args": {"action": "ident"}, "required": ["action"], "enum": {"action": ["start", "stop"]}},
+    "power":         {"args": {"action": "ident", "after": "dur"}, "required": ["action"],
+                      "enum": {"action": ["shutdown", "restart", "sleep", "sign_out", "cancel"]}},  # part of a command Jarvis can't do
     "undo":          {"args": {}, "required": []},
     "unknown":       {"args": {}, "required": []},   # out-of-scope request: decline, never guess
 }

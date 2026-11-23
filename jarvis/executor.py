@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .actions import files, system
+from .actions import control, files, system
 from .actions.base import ActionResult, Ctx
 from .config import Config
 from .dsl.grammar import Program
@@ -25,6 +25,15 @@ REGISTRY: dict[str, Handler] = {
     "unsupported": system.unsupported,
     "search_web": system.search_web,
     "play_media": system.play_media,
+    "window": control.window,
+    "desktop": control.desktop,
+    "media": control.media,
+    "brightness": control.brightness,
+    "set_volume": control.set_volume,
+    "radio": control.radio,
+    "screenshot": control.screenshot,
+    "screen_record": control.screen_record,
+    "power": control.power,
     "list_files": files.list_files,
     "move_files": files.move_files,
     "copy_files": files.copy_files,
@@ -67,7 +76,7 @@ class Executor:
                     continue
                 handler = REGISTRY[call.action]
                 tier = tier_of(call.action)
-                if needs_confirmation(call.action, getattr(self.config, "confirm_actions", None)):
+                if needs_confirmation(call.action, getattr(self.config, "confirm_actions", None), call.args):
                     preview = handler(call.args, ctx, True)          # dry run
                     question = self.describe(preview) if self.describe else preview.summary
                     if not self.confirm(tier, question, preview.items):

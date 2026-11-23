@@ -22,6 +22,15 @@ ACTION_TIERS: dict[str, Tier] = {
     "unsupported": Tier.SAFE,
     "search_web": Tier.SAFE,
     "play_media": Tier.SAFE,
+    "window": Tier.SAFE,          # close asks (see confirm names below)
+    "desktop": Tier.SAFE,
+    "media": Tier.SAFE,
+    "brightness": Tier.SAFE,
+    "set_volume": Tier.SAFE,
+    "radio": Tier.SAFE,           # turning a radio off asks
+    "screenshot": Tier.SAFE,
+    "screen_record": Tier.SAFE,
+    "power": Tier.DESTRUCTIVE,    # shutdown/restart/sleep/sign out always ask; cancel doesn't
     "undo": Tier.CONFIRM,
     "move_files": Tier.CONFIRM,
     "copy_files": Tier.SAFE,      # non-destructive and undoable
@@ -37,13 +46,25 @@ class SafetyError(PermissionError):
     pass
 
 
-DEFAULT_CONFIRM = ["move_files", "undo"]   # user-editable in settings; delete ALWAYS asks
+DEFAULT_CONFIRM = ["move_files", "undo", "window_close", "radio_off"]   # editable in settings; delete/power always ask
 
 
-def needs_confirmation(action: str, confirm_actions: list[str] | None = None) -> bool:
+def confirm_name(action: str, args: dict | None = None) -> str:
+    """Name used in the 'ask before' list: actions, or action_variant for risky variants."""
+    args = args or {}
+    if action == "window" and str(args.get("action")) == "close":
+        return "window_close"
+    if action == "radio" and str(args.get("state")) == "off":
+        return "radio_off"
+    return action
+
+
+def needs_confirmation(action: str, confirm_actions: list[str] | None = None, args: dict | None = None) -> bool:
+    if action == "power" and str((args or {}).get("action")) == "cancel":
+        return False
     if tier_of(action) >= Tier.DESTRUCTIVE:
         return True
-    return action in (DEFAULT_CONFIRM if confirm_actions is None else confirm_actions)
+    return confirm_name(action, args) in (DEFAULT_CONFIRM if confirm_actions is None else confirm_actions)
 
 
 def tier_of(action: str) -> Tier:

@@ -7,6 +7,7 @@ category plus a hash by default so the log stays privacy-friendly.
 from __future__ import annotations
 
 import hashlib
+import os
 import sys
 import threading
 import time
@@ -17,7 +18,11 @@ from ..store import Store
 IS_WINDOWS = sys.platform == "win32"
 
 
-def _foreground() -> tuple[str, str] | None:
+# The last window the user was in that isn't Jarvis itself; window actions without an app target it.
+LAST_EXTERNAL: dict = {"hwnd": None, "exe": None}
+
+
+def _foreground() -> tuple[str, str, int, int] | None:
     import ctypes
     from ctypes import wintypes
 
@@ -41,7 +46,7 @@ def _foreground() -> tuple[str, str] | None:
         if kernel32.QueryFullProcessImageNameW(h, 0, pbuf, ctypes.byref(size)):
             exe = Path(pbuf.value).name.lower()
         kernel32.CloseHandle(h)
-    return exe, buf.value
+    return exe, buf.value, int(hwnd), int(pid.value)
 
 
 def title_digest(title: str) -> str:
@@ -64,8 +69,10 @@ class FocusCollector(threading.Thread):
         while not self._stop.is_set():
             try:
                 fg = _foreground()
-                if fg and fg != last:
-                    exe, title = fg
+                if fg and fg[3] != os.getpid():
+                    LAST_EXTERNAL["hwnd"], LAST_EXTERNAL["exe"] = fg[2], fg[0]
+                if fg and fg[:2] != (last or ("", ""))[:2]:
+                    exe, title = fg[0], fg[1]
                     payload = {"app": exe, "title_hash": title_digest(title)}
                     if self.keep_titles:
                         payload["title"] = title

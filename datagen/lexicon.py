@@ -195,11 +195,11 @@ UNSUPPORTED_TEMPLATES = [
     "send an email to {name}", "email {name} the report", "call {name}", "text {name} that i'm late",
     "message {name} on whatsapp", "book a cab to {place}", "order {food} from swiggy", "buy {thing} on amazon",
     "turn on the lights", "set the ac to 24", "pay the electricity bill", "post this on instagram",
-    "record my screen", "take a screenshot", "shut down the pc", "restart the computer", "connect to wifi",
-    "turn on bluetooth", "install {app}", "uninstall {app}", "update windows", "empty the recycle bin",
+    "connect to the office wifi", "pair my headphones", "install {app}", "uninstall {app}", "update windows",
+    "empty the recycle bin", "change my wallpaper", "turn on night light",
     "format the c drive", "delete system32", "hack my neighbor's wifi", "shut down everyone's pc",
     "{name} ko call karo", "{name} ko message bhejo", "khana order karo", "cab book karo",
-    "light on karo", "screenshot le lo", "pc restart karo", "{app} install karo", "wifi connect karo",
+    "light on karo", "{app} install karo", "office wifi se connect karo",
     "share this file with {name}", "print the document", "zip the downloads folder", "rename the file",
 ]
 U_FILL_APP = ["discord", "vlc", "steam", "python", "node", "zoom", "figma"]

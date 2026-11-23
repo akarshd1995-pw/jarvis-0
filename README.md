@@ -117,6 +117,13 @@ That script runs four steps:
 | "open chrome and send an email to Rahul" | `open_app(name=chrome) ; unsupported(request="send an email to Rahul")`: does what it can, tells you what it skipped |
 | "don't delete my pdfs" | `unknown()`: never acts on a negation |
 
+| "snap chrome to the left", "maximize this", "minimize everything", "close spotify" | `window(...)`: acts on the named app, or the window you were in before opening the command bar; closing asks first |
+| "next song", "pause", "skip" · "new desktop", "next desktop" | `media(...)` · `desktop(...)` |
+| "set brightness to 60", "brightness up" · "set volume to 30" | `brightness(...)` (laptop screens; external monitors need their own buttons) · `set_volume(level=30)` |
+| "turn off wifi", "enable bluetooth" | `radio(...)`: turning a radio off asks first |
+| "take a screenshot", "snip part of the screen" · "start recording" | `screenshot(...)` (saved to Pictures, Screenshots) · `screen_record(...)` (Xbox Game Bar) |
+| "shut down in 10 minutes", "restart", "sleep", "sign out", "cancel shutdown" | `power(...)`: always asks first (except cancel); shutdown and restart wait 30 seconds by default so you can cancel |
+
 Supported search sites: google, youtube, amazon, flipkart, swiggy, zomato, github, stackoverflow, wikipedia, spotify, maps, reddit, linkedin.
 
 ## Persona

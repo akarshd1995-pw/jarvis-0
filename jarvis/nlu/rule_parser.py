@@ -63,6 +63,18 @@ def _filters(text: str) -> str:
 
 
 _SITES = "youtube|google|amazon|flipkart|spotify|github|wikipedia|reddit"
+_THIS = {"this", "this window", "the window", "it", "the current window", "this app", "current window"}
+_APP_IDENTS = {"chrome", "edge", "vscode", "notepad", "explorer", "terminal", "spotify", "calculator", "settings"}
+
+
+def _window(action: str, target: str) -> str:
+    t = target.strip()
+    if t.lower() in _THIS:
+        return f"window(action={action})"
+    key = t.lower().replace(" ", "")
+    key = {"vscode": "vscode", "visualstudiocode": "vscode", "fileexplorer": "explorer"}.get(key, key)
+    return f"window(action={action}, app={key})" if key in _APP_IDENTS else f'window(action={action}, app="{t}")'
+
 
 RULES: list[tuple[re.Pattern, callable]] = [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
@@ -78,6 +90,52 @@ RULES: list[tuple[re.Pattern, callable]] = [
      lambda m, t: f'play_media(query="{m.group(1)}", site=youtube)'),
     (re.compile(r"^(?:google|search(?: google)? for) (.+)$", re.I),
      lambda m, t: f'search_web(query="{m.group(1)}", site=google)'),
+    # ---- phase 5: system control (before the generic "open/start X" rule)
+    (re.compile(r"^(?:take (?:a )?|grab (?:a )?)?screenshot(?: (?:of )?(?:the |my )?(?:whole )?screen)?$", re.I),
+     lambda m, t: "screenshot(mode=full)"),
+    (re.compile(r"^(?:snip|screenshot an area|take a partial screenshot|open the snipping tool)", re.I),
+     lambda m, t: "screenshot(mode=region)"),
+    (re.compile(r"^(start|stop) (?:the )?(?:screen )?recording$", re.I),
+     lambda m, t: f"screen_record(action={m.group(1).lower()})"),
+    (re.compile(r"^record (?:my |the )?screen$", re.I), lambda m, t: "screen_record(action=start)"),
+    (re.compile(r"^(next|previous|last) (?:song|track)$", re.I),
+     lambda m, t: f"media(action={'next' if m.group(1).lower() == 'next' else 'previous'})"),
+    (re.compile(r"^skip(?: (?:this )?(?:song|track))?$", re.I), lambda m, t: "media(action=next)"),
+    (re.compile(r"^(?:pause|resume|play pause)(?: (?:the )?(?:music|video|song))?$", re.I),
+     lambda m, t: "media(action=play_pause)"),
+    (re.compile(r"^stop (?:the )?(?:music|playback|song)$", re.I), lambda m, t: "media(action=stop)"),
+    (re.compile(r"^(?:set )?(?:the )?(?:screen )?brightness (?:to |at )?(\d{1,3})(?: ?%| percent)?$", re.I),
+     lambda m, t: f"brightness(level={int(m.group(1))})"),
+    (re.compile(r"^(?:increase|raise|turn up) (?:the )?brightness$|^brightness up$|^(?:make the screen )?brighter$", re.I),
+     lambda m, t: "brightness(action=up)"),
+    (re.compile(r"^(?:decrease|lower|turn down) (?:the )?brightness$|^brightness down$|^dim (?:the )?screen$", re.I),
+     lambda m, t: "brightness(action=down)"),
+    (re.compile(r"^(?:set )?(?:the )?volume (?:to |at )?(\d{1,3})(?: ?%| percent)?$", re.I),
+     lambda m, t: f"set_volume(level={int(m.group(1))})"),
+    (re.compile(r"^(?:turn|switch) (on|off) (?:the )?(wi-?fi|bluetooth)$", re.I),
+     lambda m, t: f"radio(kind={m.group(2).lower().replace('-', '')}, state={m.group(1).lower()})"),
+    (re.compile(r"^(enable|disable) (?:the )?(wi-?fi|bluetooth)$", re.I),
+     lambda m, t: f"radio(kind={m.group(2).lower().replace('-', '')}, state={'on' if m.group(1).lower() == 'enable' else 'off'})"),
+    (re.compile(r"^(wi-?fi|bluetooth) (on|off)$", re.I),
+     lambda m, t: f"radio(kind={m.group(1).lower().replace('-', '')}, state={m.group(2).lower()})"),
+    (re.compile(r"^(?:cancel|abort|stop) (?:the )?(?:shutdown|restart)$|^don'?t shut ?down$", re.I),
+     lambda m, t: "power(action=cancel)"),
+    (re.compile(r"^(?:shut ?down|power off|turn off)(?: (?:the|my) (?:pc|computer|laptop))?(?: in (\d+) ?(m|mins?|minutes?|h|hours?))?$", re.I),
+     lambda m, t: "power(action=shutdown" + (f", after={m.group(1)}{m.group(2)[0].lower()})" if m.group(1) else ")")),
+    (re.compile(r"^(?:restart|reboot)(?: (?:the|my) (?:pc|computer|laptop))?(?: in (\d+) ?(m|mins?|minutes?|h|hours?))?$", re.I),
+     lambda m, t: "power(action=restart" + (f", after={m.group(1)}{m.group(2)[0].lower()})" if m.group(1) else ")")),
+    (re.compile(r"^(?:sign|log) (?:me )?out$", re.I), lambda m, t: "power(action=sign_out)"),
+    (re.compile(r"^(?:put (?:the |my )?(?:pc|computer|laptop) to )?sleep(?: mode)?$", re.I), lambda m, t: "power(action=sleep)"),
+    (re.compile(r"^(new|next|previous) (?:virtual )?desktop$", re.I),
+     lambda m, t: f"desktop(action={m.group(1).lower()})"),
+    (re.compile(r"^close (?:this|the) (?:virtual )?desktop$", re.I), lambda m, t: "desktop(action=close)"),
+    (re.compile(r"^(?:show (?:the )?desktop|minimi[sz]e (?:all|everything)(?: (?:the )?windows)?)$", re.I),
+     lambda m, t: "window(action=minimize_all)"),
+    (re.compile(r"^(?:snap|move|put) (.+?) (?:to the |on the )?(left|right)(?: half| side)?$", re.I),
+     lambda m, t: _window(f"snap_{m.group(2).lower()}", m.group(1))),
+    (re.compile(r"^(maximi[sz]e|minimi[sz]e|close|restore) (.+)$", re.I),
+     lambda m, t: _window({"maximise": "maximize", "minimise": "minimize"}.get(m.group(1).lower(), m.group(1).lower()),
+                          m.group(2))),
     (re.compile(r"^(?:open|launch|start) (?:the )?(?:website |site )?((?:https?://)?[\w\-]+\.[\w.\-/]+)$", re.I),
      lambda m, t: f'open_url(url="{m.group(1)}")'),
     (re.compile(rf"^(?:open|show) (?:my )?{_FOLDER}(?: folder)?$", re.I),
@@ -115,7 +173,7 @@ def rule_parse(text: str) -> Program | None:
             except DSLError:
                 break
     # Compound commands: split on ' and then ' / ' then ' / ' and '
-    pieces = re.split(r"\s+(?:and then|then|and)\s+(?=(?:open|launch|start|remind|move|copy|delete|remove|list|show|lock|mute|play|search)\b)",
+    pieces = re.split(r"\s+(?:and then|then|and)\s+(?=(?:open|launch|start|remind|move|copy|delete|remove|list|show|lock|mute|play|search|snap|maximi[sz]e|minimi[sz]e|close|take|turn|set|shut|restart|skip|pause|next|stop|enable|disable)\b)",
                       text, flags=re.I)
     dsl = []
     for piece in pieces:

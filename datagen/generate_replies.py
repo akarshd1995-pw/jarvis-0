@@ -60,6 +60,8 @@ def _filenames(rng, n: int) -> list[str]:
 
 def random_case(rng: random.Random, p: Persona) -> tuple[str, dict]:
     """Returns (key, fields) planned by the persona from a random situation."""
+    if rng.random() < 0.12:
+        return _control_case(rng, p)
     r = rng.random()
     now = time.time()
     if r < 0.28:
@@ -112,6 +114,41 @@ def random_case(rng: random.Random, p: Persona) -> tuple[str, dict]:
     if r < 0.98:
         return "reminder_due", {"text": LX.remind_text(rng)}
     return rng.choice(["declined", "unparsed"]), {}
+
+
+def _control_case(rng: random.Random, p: Persona) -> tuple[str, dict]:
+    """Phase 5 system-control replies and confirmations."""
+    kind = rng.choice(["window", "window", "desktop", "media", "brightness", "volume_set", "radio", "screenshot",
+                       "record", "power", "power"])
+    app = rng.choice(["", "", "chrome", "vscode", "spotify", "explorer"] + LX.OTHER_APPS[:20])
+    if kind == "window":
+        act = rng.choice(["snap_left", "snap_right", "maximize", "minimize", "restore", "close", "minimize_all"])
+        if act == "close" and rng.random() < 0.4:
+            return p.plan_confirm(AR("", kind="window", data={"action": "close", "app": app, "dry": True}))
+        return p.plan(AR("", kind="window", data={"action": act, "app": app}))
+    if kind == "desktop":
+        return p.plan(AR("", kind="desktop", data={"action": rng.choice(["new", "next", "previous", "close"])}))
+    if kind == "media":
+        return p.plan(AR("", kind="media", data={"action": rng.choice(["play_pause", "next", "previous", "stop"])}))
+    if kind == "brightness":
+        return p.plan(AR("", kind="brightness", data={"level": rng.randint(0, 100),
+                                                      "action": rng.choice(["set", "up", "down"])}))
+    if kind == "volume_set":
+        return p.plan(AR("", kind="volume_set", data={"level": rng.randint(0, 100)}))
+    if kind == "radio":
+        d = {"kind": rng.choice(["wifi", "bluetooth"]), "state": rng.choice(["on", "off"])}
+        if d["state"] == "off" and rng.random() < 0.4:
+            return p.plan_confirm(AR("", kind="radio", data={**d, "dry": True}))
+        return p.plan(AR("", kind="radio", data=d))
+    if kind == "screenshot":
+        return p.plan(AR("", kind="screenshot", data={"mode": rng.choice(["full", "window", "region"])}))
+    if kind == "record":
+        return p.plan(AR("", kind="record", data={"action": rng.choice(["start", "stop"])}))
+    d = {"action": rng.choice(["shutdown", "restart", "sleep", "sign_out", "cancel"]),
+         "seconds": rng.choice([30, 30, 60, 300, 600, 1800, 3600])}
+    if d["action"] != "cancel" and rng.random() < 0.5:
+        return p.plan_confirm(AR("", kind="power", data={**d, "dry": True}))
+    return p.plan(AR("", kind="power", data=d))
 
 
 def make_example(rng: random.Random) -> dict | None:

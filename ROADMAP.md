@@ -36,7 +36,7 @@ Status: ✅ done · 🔨 in progress · ⬜ planned
 ## Stage C: Runs and watches your machines
 | # | Phase | What it adds | Status |
 |---|---|---|---|
-| 5 | **Full system control** | Window snapping and layouts, virtual desktops, media keys, brightness, Wi-Fi and Bluetooth, screenshot and screen record, shutdown and restart (confirmed) | ⬜ |
+| 5 | **Full system control** | Window snapping and layouts, virtual desktops, media keys, brightness, Wi-Fi and Bluetooth, screenshot and screen record, shutdown and restart (confirmed) | 🔨 code done; works now via rules, retrain to teach the model |
 | 23 | 🆕 **Monitoring & alerts** | Watches CPU and GPU load and temperatures, RAM, disk, battery, network, and long jobs like training runs. An anomaly model we train flags anything unusual, with alerts on the HUD and as notifications ("GPU is at 87°C, shall I pause training?"); spoken once voice lands | ⬜ |
 | 24 | 🆕 **Briefings** | Morning and evening briefings on the HUD (spoken once voice lands): reminders due, system health, training results, Downloads clutter, what you worked on. Status updates when long jobs finish | ⬜ |
 | 14 | **Self-improving loop** | The 5070 retrains on your corrections overnight; deploys only if accuracy improves and the dangerous-error rate doesn't rise; versioning and rollback | ⬜ |

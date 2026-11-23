@@ -241,7 +241,13 @@ def main() -> None:
     bar_ref["bar"] = bar
     jarvis.hooks["settings"] = lambda: bar.post("call", lambda: SettingsWindow(bar.root, config))
     jarvis.hooks["restart"] = lambda: bar.post("call", lambda: (bar.root.destroy(), restart()))
-    hk = HotkeyThread(config.hotkey, lambda: bar.post("toggle"))
+    from .actions.control import remember_foreground
+
+    def on_hotkey():
+        remember_foreground()          # the window you were in, for "snap this left" etc.
+        bar.post("toggle")
+
+    hk = HotkeyThread(config.hotkey, on_hotkey)
     hk.start()
 
     def tray_update():

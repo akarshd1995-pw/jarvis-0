@@ -651,11 +651,154 @@ def gen_undo(c: Ctx):
     return "undo()", c.rng.choice(UNDO), {}
 
 
+# ---------------------------------------------------------------- phase 5: system control
+WIN_PHRASES = {
+    "snap_left": ["snap {t} to the left", "put {t} on the left", "move {t} to the left half", "snap {t} left",
+                  "{t} left side pe karo", "{t} ko left me lagao"],
+    "snap_right": ["snap {t} to the right", "put {t} on the right", "move {t} to the right half", "snap {t} right",
+                   "{t} right side pe karo", "{t} ko right me lagao"],
+    "maximize": ["maximize {t}", "maximise {t}", "make {t} full screen", "{t} full screen karo", "make {t} bigger"],
+    "minimize": ["minimize {t}", "minimise {t}", "hide {t}", "{t} minimize karo", "{t} chhota karo"],
+    "restore": ["bring back {t}", "restore {t}", "switch to {t}", "{t} wapas lao", "bring {t} to the front"],
+    "close": ["close {t}", "quit {t}", "exit {t}", "{t} band karo", "shut {t}"],
+}
+WIN_ALL = ["minimize everything", "minimize all windows", "hide all windows", "clear my screen", "sab windows minimize karo",
+           "minimise all the windows"]
+THIS_WINDOW = ["this window", "this", "the window", "the current window", "it", "this app", "ye window"]
+
+
+def gen_window(c: Ctx):
+    rng = c.rng
+    if rng.random() < 0.12:
+        return "window(action=minimize_all)", rng.choice(WIN_ALL), {}
+    action = rng.choice(list(WIN_PHRASES))
+    if rng.random() < 0.5:
+        return f"window(action={action})", rng.choice(WIN_PHRASES[action]).format(t=rng.choice(THIS_WINDOW)), {}
+    if rng.random() < 0.6:
+        key = rng.choice(list(LX.KNOWN_APPS))
+        val, surface = key, rng.choice([s for s in LX.KNOWN_APPS[key] if s not in ("the browser", "browser", "my computer")]
+                                       or LX.KNOWN_APPS[key])
+    else:
+        surface = rng.choice(LX.OTHER_APPS)
+        val = q(surface)
+    return f"window(action={action}, app={val})", rng.choice(WIN_PHRASES[action]).format(t=slot(surface)), {}
+
+
+DESKTOP_PHRASES = {
+    "new": ["new desktop", "create a new virtual desktop", "open a new desktop", "naya desktop banao", "add a desktop"],
+    "next": ["next desktop", "switch to the next desktop", "go to the right desktop", "agla desktop", "next virtual desktop"],
+    "previous": ["previous desktop", "go back a desktop", "switch to the left desktop", "pichla desktop",
+                 "previous virtual desktop"],
+    "close": ["close this desktop", "close the virtual desktop", "ye desktop band karo", "remove this desktop"],
+}
+MEDIA_PHRASES = {
+    "play_pause": ["pause", "pause the music", "resume", "resume playback", "pause the video", "play pause",
+                   "gaana roko", "music pause karo", "continue playing", "resume the song", "pause it"],
+    "next": ["next song", "next track", "skip", "skip this song", "play the next one", "agla gaana", "skip track"],
+    "previous": ["previous song", "previous track", "go back a song", "play the last song again", "pichla gaana",
+                 "last track"],
+    "stop": ["stop the music", "stop playback", "gaana band karo", "stop the song"],
+}
+BRIGHT_SET = ["set brightness to {n}", "brightness {n}", "brightness to {n} percent", "make the screen {n} percent bright",
+              "brightness {n} karo", "screen brightness {n} percent kar do", "set the screen brightness at {n}%"]
+BRIGHT_STEP = {"up": ["increase brightness", "brightness up", "make the screen brighter", "brighter please",
+                      "brightness badhao", "screen bright karo", "turn the brightness up"],
+               "down": ["decrease brightness", "dim the screen", "brightness down", "make the screen darker",
+                        "brightness kam karo", "screen dim karo", "turn the brightness down"]}
+VOLUME_SET = ["set volume to {n}", "volume {n} percent", "put the volume at {n}", "volume to {n}", "volume {n} kar do",
+              "awaaz {n} percent karo", "set the volume at {n}%"]
+RADIO_KIND = {"wifi": ["wifi", "wi-fi", "WiFi", "the wifi", "wireless"], "bluetooth": ["bluetooth", "BT", "the bluetooth"]}
+RADIO_PHRASES = {"on": ["turn on {k}", "enable {k}", "switch on {k}", "{k} on", "{k} on karo", "{k} chalu karo"],
+                 "off": ["turn off {k}", "disable {k}", "switch off {k}", "{k} off", "{k} off karo", "{k} band karo"]}
+SHOT_PHRASES = {
+    "full": ["take a screenshot", "screenshot", "capture the screen", "grab a screenshot of my screen", "screenshot le lo",
+             "screen capture karo", "screenshot the whole screen"],
+    "window": ["screenshot this window", "capture the current window", "copy a screenshot of this window",
+               "is window ka screenshot lo"],
+    "region": ["screenshot an area", "snip part of the screen", "take a partial screenshot",
+               "select an area to screenshot", "open the snipping tool", "screen ka hissa capture karo"],
+}
+RECORD_PHRASES = {"start": ["start recording", "record my screen", "start screen recording", "record this",
+                            "recording shuru karo", "screen record karo"],
+                  "stop": ["stop recording", "end the recording", "stop screen recording", "recording band karo",
+                           "finish recording"]}
+POWER_PHRASES = {
+    "shutdown": ["shut down", "shut down the pc", "turn off the computer", "power off", "shut down the laptop",
+                 "pc band karo", "computer band kar do"],
+    "restart": ["restart", "restart the pc", "reboot", "restart my computer", "pc restart karo", "reboot the system"],
+    "sleep": ["put the pc to sleep", "go to sleep mode", "sleep mode", "pc ko sula do", "suspend the computer"],
+    "sign_out": ["sign out", "log out", "log me out", "logout karo", "sign me out of windows"],
+    "cancel": ["cancel shutdown", "abort the shutdown", "don't shut down", "cancel the restart", "shutdown cancel karo",
+               "stop the shutdown"],
+}
+POWER_DELAY = {"shutdown": ["shut down in {d}", "shut down the pc after {d}", "turn off the computer in {d}",
+                            "{d} me pc band kar do", "power off in {d}"],
+               "restart": ["restart in {d}", "reboot after {d}", "restart the pc in {d}", "{d} baad restart karo"]}
+
+
+def _level(c: Ctx) -> tuple[int, str]:
+    n = c.rng.choice([0, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 100, c.rng.randint(0, 100)])
+    return n, slot(str(n))
+
+
+def gen_desktop(c: Ctx):
+    a = c.rng.choice(list(DESKTOP_PHRASES))
+    return f"desktop(action={a})", c.rng.choice(DESKTOP_PHRASES[a]), {}
+
+
+def gen_media(c: Ctx):
+    a = c.rng.choice(list(MEDIA_PHRASES))
+    return f"media(action={a})", c.rng.choice(MEDIA_PHRASES[a]), {}
+
+
+def gen_brightness(c: Ctx):
+    rng = c.rng
+    if rng.random() < 0.5:
+        n, surf = _level(c)
+        return f"brightness(level={n})", rng.choice(BRIGHT_SET).format(n=surf), {}
+    a = rng.choice(["up", "down"])
+    return f"brightness(action={a})", rng.choice(BRIGHT_STEP[a]), {}
+
+
+def gen_set_volume(c: Ctx):
+    n, surf = _level(c)
+    return f"set_volume(level={n})", c.rng.choice(VOLUME_SET).format(n=surf), {}
+
+
+def gen_radio(c: Ctx):
+    rng = c.rng
+    kind, state = rng.choice(["wifi", "bluetooth"]), rng.choice(["on", "off"])
+    return (f"radio(kind={kind}, state={state})",
+            rng.choice(RADIO_PHRASES[state]).format(k=rng.choice(RADIO_KIND[kind])), {})
+
+
+def gen_screenshot(c: Ctx):
+    mode = c.rng.choice(["full", "full", "window", "region"])
+    dsl = f"screenshot(mode={mode})"
+    return dsl, c.rng.choice(SHOT_PHRASES[mode]), {}
+
+
+def gen_record(c: Ctx):
+    a = c.rng.choice(["start", "stop"])
+    return f"screen_record(action={a})", c.rng.choice(RECORD_PHRASES[a]), {}
+
+
+def gen_power(c: Ctx):
+    rng = c.rng
+    a = rng.choice(list(POWER_PHRASES))
+    if a in POWER_DELAY and rng.random() < 0.4:
+        d, txt = duration(c, "delay")
+        return f"power(action={a}, after={d})", rng.choice(POWER_DELAY[a]).format(d=txt), {}
+    return f"power(action={a})", rng.choice(POWER_PHRASES[a]), {}
+
+
 GENERATORS = [
     (lambda c: gen_file_op(c, "move"), 14), (lambda c: gen_file_op(c, "copy"), 7),
     (lambda c: gen_file_op(c, "delete"), 8), (lambda c: gen_file_op(c, "list"), 6),
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 9),
+    (gen_window, 6), (gen_desktop, 2), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 2), (gen_radio, 3),
+    (gen_screenshot, 3), (gen_record, 1.5), (gen_power, 3),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",

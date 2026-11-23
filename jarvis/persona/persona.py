@@ -17,6 +17,13 @@ from .templates import (ACTION_PHRASES, ADDRESS_RATE, OP_VERBS, SITE_NAMES, SYST
 _WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"]
 _NOUN_EXT = {"pdf": "PDF", "exe": "installer", "msi": "installer", "apk": "APK", "iso": "ISO image"}
 _UNITS = {"m": "minute", "h": "hour", "d": "day", "w": "week"}
+APP_DISPLAY = {"vscode": "VS Code", "explorer": "File Explorer", "terminal": "Terminal", "chrome": "Chrome",
+               "edge": "Edge", "notepad": "Notepad", "spotify": "Spotify", "calculator": "Calculator",
+               "settings": "Settings"}
+
+
+def app_name(v: str) -> str:
+    return APP_DISPLAY.get(str(v).lower(), str(v))
 
 
 def _cap(s: str) -> str:
@@ -111,7 +118,8 @@ class Persona:
             shown = ", ".join(r.items[:5]) + (f", and {len(r.items) - 5} more" if len(r.items) > 5 else "")
             return "list", {**f, "items": shown}
         if k == "open":
-            name = folder_name(d["name"]) if d["what"] == "folder" else d["name"]
+            name = folder_name(d["name"]) if d["what"] == "folder" else app_name(d["name"]) if d["what"] == "app" \
+                else d["name"]
             return f"open_{d['what']}", {"name": name}
         if k == "remind":
             return "remind", {"text": d["text"], "when": self.when(d["due"], d.get("relative", False))}
@@ -128,6 +136,25 @@ class Persona:
             return "unsupported", {"request": _lower_first(d["request"])}
         if k == "unknown":
             return "unknown", {}
+        if k == "window":
+            return f"window_{d['action']}", {"target": app_name(d["app"]) if d.get("app") else "the window"}
+        if k == "desktop":
+            return f"desktop_{d['action']}", {}
+        if k == "media":
+            return f"media_{d['action']}", {}
+        if k == "brightness":
+            key = "brightness_set" if d.get("action") == "set" else f"brightness_{d['action']}"
+            return key, {"level": str(d.get("level", ""))}
+        if k == "volume_set":
+            return "volume_set", {"level": str(d["level"])}
+        if k == "radio":
+            return f"radio_{d['state']}", {"device": "Wi-Fi" if d["kind"] == "wifi" else "Bluetooth"}
+        if k == "screenshot":
+            return f"screenshot_{d['mode']}", {}
+        if k == "record":
+            return f"record_{d['action']}", {}
+        if k == "power":
+            return f"power_{d['action']}", {"delay": self.delay(d.get("seconds", 30))}
         if k == "undo":
             if d.get("cancelled"):
                 return "undo_cancelled", {}
@@ -142,6 +169,12 @@ class Persona:
             return f"confirm_{d['op']}", self._file_fields(d)
         if preview.kind == "system":
             return "confirm_system", {"action_phrase": SYSTEM_PHRASES.get(d["action"], d["action"])}
+        if preview.kind == "window":
+            return f"confirm_window_{d['action']}", {"target": app_name(d["app"]) if d.get("app") else "the window"}
+        if preview.kind == "radio":
+            return f"confirm_radio_{d['state']}", {"device": "Wi-Fi" if d["kind"] == "wifi" else "Bluetooth"}
+        if preview.kind == "power":
+            return f"confirm_power_{d['action']}", {"delay": self.delay(d.get("seconds", 30))}
         return "", {"summary": preview.summary}
 
     def plan_error(self, action: str, e: Exception) -> tuple[str, dict]:
@@ -152,6 +185,12 @@ class Persona:
             return "err_outside", {"name": _basename(msg.split(" is outside")[0])}
         if isinstance(e, SafetyError) and "cap is" in msg:
             return "err_too_many", {}
+        if type(e).__name__ == "NoWindowFound":
+            name = msg.replace("no open window for ", "") if msg.startswith("no open window for ") else ""
+            if name:
+                return "err_no_window", {"name": name}
+        if type(e).__name__ == "NotOnWindows":
+            return "err_not_windows", {}
         return "err_other", {"action_phrase": ACTION_PHRASES.get(action, action), "error": msg}
 
     def speak(self, key: str, fields: dict) -> str:
@@ -199,6 +238,15 @@ class Persona:
         day = "today" if due_dt.date() == now_dt.date() else \
             "tomorrow" if due_dt.date() == (now_dt + dt.timedelta(days=1)).date() else due_dt.strftime("on %A")
         return f"at {clock} {day}"
+
+    def delay(self, seconds: int) -> str:
+        if seconds < 60:
+            return f"{self._num(seconds, False)} seconds"
+        mins = round(seconds / 60)
+        if mins < 60:
+            return f"{self._num(mins, False)} minute{'s' if mins != 1 else ''}"
+        hours = round(mins / 60)
+        return f"{self._num(hours, False)} hour{'s' if hours != 1 else ''}"
 
     def reminder_due(self, text: str) -> str:
         return self.speak("reminder_due", {"text": text})

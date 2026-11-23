@@ -54,7 +54,7 @@ def smalltalk(text: str, p: Persona, now: dt.datetime | None = None) -> str | No
             return f"I'm {p.name}, your personal assistant. Every model I run on was trained from scratch on this PC."
         if intent == "can":
             return ("I can move, copy, list and delete files, open apps, websites and folders, play music and "
-                    "videos, search the web, set reminders, and control volume, lock and the display. Type /help "
+                    "videos (or music that fits your mood: try 'i'm feeling low'), search the web, set reminders, and control volume, lock and the display. Type /help "
                     "for commands like /fix and /status.")
         if intent == "thanks":
             return {"butler": f"You're most welcome{a}.", "friendly": "Anytime!", "minimal": "Welcome."}[p.tone]

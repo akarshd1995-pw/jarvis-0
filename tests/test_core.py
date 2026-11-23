@@ -867,3 +867,31 @@ def test_hinglish_and_polite_play_rules():
     from jarvis.nlu.rule_parser import rule_parse
     for text in ["super machi chalao", "super machi song bajao", "can you play super machi please", "jarvis play super machi"]:
         assert str(rule_parse(text)) == 'play_media(query="super machi", site=youtube)', text
+
+
+# ---------------------------------------------------------------- mood -> kind reply + fitting music
+def test_mood_detection():
+    from jarvis.persona import mood
+    assert mood.detect("i am feeling low, play some music to lift my mood").wants_music
+    assert mood.detect("mood kharab hai kuch gaana lagao").playlist == "feel good hindi songs"
+    assert mood.detect("i'm so stressed, play something").kind == "stressed"
+    assert not mood.detect("my mood is bad").wants_music                  # offer first, play on "yes"
+    assert mood.detect("i want to die").kind == "crisis"
+    for t in ["play sad songs", "play dear god", "open chrome", "i'm down to play some games", "what's up"]:
+        assert mood.detect(t) is None, t
+
+
+def test_mood_flow_plays_and_offers(env, tmp_path):
+    from jarvis.daemon import Jarvis
+    cfg, store, dl, arc = env
+    j = Jarvis(cfg, lambda *a: True, data_root=tmp_path / "d")
+    ran = []
+    real_run = j.executor.run
+    j.executor.run = lambda prog: (ran.append(str(prog)), real_run(parse("list_files(src=Downloads)")))[1]
+    j.handle("i am feeling low, play some music to lift my mood")
+    assert ran[-1] == 'play_media(mode=playlist, query="feel good happy songs", site=youtube)'
+    reply = j.handle("my mood is bad")
+    assert "yes" in reply.lower() and len(ran) == 1                       # offered, nothing played yet
+    j.handle("yes")
+    assert len(ran) == 2
+    assert "14416" in j.handle("i want to die") and len(ran) == 2         # never a playlist

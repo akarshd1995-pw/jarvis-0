@@ -11,11 +11,12 @@ from pathlib import Path
 from .collectors.focus import FocusCollector
 from .collectors.folders import FolderWatcher
 from .config import Config
-from .dsl.grammar import DSLError, canonical
+from .dsl.grammar import DSLError, canonical, parse
 from .actions.base import ActionResult
 from .executor import Executor
 from .nlu.brain import Brain
 from .persona import Persona, smalltalk
+from .persona import mood
 from .safety import Tier
 from .store import Store
 
@@ -181,8 +182,51 @@ class Jarvis:
             raise
         return reply
 
+    def _mood(self, text: str) -> str | None:
+        """How you feel -> a kind reply, and music that fits (now, or after you say yes)."""
+        offer, self._mood_offer = getattr(self, "_mood_offer", None), None
+        if offer is not None and mood.YES.match(text.strip()):
+            return self._play_mood(offer, empathy_first=False)
+        m = mood.detect(text)
+        if m is None:
+            return None
+        self.store.log_event("mood", {"kind": m.kind})       # only the kind, never the text
+        if m.kind == "crisis":
+            reply = mood.crisis_reply(m, self.persona)
+            self._hud("idle", reply, hold=4)
+            return reply
+        if m.wants_music:
+            return self._play_mood(m)
+        self._mood_offer = m
+        reply = f"{mood.empathy(m, self.persona)} {mood.offer_line(m, self.persona)}"
+        self._hud("idle", reply, hold=3)
+        return self._with_details(reply, "mood", None)
+
+    def _play_mood(self, m, empathy_first: bool = True) -> str:
+        prog = parse(m.program)
+        self.last_program = str(prog)
+        report = self.executor.run(prog)
+        if report.failures:
+            reply = self.persona.report(report)
+            self._hud("error", reply, hold=2)
+        else:
+            line = mood.playing_line(m, self.persona)
+            reply = f"{mood.empathy(m, self.persona)} {line}" if empathy_first else line
+            self._hud("success", reply, hold=2)
+        return self._with_details(reply, "mood", prog, report)
+
     def _handle(self, text: str) -> str:
         prog, source = self.brain.resolve(text)
+        # Feelings win only when the sentence isn't a real command ("i'm tired of these pdfs, delete them" stays a delete);
+        # crisis words always win.
+        is_command = prog is not None and any(c.action not in ("unknown", "unsupported", "play_media", "search_web")
+                                              for c in prog.calls)
+        if not is_command or mood.detect(text) is not None and mood.detect(text).kind == "crisis":
+            moody = self._mood(text)
+            if moody is not None:
+                return moody
+        else:
+            self._mood_offer = None
         self.last_text, self.last_program = text.strip(), (str(prog) if prog else None)
         self.store.log_event("command", {"text_len": len(text), "source": source,
                                          "program": str(prog) if prog else None})

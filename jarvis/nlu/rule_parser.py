@@ -78,6 +78,21 @@ def _window(action: str, target: str) -> str:
 
 RULES: list[tuple[re.Pattern, callable]] = [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
+    # richer play modes first: latest upload of a channel, playlist, live, open a channel
+    (re.compile(r"^(?:play|watch|put on|open) (?:the )?(?:latest|newest|new|recent|most recent|last) (?:video|upload)s? "
+                r"(?:of|from|by|on) (?:the )?(.+?)(?: channel)?(?: on youtube)?$", re.I),
+     lambda m, t: f'play_media(query="{m.group(1)}", mode=latest, site=youtube)'),
+    (re.compile(r"^(?:play|watch|put on) (.+?)(?:'s|s'|')? (?:channel'?s? )?(?:latest|newest|new|recent|most recent|last) "
+                r"(?:video|upload)s?(?: on youtube)?$", re.I),
+     lambda m, t: f'play_media(query="{m.group(1)}", mode=latest, site=youtube)'),
+    (re.compile(r"^(.+?) (?:ka|ki|ke) (?:latest|nayi|naya|new) (?:video|vid) (?:chalao|lagao|play karo|dikhao)$", re.I),
+     lambda m, t: f'play_media(query="{m.group(1)}", mode=latest, site=youtube)'),
+    (re.compile(r"^open (?:the )?(.+?) (?:youtube )?channel(?: on youtube)?$", re.I),
+     lambda m, t: f'play_media(query="{m.group(1)}", mode=channel, site=youtube)'),
+    (re.compile(r"^(?:play|put on) (?:a |an |some )?(.+?) (?:playlist|mix)(?: on youtube)?$", re.I),
+     lambda m, t: f'play_media(query="{m.group(1)}", mode=playlist, site=youtube)'),
+    (re.compile(r"^(?:play|watch) (.+?) live(?: ?stream)?(?: on youtube)?$", re.I),
+     lambda m, t: f'play_media(query="{m.group(1)}", mode=live, site=youtube)'),
     (re.compile(r"^(?:open (?:youtube|spotify) and )?(?:play|put on|stream) (.+?) on (youtube|spotify)$", re.I),
      lambda m, t: f'play_media(query="{m.group(1)}", site={m.group(2).lower()})'),
     (re.compile(r"^open (youtube|spotify) and (?:play|put on|stream) (.+)$", re.I),
@@ -170,7 +185,7 @@ RULES: list[tuple[re.Pattern, callable]] = [
 
 def rule_parse(text: str) -> Program | None:
     text = text.strip().rstrip(".!")
-    for pattern, build in RULES[:7]:   # whole-sentence play/search rules ("open youtube and play X") go first
+    for pattern, build in RULES[:13]:  # whole-sentence play/search rules ("open youtube and play X") go first
         m = pattern.search(text)
         if m:
             try:

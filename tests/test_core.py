@@ -762,3 +762,79 @@ def test_linearize_keeps_every_fact_the_persona_can_produce():
         key, fields = G.random_case(rng, p)
         missing = {k for k in fields if k[:1].islower() and k not in FIELD_ORDER and k != "summary"}
         assert not missing, (key, missing)
+
+
+# ------------------------------------------------------------------ richer play: latest / playlist / live / channel
+def _yt_fetch(url):
+    if "sp=EgIQAg" in url:
+        return 'x "channelRenderer":{"channelId":"UCAAAAAAAAAAAAAAAAAAAAAA","title"'
+    if "feeds/videos.xml" in url:
+        return ("<feed><title>Yes Theory</title><entry><yt:videoId>abcDEF12345</yt:videoId>"
+                "<title>We Lived With Strangers &amp; Friends</title></entry></feed>")
+    if "sp=EgIQAw" in url:
+        return '"playlistRenderer":{"playlistId":"PLxyz123","title"'
+    if "sp=EgJAAQ" in url:
+        return '"videoRenderer":{"videoId":"LIVEvid1234",'
+    return '"videoRenderer":{"videoId":"TOPvid12345",'
+
+
+@pytest.mark.parametrize("mode,expect", [
+    ("latest", "watch?v=abcDEF12345"), ("playlist", "list=PLxyz123"), ("live", "watch?v=LIVEvid1234"),
+    ("channel", "/channel/UCAAAAAAAAAAAAAAAAAAAAAA"), ("top", "watch?v=TOPvid12345")])
+def test_play_modes_open_the_right_thing(env, monkeypatch, mode, expect):
+    import jarvis.actions.system as S
+    from jarvis.actions.base import Ctx
+    cfg, store, dl, arc = env
+    opened = []
+    monkeypatch.setattr(S.webbrowser, "open", lambda url: opened.append(url))
+    r = S.play_media({"query": "yes theory", "site": "youtube", "mode": mode}, Ctx(cfg, store, "b"), False,
+                     fetch=_yt_fetch)
+    assert expect in opened[-1] and not r.data.get("fallback")
+    if mode == "latest":
+        assert r.data["title"] == "We Lived With Strangers & Friends" and r.data["channel"] == "Yes Theory"
+
+
+def test_play_latest_falls_back_to_results(env, monkeypatch):
+    import jarvis.actions.system as S
+    from jarvis.actions.base import Ctx
+    cfg, store, dl, arc = env
+    opened = []
+    monkeypatch.setattr(S.webbrowser, "open", lambda url: opened.append(url))
+    r = S.play_media({"query": "301 diaries", "mode": "latest"}, Ctx(cfg, store, "b"), False, fetch=lambda u: 1 / 0)
+    assert r.data["fallback"] and "results?search_query=301+diaries" in opened[-1]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("play 301 diaries latest video", 'play_media(mode=latest, query="301 diaries", site=youtube)'),
+    ("play the latest video from yes theory", 'play_media(mode=latest, query="yes theory", site=youtube)'),
+    ("carryminati ki latest video chalao", 'play_media(mode=latest, query="carryminati", site=youtube)'),
+    ("play a lofi playlist", 'play_media(mode=playlist, query="lofi", site=youtube)'),
+    ("play lofi girl live", 'play_media(mode=live, query="lofi girl", site=youtube)'),
+    ("open yes theory channel", 'play_media(mode=channel, query="yes theory", site=youtube)'),
+])
+def test_rules_play_modes(text, expected):
+    assert str(rule_parse(text)) == expected
+
+
+def test_old_model_output_is_normalized():
+    from jarvis.nlu.brain import upgrade_play
+    for raw, text, want in [
+        ('play_media(query="301 diaries latest video", site=youtube)', "play 301 diaries latest video",
+         'play_media(mode=latest, query="301 diaries", site=youtube)'),
+        ('search_web(query="yes theory latest video", site=youtube)', "play yes theory latest video",
+         'play_media(mode=latest, query="yes theory", site=youtube)'),
+        ('play_media(query="dhruv rathee ka latest video", site=youtube)', "dhruv rathee ka latest video chalao",
+         'play_media(mode=latest, query="dhruv rathee", site=youtube)'),
+        ('play_media(query="dear god", site=youtube)', "play dear god", 'play_media(query="dear god", site=youtube)'),
+    ]:
+        assert str(upgrade_play(parse(raw), text)) == want
+
+
+def test_persona_play_latest_mentions_channel_and_title():
+    from jarvis.actions.base import ActionResult as AR
+    from jarvis.persona import Persona
+    for tone in ("butler", "friendly", "minimal"):
+        out = Persona(tone=tone, seed=0).result(AR("", kind="play", data={
+            "query": "yes theory", "site": "youtube", "mode": "latest", "title": "We Lived With Strangers",
+            "channel": "Yes Theory"}))
+        assert "Yes Theory" in out and "We Lived With Strangers" in out

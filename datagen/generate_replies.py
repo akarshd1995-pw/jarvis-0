@@ -92,9 +92,21 @@ def random_case(rng: random.Random, p: Persona) -> tuple[str, dict]:
         site = rng.choice(list(SITE_NAMES))
         return p.plan(AR("", kind="search", data={"query": LX.web_query(rng, site), "site": site}))
     if r < 0.82:
-        site = "spotify" if rng.random() < 0.2 else "youtube"
-        return p.plan(AR("", kind="play", data={"query": LX.web_query(rng, site), "site": site,
-                                                 "fallback": site == "youtube" and rng.random() < 0.1}))
+        site = "spotify" if rng.random() < 0.15 else "youtube"
+        mode = "top" if site == "spotify" else rng.choice(["top", "top", "latest", "latest", "playlist", "live", "channel"])
+        if mode == "latest":
+            ch = LX.creator(rng)
+            title = rng.choice([f"{LX.pseudo_word(rng).capitalize()} {rng.choice(['Challenge', 'Vlog', 'Review', 'Explained'])}",
+                                f"I Tried {LX.pseudo_word(rng).capitalize()} for {rng.randint(2, 100)} Days",
+                                f"{rng.choice(LX.TOPICS).title()} in {rng.randint(3, 30)} Minutes",
+                                f"We Went to {LX.pseudo_word(rng).capitalize()}"])
+            return p.plan(AR("", kind="play", data={"query": ch, "site": "youtube", "mode": "latest", "title": title,
+                                                     "channel": ch}))
+        query = {"top": LX.song_query(rng) if site == "spotify" or rng.random() < 0.6 else LX.video_query(rng),
+                 "playlist": rng.choice(LX.GENRES_MORE), "live": rng.choice(LX.LIVE_THINGS),
+                 "channel": LX.creator(rng)}[mode]
+        return p.plan(AR("", kind="play", data={"query": query, "site": site, "mode": mode,
+                                                 "fallback": site == "youtube" and rng.random() < 0.08}))
     if r < 0.84:
         return p.plan(AR("", kind="memory", data={"query": LX.search_query(rng)}))
     if r < 0.89:

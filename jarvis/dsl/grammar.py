@@ -70,8 +70,9 @@ SCHEMA: dict[str, dict] = {
                       "enum": {"site": ["google", "youtube", "amazon", "flipkart", "swiggy", "zomato", "github",
                                         "stackoverflow", "wikipedia", "spotify", "maps", "reddit", "linkedin"]}},
     "unsupported":   {"args": {"request": "str"}, "required": ["request"]},
-    "play_media":    {"args": {"query": "str", "site": "ident"}, "required": ["query"],   # play, not just search
-                      "enum": {"site": ["youtube", "spotify"]}},
+    "play_media":    {"args": {"query": "str", "site": "ident", "mode": "ident"}, "required": ["query"],
+                      "enum": {"site": ["youtube", "spotify"],     # play, not just search
+                               "mode": ["top", "latest", "playlist", "live", "channel"]}},
     # ---- phase 5: full system control
     "window":        {"args": {"action": "ident", "app": "ident|str"}, "required": ["action"],
                       "enum": {"action": ["snap_left", "snap_right", "maximize", "minimize", "restore", "close",

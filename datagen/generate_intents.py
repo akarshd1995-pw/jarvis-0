@@ -582,27 +582,71 @@ NOSITE_GOOGLE = ["google {qs}", "search the web for {qs}", "search online for {q
 
 
 def gen_search_web(c: Ctx):
+    """Searches (results pages). Playing things is gen_play."""
     rng = c.rng
     site = rng.choice(list(LX.SEARCH_SITES))
-    r = rng.random()
-    if r < 0.15:                                  # "play X" with no site -> play it on YouTube
-        query = LX.web_query(rng, "youtube")
-        return f"play_media(query={q(query)}, site=youtube)", rng.choice(NOSITE_MUSIC).format(qs=slot(query)), {}
-    if r < 0.25:                                  # "google X" -> Google
+    if rng.random() < 0.12:                       # "google X" -> Google
         query = LX.web_query(rng, "google")
         return f"search_web(query={q(query)}, site=google)", rng.choice(NOSITE_GOOGLE).format(qs=slot(query)), {}
-    query = LX.web_query(rng, site)
-    tpl = c.T(WEB_HI if c.hing else WEB_EN)
     if site in ("youtube", "spotify"):
-        kind = "play" if rng.random() < 0.6 else "music_search"
-        if "{v}" not in tpl and "{hv}" not in tpl:   # e.g. "search {site} for {qs}"
-            kind = "music_search"
+        query = LX.video_query(rng) if site == "youtube" and rng.random() < 0.5 else LX.song_query(rng)
+        kind = "music_search"
     else:
-        kind = "other"
+        query, kind = LX.web_query(rng, site), "other"
+    tpl = c.T(WEB_HI if c.hing else WEB_EN)
     text = tpl.format(v=rng.choice(WEB_V[kind]), hv=rng.choice(WEB_HV[kind]), qs=slot(query),
                       site=slot(rng.choice(LX.SEARCH_SITES[site])))
-    action = "play_media" if kind == "play" else "search_web"
-    return f"{action}(query={q(query)}, site={site})", text, {}
+    return f"search_web(query={q(query)}, site={site})", text, {}
+
+
+# ---------------------------------------------------------------- playing things (vast): top / latest / playlist / live / channel
+PLAY_TOP_EN = ["play {q}", "put on {q}", "play {q} on youtube", "can you play {q}", "i want to listen to {q}",
+               "play me {q}", "play the song {q}", "play the video {q}", "watch {q}", "i want to watch {q}",
+               "play {q} for me", "youtube {q} play karo", "open youtube and play {q}", "play {q} please",
+               "could you put on {q}", "let's listen to {q}", "throw on {q}"]
+PLAY_TOP_HI = ["{q} chalao", "{q} bajao", "{q} lagao", "youtube pe {q} chalao", "{q} play karo", "{q} sunao",
+               "zara {q} chala do", "{q} ka gaana bajao", "youtube pe {q} lagao"]
+PLAY_LATEST_EN = ["play {c} latest video", "play the latest video from {c}", "play {c}'s newest video",
+                  "play {c}'s latest upload", "play the new {c} video", "watch {c}'s latest video",
+                  "play the most recent {c} video", "put on the newest {c} upload", "play {c} latest video on youtube",
+                  "open youtube and play the latest video from {c}", "what did {c} upload last? play it",
+                  "play the latest {c} video", "watch the newest video by {c}", "play {c}'s last video",
+                  "play the latest upload from {c}", "i want to watch {c}'s newest video"]
+PLAY_LATEST_HI = ["{c} ka latest video chalao", "{c} ki nayi video lagao", "{c} ka naya video dikhao",
+                  "latest {c} video play karo", "{c} ka last video chalao", "youtube pe {c} ka latest video chalao",
+                  "{c} ki latest video dikhao"]
+PLAY_PLAYLIST = ["play a {g} playlist", "put on some {g} mix", "play {g} playlist", "play a {g} mix on youtube",
+                 "{g} playlist chalao", "{g} mix lagao", "play the best {g} playlist", "start a {g} playlist"]
+PLAY_LIVE = ["play {e} live", "watch the {e} live stream", "put on {e} live", "{e} live chalao", "play the {e} livestream",
+             "watch {e} live", "open {e} live on youtube"]
+OPEN_CHANNEL = ["open {c} channel", "go to {c}'s youtube channel", "show me {c}'s channel", "{c} ka channel kholo",
+                "open the {c} youtube channel", "take me to {c}'s channel"]
+PLAY_SPOTIFY = ["play {q} on spotify", "spotify pe {q} chalao", "put on {q} on spotify", "open spotify and play {q}"]
+
+
+def gen_play(c: Ctx):
+    rng = c.rng
+    r = rng.random()
+    if r < 0.38:                                                   # the top result
+        query = LX.song_query(rng) if rng.random() < 0.6 else LX.video_query(rng)
+        tpl = rng.choice(PLAY_TOP_HI if c.hing else PLAY_TOP_EN)
+        return f"play_media(query={q(query)}, site=youtube)", tpl.format(q=slot(query)), {}
+    if r < 0.65:                                                   # newest upload of a channel
+        ch = LX.creator(rng)
+        surf = ch if rng.random() < 0.7 else ch.lower()
+        tpl = rng.choice(PLAY_LATEST_HI if c.hing else PLAY_LATEST_EN)
+        return f"play_media(mode=latest, query={q(surf)}, site=youtube)", tpl.format(c=slot(surf)), {}
+    if r < 0.77:
+        g = rng.choice(LX.GENRES_MORE + LX.ARTISTS_MORE[:20])
+        return f"play_media(mode=playlist, query={q(g)}, site=youtube)", rng.choice(PLAY_PLAYLIST).format(g=slot(g)), {}
+    if r < 0.85:
+        e = rng.choice(LX.LIVE_THINGS)
+        return f"play_media(mode=live, query={q(e)}, site=youtube)", rng.choice(PLAY_LIVE).format(e=slot(e)), {}
+    if r < 0.93:
+        ch = LX.creator(rng)
+        return f"play_media(mode=channel, query={q(ch)}, site=youtube)", rng.choice(OPEN_CHANNEL).format(c=slot(ch)), {}
+    query = LX.song_query(rng)
+    return f"play_media(query={q(query)}, site=spotify)", rng.choice(PLAY_SPOTIFY).format(q=slot(query)), {}
 
 
 # ---------------------------------------------------------------- safety data: negations and fragments -> unknown()
@@ -811,7 +855,7 @@ GENERATORS = [
     (lambda c: gen_file_op(c, "move"), 14), (lambda c: gen_file_op(c, "copy"), 7),
     (lambda c: gen_file_op(c, "delete"), 8), (lambda c: gen_file_op(c, "list"), 6),
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
-    (gen_system, 7), (gen_search, 6), (gen_search_web, 9),
+    (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 2), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 2), (gen_radio, 3),
     (gen_screenshot, 3), (gen_record, 1.5), (gen_power, 3), (gen_training, 2),
 ]

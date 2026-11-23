@@ -128,8 +128,16 @@ class Persona:
         if k == "search":
             return "search", {"site": SITE_NAMES.get(d["site"], d["site"]), "query": d["query"]}
         if k == "play":
-            key = "play_fallback" if d.get("fallback") else ("play_spotify" if d["site"] == "spotify" else "play")
-            return key, {"query": d["query"]}
+            mode = d.get("mode", "top")
+            if d.get("fallback"):
+                return "play_fallback", {"query": d["query"]}
+            if d["site"] == "spotify":
+                return "play_spotify", {"query": d["query"]}
+            if mode == "latest" and d.get("title"):
+                return "play_latest", {"channel": d.get("channel") or d["query"], "title": d["title"]}
+            if mode in ("playlist", "live", "channel"):
+                return f"play_{mode}", {"query": d["query"]}
+            return "play", {"query": d["query"]}
         if k == "memory":
             return "memory", {"query": d["query"]}
         if k == "unsupported":

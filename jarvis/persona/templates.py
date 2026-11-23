@@ -262,3 +262,25 @@ _MON = {
 for _tone, _keys in _MON.items():
     T[_tone].update(_keys)
 ACTION_PHRASES["training"] = "control training"
+
+# ------------------------------------------------------------------ richer play modes
+_PLAY = {
+    "butler": {
+        "play_latest": ["Playing the latest from {channel}{A}: {title}.", "Here's {channel}'s newest video{A}: {title}.",
+                        "{Channel} just posted {title}. Playing it now."],
+        "play_playlist": ["Playing a {query} playlist{A}.", "Here's a {query} playlist for you."],
+        "play_live": ["Tuning in to {query} live{A}.", "Here's the {query} live stream."],
+        "play_channel": ["Opening the {query} channel{A}.", "Here's {query} on YouTube."],
+    },
+    "friendly": {
+        "play_latest": ["Here's the newest from {channel}: {title}!", "{Channel}'s latest: {title}. Enjoy!"],
+        "play_playlist": ["Putting on a {query} playlist!"], "play_live": ["Going live with {query}!"],
+        "play_channel": ["Here's the {query} channel."],
+    },
+    "minimal": {
+        "play_latest": ["{Channel}: {title}."], "play_playlist": ["Playlist: {query}."], "play_live": ["Live: {query}."],
+        "play_channel": ["Channel: {query}."],
+    },
+}
+for _tone, _keys in _PLAY.items():
+    T[_tone].update(_keys)

@@ -152,41 +152,49 @@ def unsupported(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
 
 
 # ------------------------------------------------------------ play media
-_YT_VIDEO = re.compile(r'"videoRenderer":\{"videoId":"([\w-]{11})"')
-_YT_ANY = re.compile(r'"videoId":"([\w-]{11})"')
+from . import youtube as yt  # noqa: E402
 
 
 def first_youtube_video(query: str, fetch=None, timeout: float = 5.0) -> str | None:
-    """Find the top video for a query by reading YouTube's public results page (no API key).
-    Returns a video id, or None if the page can't be fetched or parsed (YouTube may change it)."""
-    url = search_url(query, "youtube")
-    try:
-        if fetch is None:
-            import urllib.request
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                                                       "Accept-Language": "en-US,en;q=0.9"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                html = r.read().decode("utf-8", "ignore")
-        else:
-            html = fetch(url)
-    except Exception:
-        return None
-    m = _YT_VIDEO.search(html) or _YT_ANY.search(html)
-    return m.group(1) if m else None
+    """Kept for compatibility: the top video for a query."""
+    return yt.top_video(query, fetch)
 
 
 def play_media(args: dict, ctx: Ctx, dry_run: bool, fetch=None) -> ActionResult:
+    """mode: top (default) | latest (newest upload of a channel) | playlist | live | channel (open the channel)."""
     query, site = args["query"], str(args.get("site", "youtube"))
+    mode = str(args.get("mode", "top"))
+    data = {"query": query, "site": site, "mode": mode}
     if site == "spotify":
         if not dry_run:
             _startfile(f"spotify:search:{quote(query)}")   # opens the Spotify app on the search
-        return ActionResult(f'Opening "{query}" in Spotify', kind="play", data={"query": query, "site": "spotify"})
+        return ActionResult(f'Opening "{query}" in Spotify', kind="play", data=data)
     if dry_run:
-        return ActionResult(f'Will play "{query}" on YouTube', kind="play", data={"query": query, "site": "youtube"})
-    vid = first_youtube_video(query, fetch=fetch)
-    if vid:
-        webbrowser.open(f"https://www.youtube.com/watch?v={vid}")
-        return ActionResult(f'Playing "{query}" on YouTube', kind="play", data={"query": query, "site": "youtube"})
-    webbrowser.open(search_url(query, "youtube"))
-    return ActionResult(f'Couldn\'t pick a video automatically, opened YouTube results for "{query}"', kind="play",
-                        data={"query": query, "site": "youtube", "fallback": True})
+        return ActionResult(f'Will play "{query}" on YouTube ({mode})', kind="play", data=data)
+    url = None
+    if mode == "latest":
+        found = yt.latest_video(query, fetch)
+        if found:
+            vid, title, channel = found
+            url = f"https://www.youtube.com/watch?v={vid}"
+            data.update(title=title, channel=channel)
+    elif mode == "playlist":
+        pid = yt.playlist(query, fetch)
+        url = f"https://www.youtube.com/playlist?list={pid}&play=1" if pid else None
+        if pid:
+            vid = yt.top_video(query + " playlist", fetch)
+            url = f"https://www.youtube.com/watch?v={vid}&list={pid}" if vid else url
+    elif mode == "live":
+        vid = yt.live_video(query, fetch)
+        url = f"https://www.youtube.com/watch?v={vid}" if vid else None
+    elif mode == "channel":
+        url = yt.channel_url(query, fetch)
+    else:
+        vid = yt.top_video(query, fetch)
+        url = f"https://www.youtube.com/watch?v={vid}" if vid else None
+    if url:
+        webbrowser.open(url)
+        return ActionResult(f'Playing "{query}" on YouTube ({mode})', kind="play", data=data)
+    webbrowser.open(yt.results_url(query))
+    return ActionResult(f'Couldn\'t find that automatically, opened YouTube results for "{query}"', kind="play",
+                        data={**data, "fallback": True})

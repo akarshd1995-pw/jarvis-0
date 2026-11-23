@@ -310,3 +310,105 @@ def num_surface(rng: random.Random, n: int, hinglish: bool = False) -> str:
         if n in EN_TENS:
             return EN_TENS[n]
     return str(n)
+
+
+# ---------------------------------------------------------------- media (vast): creators, songs, artists, shows
+CREATORS = [
+    "Yes Theory", "301 Diaries", "MKBHD", "Marques Brownlee", "Linus Tech Tips", "Veritasium", "Kurzgesagt", "3Blue1Brown",
+    "Fireship", "Two Minute Papers", "Computerphile", "Mrwhosetheboss", "Unbox Therapy", "Dave2D", "MrBeast",
+    "Dude Perfect", "Mark Rober", "Vsauce", "Tom Scott", "Johnny Harris", "Vox", "Wendover Productions", "Ali Abdaal",
+    "Casey Neistat", "Peter McKinnon", "Mrwhosetheboss", "Lofi Girl", "TED", "TEDx Talks", "BBC News", "WION",
+    "CarryMinati", "BB Ki Vines", "Ashish Chanchlani", "Dhruv Rathee", "Technical Guruji", "Trakin Tech", "BeerBiceps",
+    "Mostly Sane", "Zakir Khan", "Tanmay Bhat", "Samay Raina", "Physics Wallah", "Apna College", "CodeWithHarry",
+    "Striver", "Love Babbar", "Mumbiker Nikhil", "Sourav Joshi Vlogs", "Flying Beast", "Ankur Warikoo", "Think School",
+    "Abhi and Niyu", "Bhuvan Bam", "The Ranveer Show", "Nischa", "Kunal Shah", "Andrej Karpathy", "Yannic Kilcher",
+    "StatQuest", "sentdex", "Corey Schafer", "Traversy Media", "The Primeagen", "Theo", "NetworkChuck", "Ben Eater",
+    "Sebastian Lague", "Brackeys", "Code Bullet", "Stuff Made Here", "Michael Reeves", "Smarter Every Day",
+    "Real Engineering", "Lemmino", "Kitboga", "Matt D'Avella", "Nas Daily", "Drew Binsky", "Mark Wiens",
+    "Gaurav Taneja", "Harsh Beniwal", "Round2Hell", "Elvish Yadav", "Triggered Insaan", "Fukra Insaan",
+    "Slayy Point", "Prajakta Koli", "Kabita's Kitchen", "Ranveer Brar", "Nisha Madhulika", "Gordon Ramsay",
+    "Joshua Weissman", "Binging with Babish", "Formula 1", "ICC", "IPL", "ESPNcricinfo", "Netflix India", "T-Series",
+]
+CREATOR_SUFFIX = ["Vlogs", "Tech", "Diaries", "TV", "Official", "Studios", "Podcast", "Gaming", "Kitchen", "Talks",
+                  "Explained", "Live", "Shorts", "Academy", "Films", "Music"]
+
+
+def creator(rng: random.Random) -> str:
+    r = rng.random()
+    if r < 0.65:
+        return rng.choice(CREATORS)
+    if r < 0.85:
+        return f"{pseudo_word(rng).capitalize()} {rng.choice(CREATOR_SUFFIX)}"
+    if r < 0.93:
+        return f"{rng.randint(2, 999)} {rng.choice(CREATOR_SUFFIX)}"
+    return pseudo_word(rng).capitalize()
+
+
+SONGS_MORE = [
+    "dear god", "tum hi ho", "kesariya", "shape of you", "believer", "blinding lights", "night changes", "perfect",
+    "bohemian rhapsody", "chaiyya chaiyya", "apna bana le", "heeriye", "calm down", "starboy", "photograph",
+    "levitating", "the nights", "faded", "senorita", "channa mereya", "raataan lambiyan", "kal ho naa ho", "agar tum saath ho",
+    "tere vaaste", "satranga", "pasoori", "jhoome jo pathaan", "naatu naatu", "srivalli", "maan meri jaan", "excuses",
+    "brown munde", "295", "lover", "summer high", "o maahi", "chaleya", "husn", "baarishein", "alag aasmaan",
+    "bairan", "jo tum mere ho", "hotel california", "stairway to heaven", "numb", "in the end", "yellow", "fix you",
+    "viva la vida", "see you again", "counting stars", "radioactive", "thunder", "demons", "closer", "something just like this",
+    "anti-hero", "cruel summer", "flowers", "as it was", "watermelon sugar", "die for you", "save your tears", "cheap thrills",
+    "unstoppable", "attention", "let her go", "riptide", "heat waves", "stay", "peaches", "drivers license",
+    "espresso", "apt", "die with a smile", "birds of a feather", "golden hour", "until i found you", "lag ja gale",
+    "pehla nasha", "tujhe dekha toh", "gerua", "zaalima", "hawayein", "khairiyat", "shayad", "bekhayali", "kabira",
+    "ilahi", "tera ban jaunga", "dil diyan gallan", "malang sajna", "aaj ki raat", "tauba tauba", "sajni", "ishq",
+]
+ARTISTS_MORE = [
+    "arijit singh", "ap dhillon", "coldplay", "taylor swift", "the weeknd", "ed sheeran", "pritam", "diljit dosanjh",
+    "shreya ghoshal", "imagine dragons", "linkin park", "avicii", "badshah", "anuv jain", "karan aujla", "sidhu moose wala",
+    "atif aslam", "sonu nigam", "kishore kumar", "lata mangeshkar", "a r rahman", "vishal mishra", "jubin nautiyal",
+    "king", "divine", "seedhe maut", "prateek kuhad", "local train", "the beatles", "queen", "eagles", "eminem",
+    "drake", "billie eilish", "dua lipa", "bruno mars", "sabrina carpenter", "olivia rodrigo", "harry styles",
+    "post malone", "justin bieber", "lady gaga", "kendrick lamar", "travis scott", "bts", "blackpink", "rosé",
+    "sunidhi chauhan", "neha kakkar", "mohit chauhan", "kk", "shankar mahadevan", "anirudh", "sid sriram",
+]
+GENRES_MORE = ["lofi", "lofi hip hop", "chill", "workout", "gym", "study", "focus", "deep focus", "bollywood", "punjabi",
+               "jazz", "rain sounds", "90s hindi", "old hindi", "romantic hindi", "sad songs", "party", "edm", "classical",
+               "instrumental", "piano", "sleep", "meditation", "coding", "synthwave", "rock", "metal", "indie", "sufi",
+               "ghazal", "devotional", "bhajan", "k-pop", "hip hop", "rap", "road trip", "morning", "acoustic", "chill vibes"]
+SONG_EXTRA = ["", "", "", "", " song", " lyrics", " remix", " slowed reverb", " 8d audio", " acoustic", " cover",
+              " official video", " full song", " audio"]
+SHOWS = ["the boys", "stranger things", "money heist", "panchayat", "mirzapur", "the family man", "sacred games",
+         "breaking bad", "game of thrones", "house of the dragon", "squid game", "wednesday", "the office", "friends",
+         "kota factory", "scam 1992", "dune part two", "oppenheimer", "interstellar", "jawan", "pushpa 2", "kalki 2898 ad",
+         "animal", "deadpool and wolverine", "inside out 2", "avatar 3", "the batman", "spider-man", "kgf chapter 2",
+         "stree 2", "rrr", "12th fail", "laapataa ladies"]
+PODCASTS = ["the ranveer show", "lex fridman podcast", "huberman lab", "joe rogan experience", "figuring out",
+            "the diary of a ceo", "acquired", "lenny's podcast", "dostcast", "the bombay journey", "think school podcast"]
+LIVE_THINGS = ["lofi girl", "nasa", "isro launch", "ipl match", "aaj tak", "bbc news", "abp news", "dd news", "ndtv",
+               "wion", "lofi hip hop radio", "synthwave radio", "chill radio", "jazz radio", "f1 race", "spacex launch",
+               "cricket score", "sky news", "al jazeera english"]
+
+
+def song_query(rng: random.Random) -> str:
+    r = rng.random()
+    if r < 0.5:
+        return rng.choice(SONGS_MORE) + rng.choice(SONG_EXTRA)
+    if r < 0.7:
+        return f"{rng.choice(SONGS_MORE)} by {rng.choice(ARTISTS_MORE)}"
+    if r < 0.82:
+        return f"{rng.choice(ARTISTS_MORE)} {rng.choice(['songs', 'hits', 'new song', 'best songs', 'top songs'])}"
+    if r < 0.9:
+        return rng.choice(ARTISTS_MORE)
+    return f"{pseudo_word(rng)} {rng.choice(['song', 'track', 'remix'])}"
+
+
+def video_query(rng: random.Random) -> str:
+    r = rng.random()
+    if r < 0.25:
+        return f"{rng.choice(SHOWS)} trailer"
+    if r < 0.45:
+        return f"how to {rng.choice(HOWTO)}"
+    if r < 0.6:
+        return f"{rng.choice(TOPICS)} {rng.choice(['explained', 'tutorial', 'documentary', 'in 10 minutes'])}"
+    if r < 0.72:
+        return rng.choice(["funny cat videos", "cricket highlights", "ipl highlights", "f1 highlights",
+                           "stand up comedy", "car reviews", "phone unboxing", "travel vlog", "street food india"])
+    if r < 0.82:
+        return f"{rng.choice(PODCASTS)} {rng.choice(['', 'episode', 'best episode', 'clips'])}".strip()
+    return f"{rng.choice(CREATORS)} {rng.choice(['best moments', 'challenge', 'review', 'vlog', 'interview'])}"

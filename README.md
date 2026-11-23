@@ -113,6 +113,8 @@ That script runs four steps:
 | "mute", "volume up", "copy jpgs to D:/backup" | run immediately, no confirmation (change in Settings → *Ask before*; delete always asks) |
 | "play dear god on youtube" / "open youtube and play X" / "play dear god" | `play_media(query="dear god", site=youtube)`: opens the top video so it starts playing |
 | "search dear god on youtube" | `search_web(query="dear god", site=youtube)`: results page |
+| "play yes theory latest video", "play the latest video from 301 diaries", "carryminati ki latest video chalao" | `play_media(query="yes theory", mode=latest)`: finds the channel and plays its newest upload (via the channel's public RSS feed) |
+| "play a lofi playlist" · "play lofi girl live" · "open veritasium channel" | `mode=playlist` · `mode=live` · `mode=channel` |
 | "google best biryani near me", "search amazon for a usb c hub" | `search_web(..., site=google/amazon/...)` |
 | "open chrome and send an email to Rahul" | `open_app(name=chrome) ; unsupported(request="send an email to Rahul")`: does what it can, tells you what it skipped |
 | "don't delete my pdfs" | `unknown()`: never acts on a negation |

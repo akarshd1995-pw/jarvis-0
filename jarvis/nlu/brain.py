@@ -12,7 +12,7 @@ from pathlib import Path
 
 import re
 
-from ..dsl.grammar import DSLError, Program, parse
+from ..dsl.grammar import DSLError, Ident, Program, parse
 from .rule_parser import rule_parse
 
 log = logging.getLogger(__name__)
@@ -22,15 +22,48 @@ RULES_FIRST = {"window", "desktop", "media", "brightness", "set_volume", "radio"
 PLAY_WORDS = re.compile(r"\b(play|put on|stream|start playing|chalao|chala do|bajao|lagao|sunao|play karo)\b", re.I)
 
 
+_LATEST_WORDS = r"(?:latest|newest|new|recent|most recent|last|nayi|naya|naye)"
+_VID = r"(?:videos?|uploads?|vids?|episodes?)"
+_LATEST_PATTERNS = [
+    re.compile(rf"^(?:the )?{_LATEST_WORDS} {_VID} (?:of|from|by|on) (?:the )?(.+?)(?: channel)?$", re.I),
+    re.compile(rf"^(.+?) (?:ka|ki|ke) {_LATEST_WORDS} {_VID}$", re.I),
+    re.compile(rf"^(.+?)(?:'s|s'|'| channel'?s?)? {_LATEST_WORDS} {_VID}$", re.I),
+    re.compile(rf"^{_LATEST_WORDS} (.+?) {_VID}$", re.I),
+]
+
+
+def normalize_media(prog: Program) -> Program:
+    """Older models put 'yes theory latest video' straight into the query. Turn that into
+    play_media(query="yes theory", mode=latest), and '... playlist' / '... live' into their modes."""
+    for call in prog.calls:
+        if call.action != "play_media" or "mode" in call.args or str(call.args.get("site", "youtube")) != "youtube":
+            continue
+        q = call.args["query"].strip()
+        for pat in _LATEST_PATTERNS:
+            m = pat.match(q)
+            if m and m.group(1).strip():
+                call.args["query"], call.args["mode"] = m.group(1).strip(), Ident("latest")
+                break
+        else:
+            m = re.match(r"^(?:a |an |some )?(.+?) (?:playlist|mix)$", q, re.I)
+            if m:
+                call.args["query"], call.args["mode"] = m.group(1), Ident("playlist")
+                continue
+            m = re.match(r"^(.+?) (?:live(?: ?stream)?)$", q, re.I)
+            if m:
+                call.args["query"], call.args["mode"] = m.group(1), Ident("live")
+    return prog
+
+
 def upgrade_play(prog: Program, text: str) -> Program:
     """Models trained before play_media existed emit search_web(site=youtube) for "play X".
     If the user actually asked to play, turn it into play_media so the video starts."""
     if not PLAY_WORDS.search(text):
-        return prog
+        return normalize_media(prog)
     for call in prog.calls:
         if call.action == "search_web" and str(call.args.get("site", "")) in ("youtube", "spotify"):
             call.action = "play_media"
-    return prog
+    return normalize_media(prog)
 
 
 class Brain:

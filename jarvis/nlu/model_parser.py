@@ -16,6 +16,7 @@ from training.model import IntentTransformer, ModelConfig
 from training.tokenizer import BOS, EOS, PAD, BPETokenizer
 
 from ..dsl.grammar import DSLError, Program, is_complete, parse, viable_prefix
+from .copy_guard import copy_ok
 
 
 class ModelParser:
@@ -38,9 +39,14 @@ class ModelParser:
         src = torch.tensor([ids])
         pad = src == PAD
         decode = self.tok.decode
-        results = self.model.beam(src, pad, BOS, EOS, k=self.beam,
-                                  prefix_ok=lambda ids: viable_prefix(decode(ids)),
-                                  complete_ok=lambda ids: is_complete(decode(ids)))
+        results = []
+        for guard in (True, False):      # copy guard first; if it leaves no valid output, decode without it
+            results = self.model.beam(src, pad, BOS, EOS, k=self.beam,
+                                      prefix_ok=(lambda ids: viable_prefix(decode(ids)) and copy_ok(decode(ids), text))
+                                      if guard else (lambda ids: viable_prefix(decode(ids))),
+                                      complete_ok=lambda ids: is_complete(decode(ids)))
+            if results:
+                break
         for score, out in results:
             conf = math.exp(score / max(1, len(out) + 1))
             try:

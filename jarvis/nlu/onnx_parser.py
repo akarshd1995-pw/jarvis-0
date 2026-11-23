@@ -13,6 +13,7 @@ from training.tokenizer import BOS, EOS, PAD, BPETokenizer
 
 from ..dsl.grammar import DSLError, Program, is_complete, parse, viable_prefix
 from .beam import constrained_beam
+from .copy_guard import copy_ok
 
 
 class ONNXParser:
@@ -56,9 +57,14 @@ class ONNXParser:
                                                "src_pad": np.repeat(pad, n, axis=0)})[0]
 
         decode = self.tok.decode
-        results = constrained_beam(step, BOS, EOS, k=self.beam, max_len=self.max_tgt - 1,
-                                   prefix_ok=lambda t: viable_prefix(decode(t)),
-                                   complete_ok=lambda t: is_complete(decode(t)))
+        results = []
+        for guard in (True, False):      # copy guard first; if it leaves no valid output, decode without it
+            results = constrained_beam(step, BOS, EOS, k=self.beam, max_len=self.max_tgt - 1,
+                                       prefix_ok=(lambda t: viable_prefix(decode(t)) and copy_ok(decode(t), text))
+                                       if guard else (lambda t: viable_prefix(decode(t))),
+                                       complete_ok=lambda t: is_complete(decode(t)))
+            if results:
+                break
         for score, out in results:
             conf = math.exp(score / max(1, len(out) + 1))
             try:

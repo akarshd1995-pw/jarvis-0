@@ -12,6 +12,8 @@ from pathlib import Path
 
 import re
 
+from .media_text import strip_song
+
 from ..dsl.grammar import DSLError, Ident, Program, parse
 from .rule_parser import rule_parse
 
@@ -36,6 +38,8 @@ def normalize_media(prog: Program) -> Program:
     """Older models put 'yes theory latest video' straight into the query. Turn that into
     play_media(query="yes theory", mode=latest), and '... playlist' / '... live' into their modes."""
     for call in prog.calls:
+        if call.action == "play_media" and isinstance(call.args.get("query"), str):
+            call.args["query"] = strip_song(call.args["query"])
         if call.action != "play_media" or "mode" in call.args or str(call.args.get("site", "youtube")) != "youtube":
             continue
         q = call.args["query"].strip()

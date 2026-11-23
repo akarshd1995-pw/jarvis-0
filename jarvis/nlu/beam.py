@@ -54,9 +54,13 @@ def constrained_beam(step: StepFn, bos: int, eos: int, k: int = 4, max_len: int 
             (finished if ids[-1] == eos else beams).append((score, ids))
             if len(beams) == k:
                 break
-        if not beams or len(finished) >= k:
+        # Stop once k outputs are finished AND no unfinished beam can still beat the best finished one
+        # (log-probabilities only go down as a beam grows). Stopping at "k finished" alone could cut off
+        # the best beam mid-way while short, worse outputs had already finished.
+        if not beams or (len(finished) >= k and beams[0][0] < max(f[0] for f in finished)):
             break
-    finished += beams
+    if not finished:
+        finished = beams                       # ran out of length: return what we have (parse will reject it)
     finished.sort(key=lambda c: c[0] / max(1, len(c[1])), reverse=True)
     return [(s, [t for t in ids[1:] if t != eos]) for s, ids in finished[:k]]
 

@@ -941,3 +941,17 @@ def test_play_unknown_song_shows_results_not_random(env, monkeypatch):
     from jarvis.persona.persona import Persona
     reply = Persona("Jarvis", "sir", "butler").result(r)
     assert "couldn't find" in reply.lower() and "Bohemian Rhapsody" in reply
+
+
+# ---------------------------------------------------------------- copy guard: quoted values come from the input
+def test_copy_guard():
+    from jarvis.nlu.copy_guard import copy_ok
+    src = "Please pull up website datasegekot.in and play super machi"
+    assert copy_ok('open_url(url="datase', src) and copy_ok('open_url(url="datasegekot.in")', src)
+    assert not copy_ok('open_url(url="dudege', src)                       # garbled name: impossible
+    assert copy_ok('open_url(url="zomato.c', "open zomato")                # known site address is allowed
+    assert not copy_ok('play_media(query="super machi pe pe', src)        # no loops
+    assert copy_ok('move_files(src="D:\\\\yides_pro\\\\mi', r"copy from D:\yides_pro\misc to desktop")
+    assert copy_ok('play_media(query="சூப்', "play சூப்பர் மச்சி")         # multi-byte characters
+    assert copy_ok('play_media(query="\ufffd', "play சூப்பர்")            # half-decoded character
+    assert not copy_ok('play_media(query="Abhi and niyu")', "open the Abhi and Niyu channel")  # exact case

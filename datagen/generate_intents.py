@@ -27,6 +27,7 @@ import re
 from pathlib import Path
 
 from jarvis.dsl.grammar import DSLError, canonical
+from jarvis.nlu.media_text import tidy_program_text
 from . import lexicon as LX
 from .noise import L, R, apply_noise
 
@@ -989,7 +990,7 @@ def sample(rng: random.Random, split: str = "train") -> dict:
     if r < 0.146:                                               # how the user feels (always its own sentence)
         d, t = gen_mood(c)
         t = rng.choice(["", "", "", "jarvis ", "hey jarvis, ", "yaar ", "bro "]) + t
-        return {"text": apply_noise(t, rng), "program": canonical(d)}
+        return {"text": apply_noise(t, rng), "program": canonical(tidy_program_text(d))}
     n_calls = rng.choices([1, 2, 3, 4], weights=[60, 26, 10, 4])[0]
     dsls, texts, meta = [], [], {}
     for i in range(n_calls):
@@ -1009,7 +1010,7 @@ def sample(rng: random.Random, split: str = "train") -> dict:
     for t in texts[1:]:
         text += rng.choice(CONNECTORS) + t
     text = rng.choice(PRE) + text + rng.choice(POST)
-    return {"text": apply_noise(text, rng), "program": canonical(" ; ".join(dsls))}
+    return {"text": apply_noise(text, rng), "program": canonical(tidy_program_text(" ; ".join(dsls)))}
 
 # ---------------------------------------------------------------- vocabulary check for held-out frames
 

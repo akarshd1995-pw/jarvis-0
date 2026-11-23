@@ -206,9 +206,11 @@ class IntentTransformer(nn.Module):
                 (finished if ids[-1] == eos else beams).append((score, ids))
                 if len(beams) == k:
                     break
-            if not beams or len(finished) >= k:
+            # stop once k are finished and no live beam can still beat the best finished one
+            if not beams or (len(finished) >= k and beams[0][0] < max(f[0] for f in finished)):
                 break
-        finished += beams
+        if not finished:
+            finished = beams
         # length-normalized ranking
         finished.sort(key=lambda c: c[0] / max(1, len(c[1])), reverse=True)
         return [(s, [t for t in ids[1:] if t != eos]) for s, ids in finished[:k]]

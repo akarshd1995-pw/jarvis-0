@@ -30,6 +30,7 @@ HELP = """Commands:
   /status         model backend, accuracy, autostart and encryption status
   /settings       open the settings window
   /update         pull the latest version from GitHub and restart
+  /hud            show or hide the HUD overlay
   /help           this message"""
 
 
@@ -74,6 +75,11 @@ class Jarvis:
             return HELP
         if cmd == "/status":
             return self.status()
+        if cmd == "/hud":
+            if "hud_toggle" in self.hooks:
+                self.hooks["hud_toggle"]()
+                return "Toggled the HUD."
+            return "The HUD needs the command bar (not available in --cli mode)."
         if cmd == "/settings":
             if "settings" in self.hooks:
                 self.hooks["settings"]()
@@ -128,9 +134,24 @@ class Jarvis:
         lines.append(f"Autostart: {'on' if autostart.is_enabled() else 'off'}")
         return "\n".join(lines)
 
+    def _hud(self, state: str | None = None, last: str | None = None, hold: float = 0.0):
+        if state and "state" in self.hooks:
+            self.hooks["state"](state, hold)
+        if last and "last" in self.hooks:
+            self.hooks["last"](last)
+
     def handle(self, text: str) -> str:
         if text.strip().startswith("/"):
             return self._meta(text.strip())
+        self._hud("thinking")
+        try:
+            reply = self._handle(text)
+        except Exception:
+            self._hud("error", hold=3)
+            raise
+        return reply
+
+    def _handle(self, text: str) -> str:
         prog, source = self.brain.resolve(text)
         self.last_text, self.last_program = text.strip(), (str(prog) if prog else None)
         self.store.log_event("command", {"text_len": len(text), "source": source,
@@ -141,9 +162,13 @@ class Jarvis:
                 source = "smalltalk"
             else:
                 reply = self.persona.result(ActionResult("", kind="unknown")) if prog else self.persona.unparsed()
+            self._hud("success" if source == "smalltalk" else "error", reply, hold=2)
             return self._with_details(reply, source, prog)
         report = self.executor.run(prog)
-        return self._with_details(self.persona.report(report), source, prog, report)
+        reply = self.persona.report(report)
+        state = "error" if report.failures else ("idle" if report.declined and not report.results else "success")
+        self._hud(state, reply, hold=2)
+        return self._with_details(reply, source, prog, report)
 
     def _with_details(self, reply: str, source: str, prog, report=None) -> str:
         if not self.config.show_details:
@@ -216,7 +241,6 @@ def main() -> None:
     bar_ref["bar"] = bar
     jarvis.hooks["settings"] = lambda: bar.post("call", lambda: SettingsWindow(bar.root, config))
     jarvis.hooks["restart"] = lambda: bar.post("call", lambda: (bar.root.destroy(), restart()))
-    jarvis.start_background(lambda text: bar.post("reminder", text))
     hk = HotkeyThread(config.hotkey, lambda: bar.post("toggle"))
     hk.start()
 
@@ -226,8 +250,42 @@ def main() -> None:
         if changed:
             jarvis.hooks["restart"]()
 
+    hud = None
+    if config.hud_enabled:
+        from .hud.metrics import MetricsSampler
+        from .hud.view import HUD
+        ck = PROJECT_ROOT / "checkpoints"
+        sampler = MetricsSampler({"Training command model": ck / "train_log.txt",
+                                  "Training reply model": ck / "reply_log.txt"})
+        sampler.start()
+        try:
+            hud = HUD(bar.root, sampler, name=config.persona_name,
+                      reminders=lambda: jarvis.store.upcoming_reminders(time.time()),
+                      corner=config.hud_corner, opacity=config.hud_opacity,
+                      click_through=config.hud_click_through)
+
+            def hud_state(state, hold=0.0):
+                hud.set_state(state, hold)
+                bar.root.update_idletasks()
+
+            jarvis.hooks["state"] = hud_state
+            jarvis.hooks["last"] = hud.set_last
+            jarvis.hooks["hud_toggle"] = hud.toggle
+            HotkeyThread(config.hud_hotkey, lambda: bar.post("call", hud.toggle), hotkey_id=2).start()
+        except Exception as e:     # never let the HUD stop Jarvis from starting
+            log.warning("HUD unavailable: %s", e)
+            hud = None
+
+    def on_reminder(text):
+        bar.post("reminder", text)
+        if hud is not None:
+            bar.post("call", lambda: (hud.set_state("alert", 4), hud.set_last(text)))
+
+    jarvis.start_background(on_reminder)
+
     icon = start_tray({
         "open": lambda: bar.post("open"),
+        "hud": (lambda: bar.post("call", hud.toggle)) if hud else None,
         "settings": jarvis.hooks["settings"],
         "update": lambda: threading.Thread(target=tray_update, daemon=True).start(),
         "quit": lambda: bar.post("quit"),

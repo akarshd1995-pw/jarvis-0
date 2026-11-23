@@ -18,7 +18,7 @@ def _icon_image():
 
 
 def start_tray(actions: dict[str, Callable[[], None]]):
-    """actions: open, settings, update, quit. Callbacks run on the tray thread; they should only
+    """actions: open, hud (or None), settings, update, quit. Callbacks run on the tray thread; they should only
     post to the UI queue. Returns the icon or None if pystray isn't installed."""
     try:
         import pystray
@@ -27,6 +27,7 @@ def start_tray(actions: dict[str, Callable[[], None]]):
         return None
     menu = pystray.Menu(
         pystray.MenuItem("Open command bar", lambda: actions["open"](), default=True),
+        pystray.MenuItem("Show / hide HUD", lambda: actions["hud"](), visible=bool(actions.get("hud"))),
         pystray.MenuItem("Settings", lambda: actions["settings"]()),
         pystray.MenuItem("Check for updates", lambda: actions["update"]()),
         pystray.Menu.SEPARATOR,

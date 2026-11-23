@@ -96,6 +96,11 @@ class Store:
             self._db.commit()
             return cur.lastrowid
 
+    def upcoming_reminders(self, now: float, limit: int = 3) -> list[tuple[float, str]]:
+        with self._lock:
+            return self._db.execute("SELECT due, text FROM reminders WHERE fired = 0 AND due > ? ORDER BY due LIMIT ?",
+                                    (now, limit)).fetchall()
+
     def due_reminders(self, now: float) -> list[tuple[int, str]]:
         with self._lock:
             rows = self._db.execute(

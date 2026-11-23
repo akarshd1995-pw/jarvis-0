@@ -134,6 +134,15 @@ A second small model (~6.5M parameters) turns facts into a sentence in the chose
 - **Train it:** `.\train_replies.bat` (about 15 minutes; also runs automatically at the end of `train_night.bat`). Its log reports the **fact-check pass rate**.
 - **Check it:** `/status` shows how many replies it generated and how many the checker rejected. Turn it off in Settings to use templates only.
 
+## HUD
+A translucent overlay in a screen corner (`Ctrl+Alt+H` to show or hide, or tray → Show / hide HUD, or `/hud`):
+- **Status orb:** rotating rings and a breathing core. Cyan when idle, violet while working, green when done, amber when something went wrong, red for warnings (e.g. GPU over 85°C).
+- **Gauges:** CPU, RAM, GPU (with temperature, from `nvidia-smi`), disk, and battery on laptops.
+- **Jobs:** live progress bars for training runs, with time left, read from the training logs.
+- **Up next** (your next reminders), the **last** reply, and a clock.
+
+It's click-through by default (the mouse passes straight through it) and stays out of the taskbar. Change the corner, opacity and click-through in Settings. Built with tkinter and Windows APIs only, no extra packages.
+
 ## Teaching it your own phrasing
 The fastest way: right in the command bar, after Jarvis gets something wrong, type
 ```

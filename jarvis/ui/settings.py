@@ -15,7 +15,7 @@ class SettingsWindow:
         self.win = tk.Toplevel(parent)
         self.win.title("Jarvis-0 settings")
         self.win.attributes("-topmost", True)
-        self.win.geometry("580x860")
+        self.win.geometry("600x980")
         pad = dict(padx=10, pady=4, sticky="w")
         f = ttk.Frame(self.win, padding=10)
         f.pack(fill="both", expand=True)
@@ -60,6 +60,18 @@ class SettingsWindow:
         self.p_model = tk.BooleanVar(value=config.persona_model)
         ttk.Checkbutton(f, text="Use my trained reply model (fact-checked; templates if it's unsure)",
                         variable=self.p_model).grid(row=22, column=0, columnspan=2, **pad)
+        ttk.Separator(f).grid(row=24, column=0, columnspan=2, sticky="ew", pady=6)
+        self.hud_on = tk.BooleanVar(value=config.hud_enabled)
+        ttk.Checkbutton(f, text="Show the HUD overlay", variable=self.hud_on).grid(row=25, column=0, **pad)
+        self.hud_corner = tk.StringVar(value=config.hud_corner)
+        ttk.Combobox(f, textvariable=self.hud_corner, state="readonly", width=12,
+                     values=["top-right", "top-left", "bottom-right", "bottom-left"]).grid(row=25, column=1, **pad)
+        ttk.Label(f, text="HUD opacity").grid(row=26, column=0, **pad)
+        self.hud_alpha = tk.DoubleVar(value=config.hud_opacity)
+        ttk.Scale(f, from_=0.4, to=1.0, variable=self.hud_alpha).grid(row=26, column=1, sticky="ew", padx=10)
+        self.hud_ct = tk.BooleanVar(value=config.hud_click_through)
+        ttk.Checkbutton(f, text="Clicks pass through the HUD", variable=self.hud_ct).grid(
+            row=27, column=0, columnspan=2, **pad)
         self.details = tk.BooleanVar(value=config.show_details)
         ttk.Checkbutton(f, text="Show the technical command under each reply", variable=self.details).grid(
             row=20, column=0, columnspan=2, **pad)
@@ -91,7 +103,7 @@ class SettingsWindow:
         self.roots.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=10)
 
         btns = ttk.Frame(f)
-        btns.grid(row=23, column=0, columnspan=2, pady=10)
+        btns.grid(row=28, column=0, columnspan=2, pady=10)
         ttk.Button(btns, text="Save", command=self.save).pack(side="left", padx=6)
         ttk.Button(btns, text="Cancel", command=self.win.destroy).pack(side="left", padx=6)
 
@@ -119,6 +131,8 @@ class SettingsWindow:
         c.persona_address, c.persona_tone = self.p_addr.get().strip(), self.p_tone.get()
         c.show_details = self.details.get()
         c.persona_model = self.p_model.get()
+        c.hud_enabled, c.hud_corner = self.hud_on.get(), self.hud_corner.get()
+        c.hud_opacity, c.hud_click_through = round(self.hud_alpha.get(), 2), self.hud_ct.get()
         path = c.save()
         try:
             (autostart.enable if self.auto.get() else autostart.disable)()

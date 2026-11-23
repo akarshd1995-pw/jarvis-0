@@ -556,3 +556,42 @@ def test_reply_model_wrong_facts_fall_back_to_template(tmp_path):
     p = Persona(tone="minimal", address="", model=m, seed=0)
     assert p.result(_move_result()) == "Moved 14 PDFs to Archive."
     assert p.last_source == "template" and m.stats["rejected"] == m.stats["generated"] > 0
+
+
+# ------------------------------------------------------------------ phase 25: HUD (logic; the window itself needs Windows)
+def test_hud_parsers():
+    from jarvis.hud.metrics import cpu_percent, parse_nvidia_smi, parse_progress
+    g = parse_nvidia_smi("87, 8412, 12227, 64, NVIDIA GeForce RTX 5070")
+    assert g["gpu"] == 87 and round(g["gpu_mem"]) == 69 and g["gpu_temp"] == 64
+    assert parse_nvidia_smi("[N/A], x") is None
+    p = parse_progress("step 100/60000 ...\nstep  23000/60000  loss 1.0  145 min elapsed, ~234 min left  gpu mem 8.4/12 GB")
+    assert p == {"pct": 23000 / 60000 * 100, "eta_min": 234, "step": 23000, "steps": 60000}
+    assert parse_progress("no steps here") is None
+    assert cpu_percent((100, 1000), (150, 1100)) == 50.0 and cpu_percent(None, (1, 2)) is None
+
+
+def test_hud_job_progress_only_for_active_logs(tmp_path):
+    import os
+    from jarvis.hud.metrics import job_progress
+    log = tmp_path / "train_log.txt"
+    log.write_text("step  600/60000  loss 1.2  1 min elapsed, ~69 min left  gpu mem 7.4/12 GB\n")
+    assert job_progress({"Training": log})[0]["eta_min"] == 69
+    old = time.time() - 3600
+    os.utime(log, (old, old))
+    assert job_progress({"Training": log}) == []
+
+
+def test_upcoming_reminders_and_hud_state_hooks(env):
+    from jarvis.daemon import Jarvis
+    cfg, store, dl, arc = env
+    j = Jarvis(cfg, lambda *a: True)
+    events = []
+    j.hooks["state"] = lambda s, hold=0.0: events.append(s)
+    j.hooks["last"] = lambda t: events.append("last")
+    j.handle('remind(text="stretch", after=5m)')
+    assert events[0] == "thinking" and "success" in events and "last" in events
+    assert j.store.upcoming_reminders(time.time())[0][1] == "stretch"
+    events.clear()
+    j.handle("list_files(src=D:/nowhere)")
+    assert "error" in events
+    assert "needs the command bar" in j.handle("/hud")

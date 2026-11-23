@@ -40,6 +40,11 @@ class Config:
     # Jarvis may only touch files under these roots (resolved paths).
     allowed_roots: list[str] = field(default_factory=lambda: [str(HOME)])
     hotkey: str = "ctrl+alt+j"
+    hud_enabled: bool = True
+    hud_hotkey: str = "ctrl+alt+h"
+    hud_corner: str = "top-right"         # top-right | top-left | bottom-right | bottom-left
+    hud_opacity: float = 0.9
+    hud_click_through: bool = True
     focus_poll_seconds: float = 1.0
     watch_folders: list[str] = field(default_factory=lambda: ["Downloads"])
     persona_name: str = "Jarvis"
@@ -58,7 +63,7 @@ class Config:
     def save(self, path: Path | None = None) -> Path:
         """Write user-editable settings to config.json (used by the settings window)."""
         path = path or (self.data_dir / "config.json")
-        keys = ["persona_name", "persona_address", "persona_tone", "show_details", "persona_model", "hotkey", "folders", "apps", "allowed_roots", "watch_folders", "min_confidence", "confirm_actions",
+        keys = ["hud_enabled", "hud_hotkey", "hud_corner", "hud_opacity", "hud_click_through", "persona_name", "persona_address", "persona_tone", "show_details", "persona_model", "hotkey", "folders", "apps", "allowed_roots", "watch_folders", "min_confidence", "confirm_actions",
                 "encrypt_logs", "keep_window_titles", "model_backend", "focus_poll_seconds"]
         path.write_text(json.dumps({k: getattr(self, k) for k in keys}, indent=2), encoding="utf-8")
         return path

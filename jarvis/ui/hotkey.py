@@ -31,8 +31,9 @@ def parse_hotkey(spec: str) -> tuple[int, int]:
 
 
 class HotkeyThread(threading.Thread):
-    def __init__(self, spec: str, on_press: Callable[[], None]):
-        super().__init__(daemon=True, name="hotkey")
+    def __init__(self, spec: str, on_press: Callable[[], None], hotkey_id: int = 1):
+        super().__init__(daemon=True, name=f"hotkey-{hotkey_id}")
+        self.hotkey_id = hotkey_id
         self.mods, self.vk = parse_hotkey(spec)
         self.spec, self.on_press = spec, on_press
         self.error: str | None = None
@@ -45,7 +46,7 @@ class HotkeyThread(threading.Thread):
         user32 = ctypes.windll.user32  # type: ignore[attr-defined]
         import time
         for _ in range(20):       # retry: after /update restarts, the old process may still hold it briefly
-            if user32.RegisterHotKey(None, 1, self.mods, self.vk):
+            if user32.RegisterHotKey(None, self.hotkey_id, self.mods, self.vk):
                 break
             time.sleep(0.5)
         else:
@@ -57,4 +58,4 @@ class HotkeyThread(threading.Thread):
                 if msg.message == WM_HOTKEY:
                     self.on_press()
         finally:
-            user32.UnregisterHotKey(None, 1)
+            user32.UnregisterHotKey(None, self.hotkey_id)

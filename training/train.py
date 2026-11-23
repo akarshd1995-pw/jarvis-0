@@ -68,7 +68,7 @@ def batches(rows, bs, shuffle=True):
 
 
 @torch.no_grad()
-def evaluate(model, rows, tok, device, limit=2000, bs=256):
+def evaluate(model, rows, tok, device, limit=1500, bs=256):
     model.eval()
     rows = rows[:limit]
     exact = valid = 0
@@ -102,8 +102,8 @@ def main():
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--warmup", type=int, default=800)
-    ap.add_argument("--eval-every", type=int, default=2000)
-    ap.add_argument("--patience", type=int, default=6,
+    ap.add_argument("--eval-every", type=int, default=4000)
+    ap.add_argument("--patience", type=int, default=4,
                     help="stop after this many evals without improvement (0 = never stop early)")
     ap.add_argument("--d-model", type=int, default=384)
     ap.add_argument("--layers", type=int, default=6)
@@ -164,7 +164,10 @@ def main():
             step += 1
 
             if step % 100 == 0:
-                print(f"step {step:6d}  loss {loss.item():.4f}  lr {lr_at(step):.2e}  {time.time() - t0:.0f}s")
+                el = time.time() - t0
+                eta = el / step * (args.steps - step)
+                print(f"step {step:6d}/{args.steps}  loss {loss.item():.4f}  lr {lr_at(step):.2e}  "
+                      f"{el / 60:.0f} min elapsed, ~{eta / 60:.0f} min left", flush=True)
             if step % args.eval_every == 0 or step == args.steps:
                 m = evaluate(model, val_rows, tok, device)
                 print(f"  eval  loss {m['loss']:.4f}  exact {m['exact']:.4f}  valid {m['valid']:.4f}")

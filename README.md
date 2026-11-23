@@ -60,14 +60,20 @@ python -m jarvis --cli      :: terminal mode
 Until you've trained a model, the regex rules handle common commands. You can also type raw DSL
 directly, for example `list_files(src=Downloads, ext=pdf)`. Type `undo` to revert the last command.
 
-## Night 1: train your model (RTX 5070)
-```bat
-train_night.bat
+## Train your model (RTX 5070)
+```powershell
+.\train_night.bat          # full run: 2M examples, 27M-param model, about 2-3 hours (overnight)
+.\train_night.bat quick    # quick run: 1M examples, 10M-param model, about 30 minutes
 ```
+Watch live progress (with time remaining) from a second window:
+```powershell
+Get-Content checkpoints\train_log.txt -Wait -Tail 5
+```
+You can stop with Ctrl+C at any time: `checkpoints\intent.pt` always holds the best model so far.
 That script runs four steps:
 1. `python -m datagen.generate_intents --n 2000000` builds 2M training examples plus `val`, `val_ood`, `test_iid` and `test_ood` sets (about 3 min).
 2. `python -m training.tokenizer --vocab 2048` trains the BPE tokenizer (under a minute).
-3. `python -m training.train` trains the model (~27M parameters: 6+6 layers, d_model 384) from random weights for up to 60,000 steps. Expect roughly 1–1.5 hours on a 5070.
+3. `python -m training.train` trains the model (~27M parameters: 6+6 layers, d_model 384) from random weights for up to 60,000 steps. Expect roughly 2–3 hours on a 5070 (the quick mode takes about 30 minutes).
    The best checkpoint goes to `checkpoints/intent.pt`. It is picked by the average of accuracy on familiar phrasing (`val`) and on unseen sentence structures (`val_ood`). Training stops early if neither improves for 6 checks in a row.
 4. `python -m training.evaluate` writes `checkpoints/eval_report.txt` and every mistake to `checkpoints/errors_*.jsonl`.
 

@@ -938,8 +938,8 @@ GENERATORS = [
     (lambda c: gen_file_op(c, "delete"), 8), (lambda c: gen_file_op(c, "list"), 6),
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
-    (gen_window, 6), (gen_desktop, 2), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 2), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 1.5), (gen_power, 3), (gen_training, 2),
+    (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",
@@ -983,10 +983,10 @@ def sample(rng: random.Random, split: str = "train") -> dict:
     if r < 0.095:                                               # lone / garbled words
         d, t = gen_fragment(c)
         return {"text": apply_noise(t, rng), "program": d}
-    if r < 0.11:
+    if r < 0.116:
         d, t, _ = gen_undo(c)
         return {"text": apply_noise(t, rng), "program": d}
-    if r < 0.14:                                                # how the user feels (always its own sentence)
+    if r < 0.146:                                               # how the user feels (always its own sentence)
         d, t = gen_mood(c)
         t = rng.choice(["", "", "", "jarvis ", "hey jarvis, ", "yaar ", "bro "]) + t
         return {"text": apply_noise(t, rng), "program": canonical(d)}
@@ -1082,7 +1082,7 @@ def build(n_train: int, n_eval: int, seed: int, extra: Path | None = None, extra
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=2_000_000, help="training examples")
-    ap.add_argument("--n-eval", type=int, default=10_000, help="examples per eval split")
+    ap.add_argument("--n-eval", type=int, default=20_000, help="examples per eval split")
     ap.add_argument("--out", type=Path, default=Path("data/intents"))
     ap.add_argument("--extra", type=Path, default=Path("data/user_corrections.jsonl"),
                     help="your own (text, program) corrections; oversampled")

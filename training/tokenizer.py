@@ -127,11 +127,15 @@ def main():
     ap.add_argument("--vocab", type=int, default=1024)
     ap.add_argument("--out", type=Path, default=Path("checkpoints/tokenizer.json"))
     ap.add_argument("--fields", default="text,program", help="jsonl fields to learn from (replies: src,tgt)")
+    ap.add_argument("--max-lines", type=int, default=1_500_000,
+                    help="learn the vocabulary from the first N examples (plenty; keeps big datasets fast)")
     args = ap.parse_args()
     fields = args.fields.split(",")
     texts = []
     with open(args.data, encoding="utf-8") as f:
-        for line in f:
+        for i, line in enumerate(f):
+            if i >= args.max_lines:
+                break
             ex = json.loads(line)
             texts += [ex[k] for k in fields]
     tok = BPETokenizer.train(texts, args.vocab)

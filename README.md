@@ -75,7 +75,8 @@ directly, for example `list_files(src=Downloads, ext=pdf)`. Type `undo` to rever
 
 ## Train your model (RTX 5070)
 ```powershell
-.\train_night.bat          # full run: 2M examples, 27M-param model, about 2-3 hours (overnight)
+.\train_night.bat          # full run: 5M examples, 27M-param model, 120k steps, about 3-3.5 hours
+.\train_night.bat max      # whole night: 8M examples, 200k steps, about 5-6 hours
 .\train_night.bat quick    # quick run: 1M examples, 10M-param model, about 30 minutes
 ```
 Watch live progress (with time remaining) from a second window:
@@ -86,7 +87,7 @@ You can stop with Ctrl+C at any time: `checkpoints\intent.pt` always holds the b
 
 **If training is much slower than expected:** check `gpu mem` in the log, or run `nvidia-smi`. When GPU memory is full, Windows spills into system RAM and training slows down several times without crashing. Lower the per-batch budget, e.g. `python -m training.train --max-tokens 16000`. You can also set NVIDIA Control Panel → Manage 3D settings → *CUDA - Sysmem Fallback Policy* → **Prefer No Sysmem Fallback**, so it stops with a clear out-of-memory error instead.
 That script runs four steps:
-1. `python -m datagen.generate_intents --n 2000000` builds 2M training examples plus `val`, `val_ood`, `test_iid` and `test_ood` sets (about 3 min).
+1. `python -m datagen.generate_intents --n 5000000` builds 5M training examples plus 20k each of `val`, `val_ood`, `test_iid` and `test_ood` (about 7 min).
 2. `python -m training.tokenizer --vocab 2048` trains the BPE tokenizer (under a minute).
 3. `python -m training.train` trains the model (~27M parameters: 6+6 layers, d_model 384) from random weights for up to 60,000 steps. Expect roughly 2–3 hours on a 5070 (the quick mode takes about 30 minutes).
    The best checkpoint goes to `checkpoints/intent.pt`. It is picked by the average of accuracy on familiar phrasing (`val`) and on unseen sentence structures (`val_ood`). Training stops early if neither improves for 6 checks in a row.

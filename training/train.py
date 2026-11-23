@@ -45,7 +45,8 @@ def collate(batch, device):
     t_len = max(len(b[1]) for b in batch)
     src = torch.full((len(batch), s_len), PAD, dtype=torch.long)
     tgt = torch.full((len(batch), t_len), PAD, dtype=torch.long)
-    for i, (s, t, _) in enumerate(batch):
+    for i, row in enumerate(batch):
+        s, t = row[0], row[1]
         src[i, : len(s)] = torch.tensor(s.tolist() if isinstance(s, array) else s)
         tgt[i, : len(t)] = torch.tensor(t.tolist() if isinstance(t, array) else t)
     src, tgt = src.to(device, non_blocking=True), tgt.to(device, non_blocking=True)
@@ -83,21 +84,40 @@ def batches(rows, bs, shuffle=True, max_tokens=None):
         yield [rows[j] for j in g]
 
 
+def eval_batches(rows, bs=256, max_tokens=24000):
+    """Deterministic, length-sorted, memory-capped batches for evaluation."""
+    order = sorted(range(len(rows)), key=lambda j: (len(rows[j][0]), len(rows[j][1])))
+    g, s_max, t_max = [], 0, 0
+    for j in order:
+        s2, t2 = max(s_max, len(rows[j][0])), max(t_max, len(rows[j][1]))
+        if g and (len(g) >= bs or (len(g) + 1) * (s2 + t2) > max_tokens):
+            yield [rows[k] for k in g]
+            g, s2, t2 = [], len(rows[j][0]), len(rows[j][1])
+        g.append(j)
+        s_max, t_max = s2, t2
+    if g:
+        yield [rows[k] for k in g]
+
+
 @torch.no_grad()
-def evaluate(model, rows, tok, device, limit=1500, bs=256):
+def evaluate(model, rows, tok, device, limit=1500, bs=256, max_tokens=24000):
     model.eval()
     rows = rows[:limit]
     exact = valid = 0
     loss_sum = n_tok = 0
-    for batch in batches(rows, bs, shuffle=False):
+    amp = dict(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda")
+    for batch in eval_batches(rows, bs, max_tokens):
         src, src_pad, tin, tout = collate(batch, device)
-        with torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
+        with torch.autocast(**amp):
             logits = model(src, src_pad, tin)
         loss_sum += F.cross_entropy(logits.float().reshape(-1, logits.size(-1)), tout.reshape(-1),
                                     ignore_index=PAD, reduction="sum").item()
         n_tok += (tout != PAD).sum().item()
-        preds = model.greedy(src, src_pad, BOS, EOS)
-        for p, (_, _, gold) in zip(preds.tolist(), batch):
+        del logits
+        with torch.autocast(**amp):
+            preds = model.greedy(src, src_pad, BOS, EOS)
+        for p, row in zip(preds.tolist(), batch):
+            gold = row[2]
             text = tok.decode(p[: p.index(EOS)] if EOS in p else p)
             try:
                 pc = canonical(text)
@@ -106,6 +126,8 @@ def evaluate(model, rows, tok, device, limit=1500, bs=256):
             except DSLError:
                 pass
     model.train()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()   # hand back eval memory so training never inherits a spilled pool
     return {"loss": loss_sum / max(1, n_tok), "exact": exact / len(rows), "valid": valid / len(rows)}
 
 

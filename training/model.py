@@ -138,11 +138,15 @@ class IntentTransformer(nn.Module):
             x = blk(x, mask)
         return self.enc_norm(x), mask
 
-    def decode(self, tgt_in, mem, mem_mask):
+    def decode(self, tgt_in, mem, mem_mask, last_only: bool = False):
+        """last_only=True computes output logits for the final position only (decoding), which
+        avoids materializing a (batch x length x vocab) tensor at every generation step."""
         pos = torch.arange(tgt_in.size(1), device=tgt_in.device)
         y = self.drop(self.tok(tgt_in) * math.sqrt(self.cfg.d_model) + self.pos_tgt(pos))
         for blk in self.dec:
             y = blk(y, mem, mem_mask)
+        if last_only:
+            y = y[:, -1:]
         return self.head(self.dec_norm(y))
 
     def forward(self, src, src_pad, tgt_in):
@@ -150,12 +154,13 @@ class IntentTransformer(nn.Module):
         return self.decode(tgt_in, mem, mem_mask)
 
     @torch.no_grad()
-    def greedy(self, src, src_pad, bos: int, eos: int, max_len: int = 128):
+    def greedy(self, src, src_pad, bos: int, eos: int, max_len: int | None = None):
+        max_len = max_len or self.cfg.max_tgt - 1
         mem, mem_mask = self.encode(src, src_pad)
         out = torch.full((src.size(0), 1), bos, dtype=torch.long, device=src.device)
         done = torch.zeros(src.size(0), dtype=torch.bool, device=src.device)
         for _ in range(min(max_len, self.cfg.max_tgt - 1)):
-            nxt = self.decode(out, mem, mem_mask)[:, -1].argmax(-1)
+            nxt = self.decode(out, mem, mem_mask, last_only=True)[:, -1].argmax(-1)
             nxt = torch.where(done, torch.full_like(nxt, eos), nxt)
             out = torch.cat([out, nxt[:, None]], dim=1)
             done |= nxt == eos
@@ -164,13 +169,14 @@ class IntentTransformer(nn.Module):
         return out[:, 1:]
 
     @torch.no_grad()
-    def beam(self, src, src_pad, bos: int, eos: int, k: int = 4, max_len: int = 128,
+    def beam(self, src, src_pad, bos: int, eos: int, k: int = 4, max_len: int | None = None,
              prefix_ok=None, complete_ok=None):
         """Beam search for a single example; returns list of (logprob, ids) best-first.
 
         prefix_ok(ids) -> bool   : reject tokens that make the output impossible to complete (grammar)
         complete_ok(ids) -> bool : only accept <eos> when the output is a complete, valid program
         """
+        max_len = max_len or self.cfg.max_tgt - 1
         mem, mem_mask = self.encode(src, src_pad)
         beams = [(0.0, [bos])]
         finished = []
@@ -178,7 +184,7 @@ class IntentTransformer(nn.Module):
         for _ in range(min(max_len, self.cfg.max_tgt - 1)):
             seqs = torch.tensor([b[1] for b in beams], device=src.device)
             logp = self.decode(seqs, mem.expand(len(beams), -1, -1),
-                               mem_mask.expand(len(beams), -1, -1, -1))[:, -1].float().log_softmax(-1)
+                               mem_mask.expand(len(beams), -1, -1, -1), last_only=True)[:, -1].float().log_softmax(-1)
             cand = []
             for bi, (score, ids) in enumerate(beams):
                 top = logp[bi].topk(width)

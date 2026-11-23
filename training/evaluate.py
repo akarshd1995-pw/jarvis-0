@@ -20,7 +20,7 @@ import torch
 from jarvis.dsl.grammar import DSLError, canonical
 from training.model import IntentTransformer, ModelConfig
 from training.tokenizer import BOS, EOS, BPETokenizer
-from training.train import batches, collate
+from training.train import collate, eval_batches
 
 MUTATING = ("move_files", "copy_files", "delete_files", "system")
 
@@ -47,27 +47,25 @@ def main():
     model.load_state_dict(ckpt["model"])
     model.eval()
 
-    rows, texts = [], []
+    rows = []
     with open(args.data / f"{args.split}.jsonl", encoding="utf-8") as f:
         for line in f:
             ex = json.loads(line)
             src = tok.encode(ex["text"])[: cfg.max_src]
             tgt = tok.encode(ex["program"], bos=True, eos=True)
             if len(tgt) <= cfg.max_tgt:
-                rows.append((src, tgt, ex["program"]))
-                texts.append(ex["text"])
+                rows.append((src, tgt, ex["program"], ex["text"]))
             if len(rows) >= args.limit:
                 break
     stats = Counter()
     per_action = defaultdict(lambda: [0, 0])
     errors = []
-    i = 0
-    for batch in batches(rows, 256, shuffle=False):
+    amp = dict(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda")
+    for batch in eval_batches(rows):
         src, src_pad, _, _ = collate(batch, device)
-        preds = model.greedy(src, src_pad, BOS, EOS)
-        for p, (_, _, gold) in zip(preds.tolist(), batch):
-            text = texts[i] if i < len(texts) else ""
-            i += 1
+        with torch.no_grad(), torch.autocast(**amp):
+            preds = model.greedy(src, src_pad, BOS, EOS)
+        for p, (_, _, gold, text) in zip(preds.tolist(), batch):
             raw = tok.decode(p[: p.index(EOS)] if EOS in p else p)
             try:
                 pred = canonical(raw)

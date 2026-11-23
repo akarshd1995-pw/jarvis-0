@@ -143,11 +143,5 @@ python -m pytest -q
 ```
 
 ## Roadmap
-- [x] Phase 1: daemon, collectors, executors, safety layer, command bar
-- [x] Phase 2: synthetic data engine, BPE tokenizer, transformer, training loop (train it tonight)
-- [x] Phase 2.5: web search, skipped-step reporting, grammar-constrained decoding, /fix corrections, negation safety data, 2M examples and a bigger model
-- [ ] ONNX export (run without PyTorch on the laptop)
-- [ ] Phase 3: memory index (contrastive embedding model, hand-written HNSW, CRNN OCR for screenshots)
-- [ ] Phase 4: routine model (causal transformer over the focus and file event log) and proactive suggestions
-- [ ] Phase 5: notification triage (online classifier with contextual-bandit exploration)
-- [ ] v2: voice (DS-CNN wake word and command ASR)
+The full 21-phase plan lives in [ROADMAP.md](ROADMAP.md). Phases 1–3 (agent core, own command model, polish) are done.
+Next, in order: **4 Runtime & packaging → 5 Full system control → 14 Self-improving loop → 7 Memory search → 6 Conversation → 12 Automations**.

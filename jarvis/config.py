@@ -46,6 +46,7 @@ class Config:
     persona_address: str = "sir"        # how Jarvis addresses you: "sir", "ma'am", your name, or ""
     persona_tone: str = "butler"        # butler | friendly | minimal
     show_details: bool = True           # also show the technical program under each reply
+    persona_model: bool = True          # use the trained reply model (fact-checked) when it's available
     min_confidence: float = 0.55        # below this the model's answer is not executed
     confirm_actions: list[str] = field(default_factory=lambda: ["move_files", "undo"])  # delete always asks
     encrypt_logs: bool = True           # DPAPI-encrypt the activity log (Windows)
@@ -57,7 +58,7 @@ class Config:
     def save(self, path: Path | None = None) -> Path:
         """Write user-editable settings to config.json (used by the settings window)."""
         path = path or (self.data_dir / "config.json")
-        keys = ["persona_name", "persona_address", "persona_tone", "show_details", "hotkey", "folders", "apps", "allowed_roots", "watch_folders", "min_confidence", "confirm_actions",
+        keys = ["persona_name", "persona_address", "persona_tone", "show_details", "persona_model", "hotkey", "folders", "apps", "allowed_roots", "watch_folders", "min_confidence", "confirm_actions",
                 "encrypt_logs", "keep_window_titles", "model_backend", "focus_poll_seconds"]
         path.write_text(json.dumps({k: getattr(self, k) for k in keys}, indent=2), encoding="utf-8")
         return path

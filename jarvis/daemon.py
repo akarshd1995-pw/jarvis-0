@@ -40,11 +40,27 @@ class Jarvis:
         self.brain = Brain(PROJECT_ROOT / config.model_checkpoint, PROJECT_ROOT / config.tokenizer_path,
                            min_confidence=config.min_confidence, prefer=config.model_backend)
         self.hooks: dict = {}   # UI callbacks: settings, restart
-        self.persona = Persona(config.persona_name, config.persona_address, config.persona_tone)
+        self.persona = Persona(config.persona_name, config.persona_address, config.persona_tone,
+                               model=self._load_reply_model() if config.persona_model else None)
         self.executor = Executor(config, self.store, confirm, describe=self.persona.confirm_question)
         self.data_root = data_root or PROJECT_ROOT / "data"
         self.last_text: str | None = None
         self.last_program: str | None = None
+
+    @staticmethod
+    def _load_reply_model():
+        ck = PROJECT_ROOT / "checkpoints"
+        enc, dec, tok = ck / "reply_encoder.onnx", ck / "reply_decoder.onnx", ck / "reply_tokenizer.json"
+        if not (enc.exists() and dec.exists() and tok.exists()):
+            return None
+        try:
+            from .nlg.generator import ReplyModel
+            m = ReplyModel(enc, dec, tok)
+            log.info("reply model loaded (ONNX)")
+            return m
+        except Exception as e:
+            log.warning("reply model unavailable (%s); using templates", e)
+            return None
 
     def _append(self, name: str, row: dict) -> None:
         self.data_root.mkdir(parents=True, exist_ok=True)
@@ -98,6 +114,12 @@ class Jarvis:
             m = json.loads(onnx_meta.read_text(encoding="utf-8")).get("metrics") or {}
             if m:
                 lines.append(f"  validation exact {m.get('exact', 0):.2%}, unseen phrasing {m.get('val_ood_exact', 0):.2%}")
+        rm = self.persona.model
+        if rm is not None:
+            st = rm.stats
+            lines.append(f"Reply model: on ({st['generated']} generated, {st['rejected']} rejected by the fact check)")
+        else:
+            lines.append("Reply model: off (templates)")
         lines.append(f"Confidence gate: {self.config.min_confidence:.2f}")
         import sys as _sys
         enc = "yes (Windows DPAPI)" if self.config.encrypt_logs and _sys.platform == "win32" else \
@@ -127,6 +149,7 @@ class Jarvis:
         if not self.config.show_details:
             return reply
         detail = f"[{source}] {prog}" if prog is not None else f"[{source}]"
+        detail += f"  · reply: {self.persona.last_source}"
         return f"{reply}\n\n{detail}"
 
     def start_background(self, on_reminder) -> list[threading.Thread]:

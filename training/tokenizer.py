@@ -126,12 +126,14 @@ def main():
     ap.add_argument("--data", type=Path, default=Path("data/intents/train.jsonl"))
     ap.add_argument("--vocab", type=int, default=1024)
     ap.add_argument("--out", type=Path, default=Path("checkpoints/tokenizer.json"))
+    ap.add_argument("--fields", default="text,program", help="jsonl fields to learn from (replies: src,tgt)")
     args = ap.parse_args()
+    fields = args.fields.split(",")
     texts = []
     with open(args.data, encoding="utf-8") as f:
         for line in f:
             ex = json.loads(line)
-            texts += [ex["text"], ex["program"]]
+            texts += [ex[k] for k in fields]
     tok = BPETokenizer.train(texts, args.vocab)
     tok.save(args.out)
     sample = texts[0]

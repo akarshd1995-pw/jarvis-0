@@ -59,12 +59,14 @@ class Persona:
     address: str = "sir"           # "", "sir", "ma'am", a first name...
     tone: str = "butler"           # butler | friendly | minimal
     seed: int | None = None
+    model: object | None = None     # jarvis.nlg.ReplyModel (trained reply generator), optional
 
     def __post_init__(self):
         if self.tone not in TONES:
             self.tone = "butler"
         self.rng = random.Random(self.seed)
         self._last: dict[str, str] = {}
+        self.last_source = "template"
 
     # ------------------------------------------------------------------ core
     def _num(self, n: int, start: bool) -> str:
@@ -79,13 +81,8 @@ class Persona:
             options = [o for o in options if o != self._last[key]] or options
         tpl = self.rng.choice(options)
         self._last[key] = tpl
-        use_addr = self.address and self.rng.random() < ADDRESS_RATE.get(self.tone, 0)
-        f.setdefault("A", f", {self.address}" if use_addr else "")
-        for k in list(f):
-            if isinstance(f[k], str) and k[:1].islower():
-                f.setdefault(_cap(k), _cap(f[k]))
-        out = tpl.format_map(_Defaults(f))
-        return _cap(re.sub(r"\s+([.,?:])", r"\1", out).strip())
+        use_addr = bool(self.address) and self.rng.random() < ADDRESS_RATE.get(self.tone, 0)
+        return render_template(tpl, f, self.address if use_addr else "")
 
     # ------------------------------------------------------------------ results
     def _file_fields(self, d: dict) -> dict:
@@ -101,65 +98,83 @@ class Persona:
                 "files_pl": files_word(2, ext), "filt": filt, "src": folder_name(d.get("src")),
                 "dest": folder_name(d.get("dest")), "opverb": OP_VERBS.get(d.get("op", ""), "do")}
 
-    def result(self, r: ActionResult) -> str:
+    def plan(self, r: ActionResult) -> tuple[str, dict]:
+        """Facts for a result: (template key, fields). Shared by templates and the reply model."""
         d, k = r.data, r.kind
         if k == "files":
             f = self._file_fields(d)
-            if d.get("count", 0) == 0:
-                return self.say("none", **f)
-            return self.say(d["op"], **f)
+            return ("none" if d.get("count", 0) == 0 else d["op"]), f
         if k == "list":
             f = self._file_fields(d)
             if not r.items:
-                return self.say("list_none", **f)
+                return "list_none", f
             shown = ", ".join(r.items[:5]) + (f", and {len(r.items) - 5} more" if len(r.items) > 5 else "")
-            return self.say("list", items=shown, **f)
+            return "list", {**f, "items": shown}
         if k == "open":
-            name = d["name"]
-            if d["what"] == "folder":
-                name = folder_name(name)
-            return self.say(f"open_{d['what']}", name=name)
+            name = folder_name(d["name"]) if d["what"] == "folder" else d["name"]
+            return f"open_{d['what']}", {"name": name}
         if k == "remind":
-            return self.say("remind", text=d["text"], when=self.when(d["due"], d.get("relative", False)))
+            return "remind", {"text": d["text"], "when": self.when(d["due"], d.get("relative", False))}
         if k == "system":
-            key = "system_unsupported_os" if d.get("unsupported_os") else f"system_{d['action']}"
-            return self.say(key)
+            return ("system_unsupported_os" if d.get("unsupported_os") else f"system_{d['action']}"), {}
         if k == "search":
-            return self.say("search", site=SITE_NAMES.get(d["site"], d["site"]), query=d["query"])
+            return "search", {"site": SITE_NAMES.get(d["site"], d["site"]), "query": d["query"]}
         if k == "play":
             key = "play_fallback" if d.get("fallback") else ("play_spotify" if d["site"] == "spotify" else "play")
-            return self.say(key, query=d["query"])
+            return key, {"query": d["query"]}
         if k == "memory":
-            return self.say("memory", query=d["query"])
+            return "memory", {"query": d["query"]}
         if k == "unsupported":
-            return self.say("unsupported", request=_lower_first(d["request"]))
+            return "unsupported", {"request": _lower_first(d["request"])}
         if k == "unknown":
-            return self.say("unknown")
+            return "unknown", {}
         if k == "undo":
             if d.get("cancelled"):
-                return self.say("undo_cancelled")
+                return "undo_cancelled", {}
             if not d.get("count"):
-                return self.say("undo_none")
-            return self.say("undo", count=self._num(d["count"], False), Count=self._num(d["count"], True))
-        return r.summary
+                return "undo_none", {}
+            return "undo", {"count": self._num(d["count"], False), "Count": self._num(d["count"], True)}
+        return "", {"summary": r.summary}
 
-    def confirm_question(self, preview: ActionResult) -> str:
+    def plan_confirm(self, preview: ActionResult) -> tuple[str, dict]:
         d = preview.data
         if preview.kind == "files":
-            return self.say(f"confirm_{d['op']}", **self._file_fields(d))
+            return f"confirm_{d['op']}", self._file_fields(d)
         if preview.kind == "system":
-            return self.say("confirm_system", action_phrase=SYSTEM_PHRASES.get(d["action"], d["action"]))
-        return preview.summary
+            return "confirm_system", {"action_phrase": SYSTEM_PHRASES.get(d["action"], d["action"])}
+        return "", {"summary": preview.summary}
 
-    def error(self, action: str, e: Exception) -> str:
+    def plan_error(self, action: str, e: Exception) -> tuple[str, dict]:
         msg = str(e)
         if isinstance(e, FileNotFoundError):
-            return self.say("err_not_found", name=_basename(msg.split(": ", 1)[-1]))
+            return "err_not_found", {"name": _basename(msg.split(": ", 1)[-1])}
         if isinstance(e, SafetyError) and "outside" in msg:
-            return self.say("err_outside", name=_basename(msg.split(" is outside")[0]))
+            return "err_outside", {"name": _basename(msg.split(" is outside")[0])}
         if isinstance(e, SafetyError) and "cap is" in msg:
-            return self.say("err_too_many")
-        return self.say("err_other", action_phrase=ACTION_PHRASES.get(action, action), error=msg)
+            return "err_too_many", {}
+        return "err_other", {"action_phrase": ACTION_PHRASES.get(action, action), "error": msg}
+
+    def speak(self, key: str, fields: dict) -> str:
+        """Render facts as a sentence: the trained reply model if loaded (and its output passes the
+        fact check), otherwise the templates."""
+        if not key:
+            return fields.get("summary", "")
+        if self.model is not None:
+            out = self.model.generate(key, fields, self.tone, self.address)
+            if out:
+                self.last_source = "reply-model"
+                return out
+        self.last_source = "template"
+        return self.say(key, **fields)
+
+    def result(self, r: ActionResult) -> str:
+        return self.speak(*self.plan(r))
+
+    def confirm_question(self, preview: ActionResult) -> str:
+        return self.speak(*self.plan_confirm(preview))
+
+    def error(self, action: str, e: Exception) -> str:
+        return self.speak(*self.plan_error(action, e))
 
     def report(self, report) -> str:
         parts = [self.result(r) for r in report.results]
@@ -186,10 +201,21 @@ class Persona:
         return f"at {clock} {day}"
 
     def reminder_due(self, text: str) -> str:
-        return self.say("reminder_due", text=text)
+        return self.speak("reminder_due", {"text": text})
 
     def unparsed(self) -> str:
-        return self.say("unparsed")
+        return self.speak("unparsed", {})
+
+
+def render_template(tpl: str, fields: dict, address: str = "") -> str:
+    """Fill a phrasing with facts. address="" leaves the {A} slot empty."""
+    f = dict(fields)
+    f.setdefault("A", f", {address}" if address else "")
+    for k in list(f):
+        if isinstance(f[k], str) and k[:1].islower():
+            f.setdefault(_cap(k), _cap(f[k]))
+    out = tpl.format_map(_Defaults(f))
+    return _cap(re.sub(r"\s+([.,?:])", r"\1", out).strip())
 
 
 def _basename(path: str) -> str:

@@ -125,7 +125,14 @@ Every reply is in character and built from the real result, so counts, folders a
 
 - **Tones:** `butler` (default), `friendly`, `minimal`. Set the assistant's name and how it addresses you (sir, ma'am, your name, or nothing) in Settings.
 - **Small talk without a language model:** greetings, time and date, thanks, "who are you", "what can you do", and a few jokes. Open conversation comes with Jarvis-LM (phase 27).
-- **Details line:** the technical command shows under each reply (`[model 98%] move_files(...)`). Turn it off in Settings once you trust it.
+- **Details line:** the technical command shows under each reply (`[model 98%] move_files(...)  · reply: reply-model`). Turn it off in Settings once you trust it.
+
+### Our own reply model (trained from scratch)
+A second small model (~6.5M parameters) turns facts into a sentence in the chosen tone, so wording varies beyond fixed lines.
+- **Data:** random situations are turned into facts by the same code the agent uses, then paired with phrasings from a bank of ~290 lines across 37 situations and 3 tones (`jarvis/nlg/bank.py`).
+- **Fact checker** (`jarvis/nlg/checker.py`): a generated sentence is shown only if it states every required fact (count, file type, folders, names, time) and invents nothing (no extra numbers, folders, sites or forms of address). Otherwise Jarvis uses the template line.
+- **Train it:** `.\train_replies.bat` (about 15 minutes; also runs automatically at the end of `train_night.bat`). Its log reports the **fact-check pass rate**.
+- **Check it:** `/status` shows how many replies it generated and how many the checker rejected. Turn it off in Settings to use templates only.
 
 ## Teaching it your own phrasing
 The fastest way: right in the command bar, after Jarvis gets something wrong, type

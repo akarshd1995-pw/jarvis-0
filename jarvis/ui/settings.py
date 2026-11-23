@@ -57,6 +57,9 @@ class SettingsWindow:
         self.p_tone = tk.StringVar(value=config.persona_tone)
         ttk.Combobox(f, textvariable=self.p_tone, values=["butler", "friendly", "minimal"], state="readonly",
                      width=10).grid(row=19, column=1, **pad)
+        self.p_model = tk.BooleanVar(value=config.persona_model)
+        ttk.Checkbutton(f, text="Use my trained reply model (fact-checked; templates if it's unsure)",
+                        variable=self.p_model).grid(row=22, column=0, columnspan=2, **pad)
         self.details = tk.BooleanVar(value=config.show_details)
         ttk.Checkbutton(f, text="Show the technical command under each reply", variable=self.details).grid(
             row=20, column=0, columnspan=2, **pad)
@@ -88,7 +91,7 @@ class SettingsWindow:
         self.roots.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=10)
 
         btns = ttk.Frame(f)
-        btns.grid(row=21, column=0, columnspan=2, pady=10)
+        btns.grid(row=23, column=0, columnspan=2, pady=10)
         ttk.Button(btns, text="Save", command=self.save).pack(side="left", padx=6)
         ttk.Button(btns, text="Cancel", command=self.win.destroy).pack(side="left", padx=6)
 
@@ -115,6 +118,7 @@ class SettingsWindow:
         c.persona_name = self.p_name.get().strip() or "Jarvis"
         c.persona_address, c.persona_tone = self.p_addr.get().strip(), self.p_tone.get()
         c.show_details = self.details.get()
+        c.persona_model = self.p_model.get()
         path = c.save()
         try:
             (autostart.enable if self.auto.get() else autostart.disable)()

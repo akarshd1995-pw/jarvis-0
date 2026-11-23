@@ -481,3 +481,78 @@ def test_smalltalk_and_details_toggle(env):
     cfg.show_details = False
     j = Jarvis(cfg, lambda *a: True)
     assert "[" not in j.handle("thanks")
+
+
+# ------------------------------------------------------------------ phase 22b: trained reply model
+def test_checker_accepts_true_and_rejects_invented_facts():
+    from jarvis.nlg.checker import check
+    f = {"count": "fourteen", "files": "PDFs", "files_pl": "PDFs", "filt": " older than 1 month",
+         "src": "Downloads", "dest": "Archive", "opverb": "move"}
+    assert check("move", f, "butler", "sir", "Done, sir. Fourteen PDFs moved to Archive.")
+    assert not check("move", f, "butler", "sir", "Done. Twelve PDFs moved to Archive.")        # wrong number
+    assert not check("move", f, "butler", "sir", "Fourteen PDFs moved to Documents.")          # wrong folder
+    assert not check("move", f, "butler", "sir", "Fourteen PDFs moved to Archive, ma'am.")     # wrong address
+    assert not check("move", f, "butler", "sir", "Fourteen PDFs moved.")                       # missing destination
+    assert not check("move", f, "butler", "", "Fourteen PDFs moved to Archive, sir.")          # address off
+
+
+def test_every_reply_training_example_passes_its_own_fact_check():
+    from datagen.generate_replies import make_example
+    from jarvis.nlg.checker import check, linearize, parse_src
+    rng = random.Random(11)
+    for _ in range(5000):
+        ex = make_example(rng)
+        if ex:
+            key, fields, tone, addr = parse_src(ex["src"])
+            assert linearize(key, fields, tone, addr) == ex["src"]
+            assert check(key, fields, tone, addr, ex["tgt"]), ex
+
+
+def _fake_reply_model(tmp_path, sentence):
+    import numpy as np
+    from datagen.generate_replies import make_example
+    from jarvis.nlg.generator import ReplyModel
+    from training.tokenizer import EOS, BPETokenizer
+    rng = random.Random(4)
+    rows = [make_example(rng) for _ in range(1500)]
+    tok = BPETokenizer.train([r["src"] for r in rows if r] + [r["tgt"] for r in rows if r] + [sentence], 900,
+                             verbose=False)
+    path = tmp_path / "rt.json"
+    tok.save(path)
+    target = tok.encode(sentence) + [EOS]
+
+    class Enc:
+        def run(self, names, feeds):
+            return [np.zeros((1, feeds["src"].shape[1], 4), dtype=np.float32)]
+
+    class Dec:
+        def run(self, names, feeds):
+            seqs = feeds["tgt_in"]
+            out = np.full((seqs.shape[0], tok.vocab_size), -50.0, dtype=np.float32)
+            for i, s in enumerate(seqs):
+                out[i, target[min(len(s) - 1, len(target) - 1)]] = 0.0
+            return [out]
+
+    return ReplyModel(None, None, path, sessions=(Enc(), Dec()), seed=0)
+
+
+def _move_result():
+    from jarvis.actions.base import ActionResult as AR
+    return AR("", kind="files", data={"op": "move", "count": 14, "src": "Downloads", "dest": "Archive", "ext": "pdf",
+                                      "older_than": None, "newer_than": None, "name_contains": None})
+
+
+def test_reply_model_output_used_when_facts_check_out(tmp_path):
+    from jarvis.persona import Persona
+    m = _fake_reply_model(tmp_path, "Right away. 14 PDFs are tucked into Archive.")
+    p = Persona(tone="butler", address="", model=m, seed=0)
+    assert p.result(_move_result()) == "Right away. 14 PDFs are tucked into Archive."
+    assert p.last_source == "reply-model"
+
+
+def test_reply_model_wrong_facts_fall_back_to_template(tmp_path):
+    from jarvis.persona import Persona
+    m = _fake_reply_model(tmp_path, "Right away. Twelve PDFs are tucked into Documents.")
+    p = Persona(tone="minimal", address="", model=m, seed=0)
+    assert p.result(_move_result()) == "Moved 14 PDFs to Archive."
+    assert p.last_source == "template" and m.stats["rejected"] == m.stats["generated"] > 0

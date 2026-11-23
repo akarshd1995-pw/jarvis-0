@@ -30,7 +30,7 @@ Status: ✅ done · 🔨 in progress · ⬜ planned
 | # | Phase | What it adds | Status |
 |---|---|---|---|
 | 4 | **Runtime & packaging** | ONNX model (no PyTorch needed), autostart with Windows, tray icon, settings window, encrypted local store, one-click update | 🔨 code done, needs first run on Windows |
-| 22 | 🆕 **Persona layer** | In-character replies for every action ("Done. Fourteen PDFs are in Archive."), confirmations and errors. Configurable name, form of address and tone. Written so voice can read the same lines later | 🔨 code done, try it |
+| 22 | 🆕 **Persona layer** | In-character replies for every action ("Done. Fourteen PDFs are in Archive."), confirmations and errors. Configurable name, form of address and tone. Written so voice can read the same lines later. Plus our own reply model (facts to sentence, ~6.5M params) behind a fact checker, with templates as the fallback | 🔨 code done; train the reply model and try it |
 | 25 | 🆕 **HUD interface** | Animated overlay with a status orb (idle / listening / thinking / speaking) and live widgets (system stats, reminders, running jobs, last action). Our own visual design | ⬜ |
 
 ## Stage C: Runs and watches your machines

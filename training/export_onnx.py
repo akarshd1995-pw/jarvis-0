@@ -2,6 +2,7 @@
 
     python -m training.export_onnx                 # writes checkpoints/intent_encoder.onnx + intent_decoder.onnx
     python -m training.export_onnx --verify 200    # also checks ONNX == PyTorch on 200 validation examples
+    python -m training.export_onnx --checkpoint checkpoints/reply.pt --prefix reply     # the reply model
 
 Two graphs:
   encoder: (src int64 [B,S], src_pad bool [B,S])                  -> mem float32 [B,S,D]
@@ -49,13 +50,13 @@ def _export(module, args, path, names_in, names_out, dynamic):
         torch.onnx.export(module, args, str(path), **kw)
 
 
-def export(checkpoint: Path, out_dir: Path) -> tuple[Path, Path]:
+def export(checkpoint: Path, out_dir: Path, prefix: str = "intent") -> tuple[Path, Path]:
     ckpt = torch.load(checkpoint, map_location="cpu", weights_only=True)
     model = IntentTransformer(ModelConfig(**ckpt["config"]))
     model.load_state_dict(ckpt["model"])
     model.eval()
     out_dir.mkdir(parents=True, exist_ok=True)
-    enc_path, dec_path = out_dir / "intent_encoder.onnx", out_dir / "intent_decoder.onnx"
+    enc_path, dec_path = out_dir / f"{prefix}_encoder.onnx", out_dir / f"{prefix}_decoder.onnx"
 
     src = torch.randint(4, model.cfg.vocab_size, (2, 12))
     pad = torch.zeros(2, 12, dtype=torch.bool)
@@ -69,7 +70,7 @@ def export(checkpoint: Path, out_dir: Path) -> tuple[Path, Path]:
                 {"tgt_in": {0: "b", 1: "t"}, "mem": {0: "b", 1: "s"}, "src_pad": {0: "b", 1: "s"},
                  "logprobs": {0: "b"}})
     meta = {"config": ckpt["config"], "step": ckpt.get("step"), "metrics": ckpt.get("metrics")}
-    (out_dir / "intent_onnx.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    (out_dir / f"{prefix}_onnx.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return enc_path, dec_path
 
 
@@ -112,12 +113,13 @@ def main():
     ap.add_argument("--checkpoint", type=Path, default=Path("checkpoints/intent.pt"))
     ap.add_argument("--tokenizer", type=Path, default=Path("checkpoints/tokenizer.json"))
     ap.add_argument("--out", type=Path, default=Path("checkpoints"))
+    ap.add_argument("--prefix", default="intent", help="intent (command model) or reply (reply model)")
     ap.add_argument("--verify", type=int, default=0, help="compare ONNX vs PyTorch on N validation examples")
     ap.add_argument("--data", type=Path, default=Path("data/intents/val.jsonl"))
     args = ap.parse_args()
-    enc, dec = export(args.checkpoint, args.out)
+    enc, dec = export(args.checkpoint, args.out, args.prefix)
     print(f"wrote {enc} ({enc.stat().st_size / 1e6:.1f} MB) and {dec} ({dec.stat().st_size / 1e6:.1f} MB)")
-    if args.verify:
+    if args.verify and args.prefix == "intent":
         verify(args.checkpoint, args.out, args.tokenizer, args.data, args.verify)
 
 

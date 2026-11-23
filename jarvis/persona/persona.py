@@ -222,6 +222,9 @@ class Persona:
         return self.say(key, **fields)
 
     def result(self, r: ActionResult) -> str:
+        if r.kind == "briefing":                     # already written in character by jarvis.briefing
+            self.last_source = "briefing"
+            return r.data["text"]
         return self.speak(*self.plan(r))
 
     def confirm_question(self, preview: ActionResult) -> str:

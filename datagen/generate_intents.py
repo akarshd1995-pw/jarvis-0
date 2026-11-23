@@ -934,13 +934,58 @@ def gen_mood(c: Ctx):
     return f"mood(kind={kind}, music=no)", feel
 
 
+# ---------------------------------------------------------------- briefings (phase 24)
+BRIEF_MORNING_EN = frames("BRIEF_MORNING_EN", [
+    "good morning", "good morning jarvis", "morning briefing", "give me my morning briefing", "what's my day look like",
+    "what do i have today", "what's on today", "what's on my agenda today", "read me the morning briefing",
+    "start my morning briefing", "morning update please", "what's the plan for today", "how's my day looking",
+    "anything on today", "morning summary", "give me the morning report", "what's planned for today",
+    "what's my schedule today", "brief me on today", "tell me about my day", "what does today look like",
+    "give me today's briefing", "today's update please", "morning rundown",
+    "morning agenda summary please", "the morning report and rundown",
+])
+BRIEF_MORNING_HI = frames("BRIEF_MORNING_HI", [
+    "aaj ka plan kya hai", "aaj kya hai", "aaj ke liye kya hai", "aaj ka din kaisa hai", "subah ki briefing do",
+    "aaj ka schedule batao", "aaj kya kya hai batao", "good morning yaar, aaj ka plan batao", "aaj ka update do",
+    "aaj ka briefing do", "good morning yaar",
+])
+BRIEF_EVENING_EN = frames("BRIEF_EVENING_EN", [
+    "how was my day", "evening summary", "give me my evening briefing", "summarize my day", "what did i do today",
+    "what did i work on today", "wrap up the day", "end of day summary", "daily report", "give me the day recap",
+    "evening update please", "how did my day go", "recap my day", "evening report", "day summary please",
+    "what did i get done today", "give me today's summary", "read me the evening briefing", "end of day report",
+    "how productive was i today", "show me my day", "evening rundown", "tell me how today went", "day wrap up",
+    "tell me what i get done and wrap it up", "how it went today, sum it up",
+])
+BRIEF_EVENING_HI = frames("BRIEF_EVENING_HI", [
+    "aaj maine kya kiya", "aaj ka summary do", "aaj ka hisaab batao", "aaj din kaisa gaya", "aaj kitna kaam kiya",
+    "shaam ki briefing do", "aaj ka recap do", "aaj kya kya kiya batao", "din ka summary batao", "aaj ka report do",
+    "din ka recap",
+])
+BRIEF_ANY = frames("BRIEF_ANY", [
+    "brief me", "briefing", "give me a briefing", "catch me up", "status update", "sitrep", "update me",
+    "give me the rundown", "what's the status", "give me an update", "quick briefing please", "run the briefing",
+    "read me my briefing", "what did i miss", "daily briefing", "jarvis briefing", "update de do", "briefing do",
+    "daily rundown jarvis",
+])
+
+
+def gen_briefing(c: Ctx):
+    r = c.rng.random()
+    if r < 0.4:
+        return "briefing(kind=morning)", c.T(BRIEF_MORNING_HI if c.hing else BRIEF_MORNING_EN), {}
+    if r < 0.8:
+        return "briefing(kind=evening)", c.T(BRIEF_EVENING_HI if c.hing else BRIEF_EVENING_EN), {}
+    return "briefing()", c.T(BRIEF_ANY), {}
+
+
 GENERATORS = [
     (lambda c: gen_file_op(c, "move"), 14), (lambda c: gen_file_op(c, "copy"), 7),
     (lambda c: gen_file_op(c, "delete"), 8), (lambda c: gen_file_op(c, "list"), 6),
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",

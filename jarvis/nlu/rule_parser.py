@@ -78,6 +78,19 @@ def _window(action: str, target: str) -> str:
 
 RULES: list[tuple[re.Pattern, callable]] = [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
+    # briefings (phase 24)
+    (re.compile(r"^(?:(?:hey |ok )?jarvis,? )?(?:good morning|gm)(?:,? jarvis)?[!. ]*$"
+                r"|^(?:(?:hey )?jarvis,? )?(?:(?:give|read) me |start |run |play )?(?:my |the |a |today'?s )?morning (?:briefing|brief|summary|update|report)(?: please| pls)?$"
+                r"|^(?:what'?s|what is|whats) (?:on )?(?:my |the )?(?:day|agenda|plan|schedule)(?: (?:look )?like)?(?: today)?\??$"
+                r"|^what(?:'s| is| do i have) (?:on |planned )?(?:for )?today\??$"
+                r"|^aaj (?:ka (?:plan|din) kya hai|kya (?:hai|plan hai)|ke liye kya hai)\??$", re.I),
+     lambda m, t: "briefing(kind=morning)"),
+    (re.compile(r"^(?:(?:hey )?jarvis,? )?(?:how was my day|how did my day go|summari[sz]e my day|wrap up (?:the|my) day"
+                r"|(?:give me |read me )?(?:my |the |an? )?(?:evening|end of (?:the )?day|eod|daily|day) (?:briefing|brief|summary|report|recap|wrap ?up)"
+                r"|what did i (?:do|work on) today|aaj (?:maine )?kya kiya|aaj ka (?:summary|hisaab)(?: do| batao)?|day recap)(?: please| pls)?\??$", re.I),
+     lambda m, t: "briefing(kind=evening)"),
+    (re.compile(r"^(?:(?:hey )?jarvis,? )?(?:give me |read me |start |run )?(?:my |the |a )?(?:briefing|daily brief|rundown|status update|sitrep)(?: please| pls)?\??$|^(?:(?:hey )?jarvis,? )?(?:brief me|catch me up|update me)(?: please| pls)?\??$", re.I),
+     lambda m, t: "briefing()"),
     # richer play modes first: latest upload of a channel, playlist, live, open a channel
     (re.compile(r"^(?:play|watch|put on|open) (?:the )?(?:latest|newest|new|recent|most recent|last) (?:video|upload)s? "
                 r"(?:of|from|by|on) (?:the )?(.+?)(?: channel)?(?: on youtube)?$", re.I),

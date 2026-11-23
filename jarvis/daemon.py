@@ -17,6 +17,7 @@ from .executor import Executor
 from .nlu.brain import Brain
 from .persona import Persona, smalltalk
 from .persona import mood
+from . import briefing
 from .safety import Tier
 from .store import Store
 
@@ -48,7 +49,59 @@ class Jarvis:
         self.data_root = data_root or PROJECT_ROOT / "data"
         self.last_text: str | None = None
         self.monitor = None
+        self.sampler = None
         self.last_program: str | None = None
+        from .executor import REGISTRY
+        REGISTRY["briefing"] = self._briefing_action
+        self.briefings = briefing.Scheduler(config.data_dir / "briefing_state.json", config.briefing_morning,
+                                            config.briefing_evening, enabled=config.briefing_auto)
+
+    # ------------------------------------------------------------ briefings (phase 24)
+    @property
+    def job_logs(self) -> dict:
+        ck = PROJECT_ROOT / "checkpoints"
+        return {"Training command model": ck / "train_log.txt", "Training reply model": ck / "reply_log.txt"}
+
+    def briefing_text(self, kind: str, now: float | None = None) -> str:
+        try:
+            downloads = self.config.resolve_folder("Downloads")
+        except Exception:
+            downloads = None
+        facts = briefing.gather(kind, self.store, self.sampler.snapshot if self.sampler else None, self.job_logs,
+                                PROJECT_ROOT / "checkpoints" / "eval_report.txt", downloads, now)
+        return briefing.render(facts, self.config.persona_name, self.config.persona_address, self.config.persona_tone)
+
+    def _briefing_action(self, args, ctx, dry_run: bool):
+        from datetime import datetime
+        kind = str(args.get("kind", "")) or ("morning" if datetime.now().hour < 15 else "evening")
+        text = self.briefing_text(kind)
+        if not dry_run:
+            self.briefings.mark(kind, datetime.now())
+            self.store.log_event("briefing", {"kind": kind, "auto": False})
+        return ActionResult(briefing.short(text), kind="briefing", data={"text": text, "kind": kind})
+
+    def start_briefings(self, deliver) -> threading.Thread:
+        """deliver(kind, text): the morning one the first time you're at the PC after briefing_morning,
+        the evening one after briefing_evening, each once a day."""
+        from datetime import datetime
+
+        def loop():
+            while True:
+                try:
+                    now = time.time()
+                    active = bool(self.store.events_since(now - 300, "focus") or self.store.events_since(now - 300, "command"))
+                    kind = self.briefings.due(datetime.now(), active)
+                    if kind:
+                        self.briefings.mark(kind, datetime.now())
+                        self.store.log_event("briefing", {"kind": kind, "auto": True})
+                        deliver(kind, self.briefing_text(kind))
+                except Exception as e:                 # a briefing must never take Jarvis down
+                    log.warning("briefing failed: %s", e)
+                time.sleep(60)
+
+        t = threading.Thread(target=loop, daemon=True, name="briefings")
+        t.start()
+        return t
 
     @staticmethod
     def _load_reply_model():
@@ -149,6 +202,7 @@ class Jarvis:
         logs = {"Training command model": ck / "train_log.txt", "Training reply model": ck / "reply_log.txt"}
         sampler = MetricsSampler(logs)
         sampler.start()
+        self.sampler = sampler
         monitor = None
         if self.config.monitor_enabled:
             c = self.config
@@ -299,6 +353,7 @@ def main() -> None:
         jarvis = Jarvis(config, _cli_confirm)
         jarvis.start_background(lambda text: print(f"\n[REMINDER] {text}\n> ", end=""))
         jarvis.start_monitor(lambda a, text: print(f"\n[{a.level.upper()}] {text}\n> ", end=""))
+        jarvis.start_briefings(lambda kind, text: print(f"\n[{kind.upper()} BRIEFING] {text}\n> ", end=""))
         print("Jarvis-0 (cli). Ctrl+C to quit.")
         try:
             while True:
@@ -378,6 +433,20 @@ def main() -> None:
             bar.post("call", lambda: (hud.set_state("alert", 4), hud.set_last(text)))
 
     jarvis.start_background(on_reminder)
+
+    def deliver_briefing(kind, text):
+        """Full text in the command bar, the gist on the HUD and as a Windows notification."""
+        bar.post("message", text)
+        gist = briefing.short(text)
+        if hud is not None:
+            bar.post("call", lambda: (hud.set_state("success", 4), hud.set_last(gist)))
+        if ui["icon"] is not None:
+            try:
+                ui["icon"].notify(gist, f"{config.persona_name}: {kind} briefing")
+            except Exception:
+                pass
+
+    jarvis.start_briefings(deliver_briefing)
 
     icon = ui["icon"] = start_tray({
         "open": lambda: bar.post("open"),

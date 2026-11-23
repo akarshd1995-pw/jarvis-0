@@ -955,3 +955,65 @@ def test_copy_guard():
     assert copy_ok('play_media(query="சூப்', "play சூப்பர் மச்சி")         # multi-byte characters
     assert copy_ok('play_media(query="\ufffd', "play சூப்பர்")            # half-decoded character
     assert not copy_ok('play_media(query="Abhi and niyu")', "open the Abhi and Niyu channel")  # exact case
+
+
+# ---------------------------------------------------------------- briefings (phase 24)
+def test_briefing_rules():
+    from jarvis.nlu.rule_parser import rule_parse
+    assert str(rule_parse("good morning")) == "briefing(kind=morning)"
+    assert str(rule_parse("aaj ka plan kya hai")) == "briefing(kind=morning)"
+    assert str(rule_parse("how was my day")) == "briefing(kind=evening)"
+    assert str(rule_parse("aaj maine kya kiya")) == "briefing(kind=evening)"
+    assert str(rule_parse("brief me")) == "briefing()"
+
+
+def test_briefing_gather_and_render(tmp_path):
+    import os
+    from datetime import datetime
+    from jarvis import briefing as B
+    from jarvis.hud.metrics import Snapshot
+    from jarvis.store import Store
+    st = Store(tmp_path / "db.sqlite", encrypt=False)
+    now = datetime(2026, 11, 24, 21, 15).timestamp()
+    st.add_reminder(datetime(2026, 11, 25, 10, 0).timestamp(), "dentist")
+    st.add_reminder(datetime(2026, 11, 27, 10, 0).timestamp(), "not tomorrow")
+    t = datetime(2026, 11, 24, 9, 0).timestamp()
+    for app, mins in [("Code.exe", 190), ("chrome.exe", 45), ("LockApp.exe", 120), ("Spotify.exe", 25)]:
+        st.log_event("focus", {"app": app}, ts=t)
+        t += mins * 60
+    st.log_event("command_run", {"program": "x"}, ts=t)
+    dl = tmp_path / "Downloads"
+    dl.mkdir()
+    for i in range(30):
+        (dl / f"{i}.zip").write_bytes(b"x")
+        os.utime(dl / f"{i}.zip", (now - 90 * 86400,) * 2)
+    f = B.gather("evening", st, Snapshot(cpu=5, gpu_temp=88, disk_free_gb=200), {}, None, dl, now)
+    assert f.apps[0] == ("VS Code", 190) and all(a != "Lockapp" for a, _ in f.apps)   # lock screen isn't work
+    assert [r[1] for r in f.reminders] == ["dentist"]
+    text = B.render(f, "Jarvis", "sir", "butler")
+    for bit in ["VS Code (3 h 10 min)", "dentist at 10:00 am", "running hot at 88", "30 are over a month old", "1 command"]:
+        assert bit in text, bit
+    assert not B.short(text).startswith("Good")
+
+
+def test_briefing_scheduler(tmp_path):
+    from datetime import datetime
+    from jarvis.briefing import Scheduler
+    s = Scheduler(tmp_path / "state.json", "07:00", "21:00")
+    assert s.due(datetime(2026, 11, 24, 6, 30), True) is None          # too early
+    assert s.due(datetime(2026, 11, 24, 8, 0), False) is None          # not at the PC
+    assert s.due(datetime(2026, 11, 24, 8, 0), True) == "morning"
+    s.mark("morning", datetime(2026, 11, 24, 8, 0))
+    assert s.due(datetime(2026, 11, 24, 9, 0), True) is None           # once a day
+    assert s.due(datetime(2026, 11, 24, 21, 5), True) == "evening"
+    assert Scheduler(tmp_path / "state.json").given_today("morning", datetime(2026, 11, 24, 10, 0))   # survives restart
+
+
+def test_briefing_command_end_to_end(env, tmp_path):
+    from jarvis.daemon import Jarvis
+    cfg, store, dl, arc = env
+    j = Jarvis(cfg, lambda *a: True, data_root=tmp_path / "d")
+    j.config.show_details = False
+    reply = j.handle("how was my day")
+    assert reply.startswith("Good") and "reminders tomorrow" in reply or "reminder" in reply
+    assert j.briefings.given_today("evening", __import__("datetime").datetime.now())

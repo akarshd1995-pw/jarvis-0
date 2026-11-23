@@ -88,6 +88,8 @@ SCHEMA: dict[str, dict] = {
                       "enum": {"kind": ["wifi", "bluetooth"], "state": ["on", "off"]}},
     "screenshot":    {"args": {"mode": "ident"}, "required": [], "enum": {"mode": ["full", "window", "region"]}},
     "screen_record": {"args": {"action": "ident"}, "required": ["action"], "enum": {"action": ["start", "stop"]}},
+    "briefing":      {"args": {"kind": "ident"}, "required": [],                         # morning / evening summary
+                      "enum": {"kind": ["morning", "evening"]}},
     "mood":          {"args": {"kind": "ident", "music": "ident"}, "required": ["kind"],   # how the user feels
                       "enum": {"kind": ["low", "stressed", "tired", "bored", "angry", "lonely", "happy", "focus", "sleep"],
                                "music": ["yes", "no"]}},

@@ -84,6 +84,14 @@ class SettingsWindow:
         ttk.Label(f, text="Repeat the same alert after (minutes)").grid(row=33, column=0, **pad)
         self.a_cool = tk.StringVar(value=f"{config.alert_cooldown_min:g}")
         ttk.Entry(f, textvariable=self.a_cool, width=8).grid(row=33, column=1, **pad)
+        self.b_auto = tk.BooleanVar(value=config.briefing_auto)
+        ttk.Checkbutton(f, text="Morning and evening briefings", variable=self.b_auto).grid(row=34, column=0, **pad)
+        ttk.Label(f, text="Morning briefing from (HH:MM)").grid(row=35, column=0, **pad)
+        self.b_morning = tk.StringVar(value=config.briefing_morning)
+        ttk.Entry(f, textvariable=self.b_morning, width=8).grid(row=35, column=1, **pad)
+        ttk.Label(f, text="Evening briefing at (HH:MM)").grid(row=36, column=0, **pad)
+        self.b_evening = tk.StringVar(value=config.briefing_evening)
+        ttk.Entry(f, textvariable=self.b_evening, width=8).grid(row=36, column=1, **pad)
         self.details = tk.BooleanVar(value=config.show_details)
         ttk.Checkbutton(f, text="Show the technical command under each reply", variable=self.details).grid(
             row=20, column=0, columnspan=2, **pad)
@@ -115,7 +123,7 @@ class SettingsWindow:
         self.roots.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=10)
 
         btns = ttk.Frame(f)
-        btns.grid(row=34, column=0, columnspan=2, pady=10)
+        btns.grid(row=40, column=0, columnspan=2, pady=10)
         ttk.Button(btns, text="Save", command=self.save).pack(side="left", padx=6)
         ttk.Button(btns, text="Cancel", command=self.win.destroy).pack(side="left", padx=6)
 
@@ -152,6 +160,13 @@ class SettingsWindow:
             messagebox.showerror("Alerts", "Alert thresholds must be numbers.", parent=self.win)
             return
         c.monitor_enabled = self.mon_on.get()
+        import re as _re
+        for label, var in (("Morning briefing", self.b_morning), ("Evening briefing", self.b_evening)):
+            if not _re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", var.get().strip()):
+                messagebox.showerror("Briefings", f"{label} time must look like 07:30.", parent=self.win)
+                return
+        c.briefing_auto = self.b_auto.get()
+        c.briefing_morning, c.briefing_evening = self.b_morning.get().strip(), self.b_evening.get().strip()
         path = c.save()
         try:
             (autostart.enable if self.auto.get() else autostart.disable)()

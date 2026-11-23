@@ -183,7 +183,7 @@ UNKNOWN_TEMPLATES = [  # chit-chat, questions, unclear or incomplete requests ->
     "write python code for {topic}", "summarize this article", "how much is bitcoin",
     "who won the match {when}", "recommend a movie", "what should i eat", "do my homework",
     "make me a website", "what's on my calendar {when}", "how do i {topic}", "i love you", "thanks",
-    "hello", "good morning", "good night", "ok", "hmm", "nothing", "never mind", "asdfgh", "?",
+    "hello", "good night", "ok", "hmm", "nothing", "never mind", "asdfgh", "?",
     "kya haal hai", "mausam kaisa hai", "ek joke sunao", "mera homework kar do", "{topic} kya hai",
     "gaana bajao", "tum kaun ho", "kuch nahi", "move my stuff", "delete it", "put them somewhere",
     "remind me", "open", "copy", "do the thing", "play", "search", "play something",

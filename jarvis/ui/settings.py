@@ -7,125 +7,227 @@ from tkinter import messagebox, ttk
 
 from .. import autostart
 from ..config import Config
+from . import theme as T
+
+
+class Toggle(tk.Canvas):
+    """Pill-shaped on/off switch bound to a BooleanVar."""
+
+    def __init__(self, parent, variable: tk.BooleanVar, bg: str = T.SURFACE):
+        super().__init__(parent, width=40, height=22, bg=bg, highlightthickness=0, bd=0, cursor="hand2")
+        self.var = variable
+        self.bind("<Button-1>", lambda e: (self.var.set(not self.var.get()), self.draw()))
+        self.draw()
+
+    def draw(self):
+        self.delete("all")
+        on = bool(self.var.get())
+        T.round_rect(self, 1, 1, 39, 21, 10, fill=T.ACCENT if on else T.BORDER_HI, outline="")
+        x = 28 if on else 12
+        self.create_oval(x - 7, 4, x + 7, 18, fill=T.BG if on else T.MUTED, outline="")
 
 
 class SettingsWindow:
+    PAGES = ["General", "Persona", "HUD & alerts", "Briefings", "Folders & apps", "Privacy"]
+
     def __init__(self, parent: tk.Misc, config: Config):
         self.config = config
-        self.win = tk.Toplevel(parent)
-        self.win.title("Jarvis-0 settings")
-        self.win.attributes("-topmost", True)
-        self.win.geometry("620x1080")
-        pad = dict(padx=10, pady=4, sticky="w")
-        f = ttk.Frame(self.win, padding=10)
-        f.pack(fill="both", expand=True)
-        f.columnconfigure(1, weight=1)
+        self.win = w = tk.Toplevel(parent)
+        w.title("Jarvis-0 settings")
+        w.attributes("-topmost", True)
+        w.configure(bg=T.BG)
+        w.geometry("820x600")
+        w.minsize(760, 520)
+        self._style()
 
-        ttk.Label(f, text="Hotkey").grid(row=0, column=0, **pad)
-        self.hotkey = tk.StringVar(value=config.hotkey)
-        ttk.Entry(f, textvariable=self.hotkey).grid(row=0, column=1, sticky="ew", padx=10)
+        side = tk.Frame(w, bg=T.BG, width=200)
+        side.pack(side="left", fill="y")
+        side.pack_propagate(False)
+        tk.Label(side, text="  ".join(config.persona_name.upper()), bg=T.BG, fg=T.TEXT,
+                 font=T.F(13, "bold", "display")).pack(anchor="w", padx=22, pady=(24, 2))
+        tk.Label(side, text="Settings", bg=T.BG, fg=T.MUTED, font=T.F(10)).pack(anchor="w", padx=22, pady=(0, 18))
+        self.nav: dict[str, tk.Label] = {}
+        for name in self.PAGES:
+            lab = tk.Label(side, text=name, bg=T.BG, fg=T.MUTED, font=T.F(10), anchor="w", padx=22, pady=8,
+                           cursor="hand2")
+            lab.pack(fill="x")
+            lab.bind("<Button-1>", lambda e, n=name: self.show(n))
+            self.nav[name] = lab
+        tk.Label(side, text="Changes apply after Save.\nHotkey, model and persona\nneed a restart.", bg=T.BG,
+                 fg=T.FAINT, font=T.F(8), justify="left").pack(side="bottom", anchor="w", padx=22, pady=20)
 
-        ttk.Label(f, text="Min. model confidence").grid(row=1, column=0, **pad)
-        self.conf = tk.DoubleVar(value=config.min_confidence)
-        row = ttk.Frame(f)
-        row.grid(row=1, column=1, sticky="ew", padx=10)
-        self.conf_label = ttk.Label(row, width=5)
-        ttk.Scale(row, from_=0.3, to=0.95, variable=self.conf, command=lambda _v: self._conf_text()).pack(
-            side="left", fill="x", expand=True)
-        self.conf_label.pack(side="left")
-        self._conf_text()
+        main = tk.Frame(w, bg=T.SURFACE, highlightthickness=1, highlightbackground=T.BORDER)
+        main.pack(side="left", fill="both", expand=True)
+        foot = tk.Frame(main, bg=T.SURFACE)
+        foot.pack(side="bottom", fill="x", padx=24, pady=16)
+        self._button(foot, "Save", T.ACCENT, T.BG, self.save).pack(side="right")
+        self._button(foot, "Cancel", T.RAISED, T.TEXT, w.destroy).pack(side="right", padx=(0, 10))
+        tk.Frame(main, bg=T.BORDER, height=1).pack(side="bottom", fill="x")
+        self.content = tk.Frame(main, bg=T.SURFACE)
+        self.content.pack(fill="both", expand=True, padx=28, pady=(22, 8))
 
-        ttk.Label(f, text="Model backend").grid(row=2, column=0, **pad)
-        self.backend = tk.StringVar(value=config.model_backend)
-        ttk.Combobox(f, textvariable=self.backend, values=["auto", "onnx", "torch"], state="readonly",
-                     width=10).grid(row=2, column=1, **pad)
+        self._vars(config)
+        self.pages = {n: self._build_page(n) for n in self.PAGES}
+        self.show("General")
+        w.after(30, lambda: T.win11_style(w))
 
-        ttk.Label(f, text="Ask before (comma-separated)").grid(row=13, column=0, **pad)
-        self.confirm = tk.StringVar(value=", ".join(config.confirm_actions))
-        ttk.Entry(f, textvariable=self.confirm).grid(row=13, column=1, sticky="ew", padx=10)
-        ttk.Label(f, text="e.g. move_files, copy_files, system, undo. Deleting always asks.",
-                  foreground="gray").grid(row=14, column=0, columnspan=2, **pad)
+    # ------------------------------------------------------------ look
+    def _style(self):
+        st = ttk.Style(self.win)
+        try:
+            st.theme_use("clam")
+        except tk.TclError:
+            pass
+        st.configure("TCombobox", fieldbackground=T.RAISED, background=T.RAISED, foreground=T.TEXT,
+                     arrowcolor=T.MUTED, bordercolor=T.BORDER_HI, lightcolor=T.RAISED, darkcolor=T.RAISED,
+                     selectbackground=T.RAISED, selectforeground=T.TEXT, padding=5)
+        st.map("TCombobox", fieldbackground=[("readonly", T.RAISED)], foreground=[("readonly", T.TEXT)])
+        st.configure("Horizontal.TScale", background=T.SURFACE, troughcolor=T.BORDER, bordercolor=T.SURFACE,
+                     lightcolor=T.ACCENT, darkcolor=T.ACCENT)
+        self.win.option_add("*TCombobox*Listbox.background", T.RAISED)
+        self.win.option_add("*TCombobox*Listbox.foreground", T.TEXT)
+        self.win.option_add("*TCombobox*Listbox.selectBackground", T.ACCENT_DIM)
+        self.win.option_add("*TCombobox*Listbox.font", T.F(10))
 
-        ttk.Separator(f).grid(row=16, column=0, columnspan=2, sticky="ew", pady=6)
-        ttk.Label(f, text="Assistant name").grid(row=17, column=0, **pad)
-        self.p_name = tk.StringVar(value=config.persona_name)
-        ttk.Entry(f, textvariable=self.p_name).grid(row=17, column=1, sticky="ew", padx=10)
-        ttk.Label(f, text="Call me (sir, ma'am, a name, or blank)").grid(row=18, column=0, **pad)
-        self.p_addr = tk.StringVar(value=config.persona_address)
-        ttk.Entry(f, textvariable=self.p_addr).grid(row=18, column=1, sticky="ew", padx=10)
-        ttk.Label(f, text="Tone").grid(row=19, column=0, **pad)
-        self.p_tone = tk.StringVar(value=config.persona_tone)
-        ttk.Combobox(f, textvariable=self.p_tone, values=["butler", "friendly", "minimal"], state="readonly",
-                     width=10).grid(row=19, column=1, **pad)
-        self.p_model = tk.BooleanVar(value=config.persona_model)
-        ttk.Checkbutton(f, text="Use my trained reply model (fact-checked; templates if it's unsure)",
-                        variable=self.p_model).grid(row=22, column=0, columnspan=2, **pad)
-        ttk.Separator(f).grid(row=24, column=0, columnspan=2, sticky="ew", pady=6)
-        self.hud_on = tk.BooleanVar(value=config.hud_enabled)
-        ttk.Checkbutton(f, text="Show the HUD overlay", variable=self.hud_on).grid(row=25, column=0, **pad)
-        self.hud_corner = tk.StringVar(value=config.hud_corner)
-        ttk.Combobox(f, textvariable=self.hud_corner, state="readonly", width=12,
-                     values=["top-right", "top-left", "bottom-right", "bottom-left"]).grid(row=25, column=1, **pad)
-        ttk.Label(f, text="HUD opacity").grid(row=26, column=0, **pad)
-        self.hud_alpha = tk.DoubleVar(value=config.hud_opacity)
-        ttk.Scale(f, from_=0.4, to=1.0, variable=self.hud_alpha).grid(row=26, column=1, sticky="ew", padx=10)
-        self.hud_ct = tk.BooleanVar(value=config.hud_click_through)
-        ttk.Checkbutton(f, text="Clicks pass through the HUD", variable=self.hud_ct).grid(
-            row=27, column=0, columnspan=2, **pad)
-        ttk.Separator(f).grid(row=29, column=0, columnspan=2, sticky="ew", pady=6)
-        self.mon_on = tk.BooleanVar(value=config.monitor_enabled)
-        ttk.Checkbutton(f, text="Monitoring alerts", variable=self.mon_on).grid(row=30, column=0, **pad)
-        ttk.Label(f, text="Alert when GPU reaches (°C)").grid(row=31, column=0, **pad)
-        self.a_temp = tk.StringVar(value=f"{config.alert_gpu_temp:g}")
-        ttk.Entry(f, textvariable=self.a_temp, width=8).grid(row=31, column=1, **pad)
-        ttk.Label(f, text="Alert when C: free space below (GB)").grid(row=32, column=0, **pad)
-        self.a_disk = tk.StringVar(value=f"{config.alert_disk_free_gb:g}")
-        ttk.Entry(f, textvariable=self.a_disk, width=8).grid(row=32, column=1, **pad)
-        ttk.Label(f, text="Repeat the same alert after (minutes)").grid(row=33, column=0, **pad)
-        self.a_cool = tk.StringVar(value=f"{config.alert_cooldown_min:g}")
-        ttk.Entry(f, textvariable=self.a_cool, width=8).grid(row=33, column=1, **pad)
-        self.b_auto = tk.BooleanVar(value=config.briefing_auto)
-        ttk.Checkbutton(f, text="Morning and evening briefings", variable=self.b_auto).grid(row=34, column=0, **pad)
-        ttk.Label(f, text="Morning briefing from (HH:MM)").grid(row=35, column=0, **pad)
-        self.b_morning = tk.StringVar(value=config.briefing_morning)
-        ttk.Entry(f, textvariable=self.b_morning, width=8).grid(row=35, column=1, **pad)
-        ttk.Label(f, text="Evening briefing at (HH:MM)").grid(row=36, column=0, **pad)
-        self.b_evening = tk.StringVar(value=config.briefing_evening)
-        ttk.Entry(f, textvariable=self.b_evening, width=8).grid(row=36, column=1, **pad)
-        self.details = tk.BooleanVar(value=config.show_details)
-        ttk.Checkbutton(f, text="Show the technical command under each reply", variable=self.details).grid(
-            row=20, column=0, columnspan=2, **pad)
+    @staticmethod
+    def _button(parent, text, bg, fg, cmd) -> tk.Label:
+        b = tk.Label(parent, text=text, bg=bg, fg=fg, font=T.F(10, "bold"), padx=18, pady=7, cursor="hand2")
+        b.bind("<Button-1>", lambda e: cmd())
+        b.bind("<Enter>", lambda e: b.configure(bg=T.blend(bg, "#ffffff", 0.12)))
+        b.bind("<Leave>", lambda e: b.configure(bg=bg))
+        return b
 
-        self.encrypt = tk.BooleanVar(value=config.encrypt_logs)
-        ttk.Checkbutton(f, text="Encrypt activity log (Windows DPAPI)", variable=self.encrypt).grid(
-            row=3, column=0, columnspan=2, **pad)
-        self.titles = tk.BooleanVar(value=config.keep_window_titles)
-        ttk.Checkbutton(f, text="Store full window titles (off = app name only)", variable=self.titles).grid(
-            row=4, column=0, columnspan=2, **pad)
+    def show(self, name: str):
+        for n, frame in self.pages.items():
+            frame.pack_forget()
+            self.nav[n].configure(bg=T.BG, fg=T.MUTED, font=T.F(10))
+        self.pages[name].pack(fill="both", expand=True)
+        self.nav[name].configure(bg=T.SURFACE, fg=T.ACCENT, font=T.F(10, "bold"))
+
+    # ------------------------------------------------------------ widgets
+    def _entry(self, parent, var, width=None):
+        e = tk.Entry(parent, textvariable=var, bg=T.RAISED, fg=T.TEXT, insertbackground=T.ACCENT, relief="flat",
+                     font=T.F(10), highlightthickness=1, highlightbackground=T.BORDER_HI, highlightcolor=T.ACCENT,
+                     selectbackground=T.ACCENT_DIM, **({"width": width} if width else {}))
+        return e
+
+    def _text(self, parent, value: str, height: int):
+        t = tk.Text(parent, height=height, bg=T.RAISED, fg=T.TEXT, insertbackground=T.ACCENT, relief="flat",
+                    font=T.F(9, kind="mono"), highlightthickness=1, highlightbackground=T.BORDER_HI,
+                    highlightcolor=T.ACCENT, selectbackground=T.ACCENT_DIM, padx=8, pady=6)
+        t.insert("1.0", value)
+        return t
+
+    def _combo(self, parent, var, values, width=14):
+        return ttk.Combobox(parent, textvariable=var, values=values, state="readonly", width=width, font=T.F(10))
+
+    def _row(self, page, label: str, widget_fn, hint: str = "", stretch: bool = False):
+        row = tk.Frame(page, bg=T.SURFACE)
+        row.pack(fill="x", pady=7)
+        left = tk.Frame(row, bg=T.SURFACE)
+        left.pack(side="left", fill="x", expand=True)
+        tk.Label(left, text=label, bg=T.SURFACE, fg=T.TEXT, font=T.F(10), anchor="w").pack(anchor="w")
+        if hint:
+            tk.Label(left, text=hint, bg=T.SURFACE, fg=T.FAINT, font=T.F(8), anchor="w", justify="left",
+                     wraplength=360).pack(anchor="w")
+        wdg = widget_fn(row)
+        wdg.pack(side="right", fill="x" if stretch else None, expand=stretch, padx=(16, 0))
+        return wdg
+
+    def _title(self, page, text: str, sub: str = ""):
+        tk.Label(page, text=text, bg=T.SURFACE, fg=T.TEXT, font=T.F(15, "bold", "display")).pack(anchor="w")
+        if sub:
+            tk.Label(page, text=sub, bg=T.SURFACE, fg=T.MUTED, font=T.F(9)).pack(anchor="w", pady=(2, 0))
+        tk.Frame(page, bg=T.BORDER, height=1).pack(fill="x", pady=(12, 8))
+
+    # ------------------------------------------------------------ state
+    def _vars(self, c: Config):
+        self.hotkey = tk.StringVar(value=c.hotkey)
+        self.conf = tk.DoubleVar(value=c.min_confidence)
+        self.backend = tk.StringVar(value=c.model_backend)
+        self.confirm = tk.StringVar(value=", ".join(c.confirm_actions))
+        self.details = tk.BooleanVar(value=c.show_details)
+        self.p_name = tk.StringVar(value=c.persona_name)
+        self.p_addr = tk.StringVar(value=c.persona_address)
+        self.p_tone = tk.StringVar(value=c.persona_tone)
+        self.p_model = tk.BooleanVar(value=c.persona_model)
+        self.hud_on = tk.BooleanVar(value=c.hud_enabled)
+        self.hud_corner = tk.StringVar(value=c.hud_corner)
+        self.hud_alpha = tk.DoubleVar(value=c.hud_opacity)
+        self.hud_ct = tk.BooleanVar(value=c.hud_click_through)
+        self.mon_on = tk.BooleanVar(value=c.monitor_enabled)
+        self.a_temp = tk.StringVar(value=f"{c.alert_gpu_temp:g}")
+        self.a_disk = tk.StringVar(value=f"{c.alert_disk_free_gb:g}")
+        self.a_cool = tk.StringVar(value=f"{c.alert_cooldown_min:g}")
+        self.b_auto = tk.BooleanVar(value=c.briefing_auto)
+        self.b_morning = tk.StringVar(value=c.briefing_morning)
+        self.b_evening = tk.StringVar(value=c.briefing_evening)
+        self.encrypt = tk.BooleanVar(value=c.encrypt_logs)
+        self.titles = tk.BooleanVar(value=c.keep_window_titles)
         self.auto = tk.BooleanVar(value=autostart.is_enabled())
-        ttk.Checkbutton(f, text="Start Jarvis when I log in to Windows", variable=self.auto).grid(
-            row=5, column=0, columnspan=2, **pad)
 
-        ttk.Label(f, text="Folder aliases (JSON)").grid(row=6, column=0, columnspan=2, **pad)
-        self.folders = tk.Text(f, height=8, font=("Consolas", 9))
-        self.folders.insert("1.0", json.dumps(config.folders, indent=2))
-        self.folders.grid(row=7, column=0, columnspan=2, sticky="nsew", padx=10)
+    def _build_page(self, name: str) -> tk.Frame:
+        pg = tk.Frame(self.content, bg=T.SURFACE)
+        tog = lambda var: (lambda parent: Toggle(parent, var))          # noqa: E731
+        if name == "General":
+            self._title(pg, "General", "How you call Jarvis and how sure it must be before acting.")
+            self._row(pg, "Hotkey", lambda p: self._entry(p, self.hotkey, 18), "Opens the command bar, e.g. ctrl+alt+j")
 
-        ttk.Label(f, text="App aliases (JSON)").grid(row=8, column=0, columnspan=2, **pad)
-        self.apps = tk.Text(f, height=6, font=("Consolas", 9))
-        self.apps.insert("1.0", json.dumps(config.apps, indent=2))
-        self.apps.grid(row=9, column=0, columnspan=2, sticky="nsew", padx=10)
-
-        ttk.Label(f, text="Allowed folders, one per line (Jarvis can't touch anything else)").grid(
-            row=10, column=0, columnspan=2, **pad)
-        self.roots = tk.Text(f, height=3, font=("Consolas", 9))
-        self.roots.insert("1.0", "\n".join(config.allowed_roots))
-        self.roots.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=10)
-
-        btns = ttk.Frame(f)
-        btns.grid(row=40, column=0, columnspan=2, pady=10)
-        ttk.Button(btns, text="Save", command=self.save).pack(side="left", padx=6)
-        ttk.Button(btns, text="Cancel", command=self.win.destroy).pack(side="left", padx=6)
+            def conf(p):
+                f = tk.Frame(p, bg=T.SURFACE)
+                self.conf_label = tk.Label(f, width=5, bg=T.SURFACE, fg=T.ACCENT, font=T.F(10, "bold"))
+                ttk.Scale(f, from_=0.3, to=0.95, variable=self.conf, length=180,
+                          command=lambda _v: self._conf_text()).pack(side="left")
+                self.conf_label.pack(side="left", padx=(8, 0))
+                self._conf_text()
+                return f
+            self._row(pg, "Minimum model confidence", conf, "Below this, the trained model's answer isn't run.")
+            self._row(pg, "Model backend", lambda p: self._combo(p, self.backend, ["auto", "onnx", "torch"]))
+            self._row(pg, "Ask before", lambda p: self._entry(p, self.confirm, 30),
+                      "Comma-separated, e.g. move_files, undo. Deleting and shutdown always ask.")
+            self._row(pg, "Show the technical command under replies", tog(self.details))
+            self._row(pg, "Start Jarvis when I log in to Windows", tog(self.auto))
+        elif name == "Persona":
+            self._title(pg, "Persona", "Who Jarvis is and how it talks to you.")
+            self._row(pg, "Assistant name", lambda p: self._entry(p, self.p_name, 22))
+            self._row(pg, "Call me", lambda p: self._entry(p, self.p_addr, 22), "sir, ma'am, your name, or blank")
+            self._row(pg, "Tone", lambda p: self._combo(p, self.p_tone, ["butler", "friendly", "minimal"]))
+            self._row(pg, "Use my trained reply model", tog(self.p_model),
+                      "Fact-checked; falls back to templates when it's unsure.")
+        elif name == "HUD & alerts":
+            self._title(pg, "HUD & alerts", "The overlay with the orb and gauges, and what it warns you about.")
+            self._row(pg, "Show the HUD", tog(self.hud_on), "Toggle any time with Ctrl+Alt+H")
+            self._row(pg, "Corner", lambda p: self._combo(p, self.hud_corner,
+                                                          ["top-right", "top-left", "bottom-right", "bottom-left"]))
+            self._row(pg, "Opacity", lambda p: ttk.Scale(p, from_=0.4, to=1.0, variable=self.hud_alpha, length=180))
+            self._row(pg, "Clicks pass through the HUD", tog(self.hud_ct))
+            self._row(pg, "Monitoring alerts", tog(self.mon_on))
+            self._row(pg, "Alert when GPU reaches (°C)", lambda p: self._entry(p, self.a_temp, 8))
+            self._row(pg, "Alert when C: has less free (GB)", lambda p: self._entry(p, self.a_disk, 8))
+            self._row(pg, "Repeat the same alert after (min)", lambda p: self._entry(p, self.a_cool, 8))
+        elif name == "Briefings":
+            self._title(pg, "Briefings", "Morning and evening summaries. You can always ask: \"brief me\".")
+            self._row(pg, "Briefings on their own", tog(self.b_auto), "Once a day each, only when you're at the PC.")
+            self._row(pg, "Morning briefing from", lambda p: self._entry(p, self.b_morning, 8),
+                      "The first time you're at the PC after this time (until noon). HH:MM")
+            self._row(pg, "Evening briefing at", lambda p: self._entry(p, self.b_evening, 8), "HH:MM")
+        elif name == "Folders & apps":
+            self._title(pg, "Folders & apps", "Names you can use in commands, and where Jarvis may touch files.")
+            tk.Label(pg, text="Folder aliases (JSON)", bg=T.SURFACE, fg=T.TEXT, font=T.F(10)).pack(anchor="w")
+            self.folders = self._text(pg, json.dumps(self.config.folders, indent=2), 6)
+            self.folders.pack(fill="x", pady=(4, 10))
+            tk.Label(pg, text="App aliases (JSON)", bg=T.SURFACE, fg=T.TEXT, font=T.F(10)).pack(anchor="w")
+            self.apps = self._text(pg, json.dumps(self.config.apps, indent=2), 5)
+            self.apps.pack(fill="x", pady=(4, 10))
+            tk.Label(pg, text="Allowed folders, one per line (Jarvis can't touch anything else)", bg=T.SURFACE,
+                     fg=T.TEXT, font=T.F(10)).pack(anchor="w")
+            self.roots = self._text(pg, "\n".join(self.config.allowed_roots), 3)
+            self.roots.pack(fill="x", pady=(4, 0))
+        elif name == "Privacy":
+            self._title(pg, "Privacy", "Everything stays on this PC.")
+            self._row(pg, "Encrypt the activity log", tog(self.encrypt), "Windows DPAPI: only your account can read it.")
+            self._row(pg, "Store full window titles", tog(self.titles), "Off: only app names (used for briefings).")
+        return pg
 
     def _conf_text(self):
         self.conf_label.configure(text=f"{self.conf.get():.2f}")

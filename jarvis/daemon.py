@@ -415,13 +415,10 @@ def main() -> None:
                       corner=config.hud_corner, opacity=config.hud_opacity,
                       click_through=config.hud_click_through)
 
-            def hud_state(state, hold=0.0):
-                hud.set_state(state, hold)
-                bar.root.update_idletasks()
-
-            jarvis.hooks["state"] = hud_state
-            jarvis.hooks["last"] = hud.set_last
-            jarvis.hooks["hud_toggle"] = hud.toggle
+            # commands run on a worker thread: every HUD change goes through the UI thread's queue
+            jarvis.hooks["state"] = lambda state, hold=0.0: bar.post("call", lambda: hud.set_state(state, hold))
+            jarvis.hooks["last"] = lambda text: bar.post("call", lambda: hud.set_last(text))
+            jarvis.hooks["hud_toggle"] = lambda: bar.post("call", hud.toggle)
             HotkeyThread(config.hud_hotkey, lambda: bar.post("call", hud.toggle), hotkey_id=2).start()
         except Exception as e:     # never let the HUD stop Jarvis from starting
             log.warning("HUD unavailable: %s", e)

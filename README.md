@@ -70,6 +70,8 @@ Watch live progress (with time remaining) from a second window:
 Get-Content checkpoints\train_log.txt -Wait -Tail 5
 ```
 You can stop with Ctrl+C at any time: `checkpoints\intent.pt` always holds the best model so far.
+
+**If training is much slower than expected:** check `gpu mem` in the log, or run `nvidia-smi`. When GPU memory is full, Windows spills into system RAM and training slows down several times without crashing. Lower the per-batch budget, e.g. `python -m training.train --max-tokens 16000`. You can also set NVIDIA Control Panel → Manage 3D settings → *CUDA - Sysmem Fallback Policy* → **Prefer No Sysmem Fallback**, so it stops with a clear out-of-memory error instead.
 That script runs four steps:
 1. `python -m datagen.generate_intents --n 2000000` builds 2M training examples plus `val`, `val_ood`, `test_iid` and `test_ood` sets (about 3 min).
 2. `python -m training.tokenizer --vocab 2048` trains the BPE tokenizer (under a minute).

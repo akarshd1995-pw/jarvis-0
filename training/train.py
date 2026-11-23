@@ -52,19 +52,35 @@ def collate(batch, device):
     return src, src == PAD, tgt[:, :-1], tgt[:, 1:]
 
 
-def batches(rows, bs, shuffle=True):
+def batches(rows, bs, shuffle=True, max_tokens=None):
+    """Yield batches. With max_tokens, each training batch is capped by padded size
+    (rows x (longest source + longest target)) so long multi-command batches can't overflow
+    GPU memory. On Windows an overflow doesn't crash: the driver spills into system RAM
+    and training silently runs several times slower."""
     idx = list(range(len(rows)))
-    if shuffle:
-        random.shuffle(idx)
-        # bucket by length so batches have little padding
-        chunks = [sorted(idx[i:i + bs * 50], key=lambda j: len(rows[j][0])) for i in range(0, len(idx), bs * 50)]
-        groups = [c[i:i + bs] for c in chunks for i in range(0, len(c), bs)]
-        random.shuffle(groups)
-        for g in groups:
-            yield [rows[j] for j in g]
-    else:
+    if not shuffle:
         for i in range(0, len(idx), bs):
             yield [rows[j] for j in idx[i:i + bs]]
+        return
+    random.shuffle(idx)
+    # bucket by length so batches have little padding
+    chunks = [sorted(idx[i:i + bs * 50], key=lambda j: (len(rows[j][0]), len(rows[j][1])))
+              for i in range(0, len(idx), bs * 50)]
+    groups = []
+    for c in chunks:
+        g, s_max, t_max = [], 0, 0
+        for j in c:
+            s2, t2 = max(s_max, len(rows[j][0])), max(t_max, len(rows[j][1]))
+            if g and (len(g) >= bs or (max_tokens and (len(g) + 1) * (s2 + t2) > max_tokens)):
+                groups.append(g)
+                g, s2, t2 = [], len(rows[j][0]), len(rows[j][1])
+            g.append(j)
+            s_max, t_max = s2, t2
+        if g:
+            groups.append(g)
+    random.shuffle(groups)
+    for g in groups:
+        yield [rows[j] for j in g]
 
 
 @torch.no_grad()
@@ -99,7 +115,9 @@ def main():
     ap.add_argument("--tokenizer", type=Path, default=Path("checkpoints/tokenizer.json"))
     ap.add_argument("--out", type=Path, default=Path("checkpoints/intent.pt"))
     ap.add_argument("--steps", type=int, default=60000)
-    ap.add_argument("--batch", type=int, default=256)
+    ap.add_argument("--batch", type=int, default=256, help="max sentences per batch")
+    ap.add_argument("--max-tokens", type=int, default=24000,
+                    help="max padded tokens per batch (source + target); keeps GPU memory under 12 GB")
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--warmup", type=int, default=800)
     ap.add_argument("--eval-every", type=int, default=4000)
@@ -149,7 +167,7 @@ def main():
     best, step, t0, stale = -1.0, 0, time.time(), 0
     model.train()
     while step < args.steps:
-        for batch in batches(train_rows, args.batch):
+        for batch in batches(train_rows, args.batch, max_tokens=args.max_tokens):
             src, src_pad, tin, tout = collate(batch, device)
             for g in opt.param_groups:
                 g["lr"] = lr_at(step)
@@ -166,8 +184,16 @@ def main():
             if step % 100 == 0:
                 el = time.time() - t0
                 eta = el / step * (args.steps - step)
+                mem = ""
+                if device.type == "cuda":
+                    peak = torch.cuda.max_memory_reserved() / 2**30
+                    total = torch.cuda.get_device_properties(0).total_memory / 2**30
+                    mem = f"  gpu mem {peak:.1f}/{total:.0f} GB"
+                    if peak > total - 0.8 and step == 100:
+                        print("  WARNING: GPU memory nearly full; Windows may spill to system RAM and run "
+                              "much slower. Lower --max-tokens.", flush=True)
                 print(f"step {step:6d}/{args.steps}  loss {loss.item():.4f}  lr {lr_at(step):.2e}  "
-                      f"{el / 60:.0f} min elapsed, ~{eta / 60:.0f} min left", flush=True)
+                      f"{el / 60:.0f} min elapsed, ~{eta / 60:.0f} min left{mem}", flush=True)
             if step % args.eval_every == 0 or step == args.steps:
                 m = evaluate(model, val_rows, tok, device)
                 print(f"  eval  loss {m['loss']:.4f}  exact {m['exact']:.4f}  valid {m['valid']:.4f}")

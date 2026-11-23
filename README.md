@@ -150,6 +150,17 @@ A translucent overlay in a screen corner (`Ctrl+Alt+H` to show or hide, or tray 
 
 It's click-through by default (the mouse passes straight through it) and stays out of the taskbar. Change the corner, opacity and click-through in Settings. Built with tkinter and Windows APIs only, no extra packages.
 
+## Monitoring & alerts
+Jarvis keeps an eye on the PC and your training runs, and tells you when something needs attention (HUD flash, Windows notification from the tray icon, and in the command bar if there's no tray):
+- **GPU hot** (default 85°C). If training is running it offers to pause it: *"The GPU is at 88 degrees, sir. Shall I pause training?"*
+- **Low disk space** on C: (default under 10 GB), **low battery** while not charging, **memory** pinned high.
+- **Training runs:** finished (with the best score), crashed (with the error), or stalled for 10 minutes.
+- **Unusual load:** a small model learns *your* normal CPU, RAM, GPU and temperature for each hour of the day, on this PC, from your own history. After a few days it flags readings far outside your normal.
+
+Each alert repeats at most every 30 minutes. Thresholds and the cooldown are in Settings.
+
+**Training control:** "pause training", "resume training", "how is the training going". Pausing keeps the run's GPU memory and continues exactly where it stopped (it uses a `checkpoints\PAUSE` flag file that the training loops check every step).
+
 ## Teaching it your own phrasing
 The fastest way: right in the command bar, after Jarvis gets something wrong, type
 ```

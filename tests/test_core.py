@@ -662,3 +662,90 @@ def test_persona_system_control_replies(tone):
     assert "VS Code" in p.result(AR("", kind="window", data={"action": "maximize", "app": "vscode"})) or tone == "minimal"
     q = p.confirm_question(AR("", kind="power", data={"action": "shutdown", "seconds": 600, "dry": True}))
     assert q.endswith("?") and ("ten minutes" in q or "10 minutes" in q)
+
+
+# ------------------------------------------------------------------ phase 23: monitoring & alerts
+def _snap(**k):
+    from jarvis.hud.metrics import Snapshot
+    base = dict(ts=1, cpu=10, ram=40, gpu=5, gpu_temp=45, disk_free_gb=200, battery=None, charging=None)
+    return Snapshot(**{**base, **k})
+
+
+def test_monitor_threshold_alerts_and_cooldown():
+    from jarvis.hud.metrics import MetricsSampler
+    from jarvis.monitor import Monitor
+    m = Monitor(MetricsSampler({}), {}, lambda a: None)
+    keys = {a.key for a in m.evaluate(_snap(gpu_temp=90, disk_free_gb=4, battery=12, charging=False), 0, 10)}
+    assert keys == {"gpu_hot", "disk_low", "battery_low"}
+    assert m.evaluate(_snap(gpu_temp=90), 60, 10) == []                 # cooldown
+    assert [a.key for a in m.evaluate(_snap(gpu_temp=90), 60 + 31 * 60, 10)] == ["gpu_hot"]
+    assert m.evaluate(_snap(battery=12, charging=True), 0, 10) == []    # charging: fine
+
+
+def test_monitor_training_events(tmp_path):
+    import os
+    from jarvis.hud.metrics import MetricsSampler
+    from jarvis.monitor import Monitor
+    log = tmp_path / "train_log.txt"
+    log.write_text("step  600/60000  loss 1.2  1 min elapsed, ~69 min left\n")
+    m = Monitor(MetricsSampler({}), {"Training command model": log}, lambda a: None)
+    assert m.evaluate(_snap(), 0, 10) == []                              # first sight: no alert
+    log.write_text("step 60000/60000 ...\ndone. best score = 0.9984\n")
+    done = m.evaluate(_snap(), 1, 10)
+    assert done[0].kind == "training_done" and done[0].data["best"] == 0.9984
+    log.write_text("step  700/60000  loss 1.2  1 min elapsed, ~69 min left\n")
+    m.evaluate(_snap(), 2, 10)
+    old = time.time() - 3600
+    os.utime(log, (old, old))
+    (tmp_path / "PAUSE").write_text("x")
+    assert m.evaluate(_snap(), 3, 10) == []                              # paused on purpose: no stall alert
+    (tmp_path / "PAUSE").unlink()
+    assert m.evaluate(_snap(), 4, 10)[0].kind == "training_stalled"
+    log.write_text("Traceback (most recent call last):\nRuntimeError: CUDA out of memory\n")
+    crash = m.evaluate(_snap(), 5, 10)
+    assert crash[0].kind == "training_crashed" and "out of memory" in crash[0].data["error"]
+
+
+def test_baseline_learns_normal_and_flags_unusual():
+    from jarvis.monitor.baseline import Baseline
+    b = Baseline(min_samples=50, persist=3)
+    for i in range(300):
+        assert b.observe({"gpu": 8 + (i % 5), "cpu": 15}, hour=14) == []
+    assert b.observe({"gpu": 97}, 14) == [] and b.observe({"gpu": 97}, 14) == []
+    hit = b.observe({"gpu": 97}, 14)
+    assert hit and hit[0][0] == "gpu" and hit[0][2] < 20
+    assert b.observe({"gpu": 97}, 3) == []                               # other hours have no history yet
+
+
+def test_training_pause_resume(monkeypatch, tmp_path, env):
+    import jarvis.actions.training as T
+    cfg, store, dl, arc = env
+    log = tmp_path / "train_log.txt"
+    log.write_text("step  600/60000  loss 1.2  1 min elapsed, ~69 min left\n")
+    monkeypatch.setattr(T, "PAUSE_FLAG", tmp_path / "PAUSE")
+    monkeypatch.setattr(T, "JOB_LOGS", {"command model": log})
+    ex = Executor(cfg, store, lambda *a: True)
+    ex.run(parse("training(action=pause)"))
+    assert (tmp_path / "PAUSE").exists()
+    st = ex.run(parse("training(action=status)")).results[0]
+    assert st.data["paused"] and st.data["jobs"][0]["eta_min"] == 69
+    ex.run(parse("training(action=resume)"))
+    assert not (tmp_path / "PAUSE").exists()
+
+
+@pytest.mark.parametrize("tone", ["butler", "friendly", "minimal"])
+def test_persona_alerts(tone):
+    from jarvis.monitor import Alert
+    from jarvis.persona import Persona
+    p = Persona(tone=tone, seed=0)
+    alerts = [Alert("a", "gpu_hot", "critical", {"temp": 88, "training": t}) for t in (True, False)] + [
+        Alert("a", "disk_low", "warning", {"free_gb": 6.2}), Alert("a", "battery_low", "warning", {"pct": 14}),
+        Alert("a", "ram_high", "warning", {"pct": 95}),
+        Alert("a", "training_done", "info", {"name": "Training command model", "best": 0.9984}),
+        Alert("a", "training_crashed", "critical", {"name": "Training reply model", "error": "RuntimeError: boom"}),
+        Alert("a", "training_stalled", "warning", {"name": "Training reply model", "minutes": 12}),
+        Alert("a", "unusual", "info", {"metric": "gpu", "value": 97, "typical": 12})]
+    for a in alerts:
+        out = p.alert(a)
+        assert out and "{" not in out and "  " not in out, (tone, a.kind, out)
+    assert "99.8 percent" in p.alert(alerts[5])

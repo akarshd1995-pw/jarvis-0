@@ -30,6 +30,7 @@ ACTION_TIERS: dict[str, Tier] = {
     "radio": Tier.SAFE,           # turning a radio off asks
     "screenshot": Tier.SAFE,
     "screen_record": Tier.SAFE,
+    "training": Tier.SAFE,
     "power": Tier.DESTRUCTIVE,    # shutdown/restart/sleep/sign out always ask; cancel doesn't
     "undo": Tier.CONFIRM,
     "move_files": Tier.CONFIRM,

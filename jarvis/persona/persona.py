@@ -155,6 +155,8 @@ class Persona:
             return f"record_{d['action']}", {}
         if k == "power":
             return f"power_{d['action']}", {"delay": self.delay(d.get("seconds", 30))}
+        if k == "training":
+            return self._plan_training(d)
         if k == "undo":
             if d.get("cancelled"):
                 return "undo_cancelled", {}
@@ -239,6 +241,50 @@ class Persona:
             "tomorrow" if due_dt.date() == (now_dt + dt.timedelta(days=1)).date() else due_dt.strftime("on %A")
         return f"at {clock} {day}"
 
+    def _plan_training(self, d: dict) -> tuple[str, dict]:
+        if d["action"] == "pause":
+            return ("training_pause_none", {}) if d.get("none") else ("training_paused", {"name": d.get("name", "")})
+        if d["action"] == "resume":
+            return ("training_resume_none", {}) if d.get("none") else ("training_resumed", {})
+        jobs = d.get("jobs") or []
+        running = [j for j in jobs if j["state"] == "running"]
+        if running:
+            j = running[0]
+            f = {"name": j["name"], "pct": f"{self._num(round(j.get('pct', 0)), False)} percent",
+                 "eta": self.minutes(j.get("eta_min", 0))}
+            return ("training_status_paused" if d.get("paused") else "training_status"), f
+        done = [j for j in jobs if j["state"] == "finished"]
+        if done:
+            return "training_status_done", {"name": done[0]["name"], "best": _pct(done[0].get("best"))}
+        return "training_status_none", {}
+
+    def minutes(self, m: int) -> str:
+        if m < 60:
+            return f"{self._num(m, False)} minute{'s' if m != 1 else ''}"
+        h, r = divmod(m, 60)
+        return f"{self._num(h, False)} hour{'s' if h != 1 else ''}" + (f" {r} minutes" if r >= 5 else "")
+
+    def alert(self, a) -> str:
+        """In-character text for a monitoring alert (jarvis.monitor.Alert)."""
+        d = a.data
+        if a.kind == "gpu_hot":
+            return self.speak("alert_gpu_hot_training" if d.get("training") else "alert_gpu_hot", {"temp": str(d["temp"])})
+        if a.kind == "disk_low":
+            return self.speak("alert_disk_low", {"free_gb": f"{d['free_gb']:g}"})
+        if a.kind in ("battery_low", "ram_high"):
+            return self.speak(f"alert_{a.kind}", {"pct": str(d["pct"])})
+        if a.kind == "training_done":
+            return self.speak("alert_training_done", {"name": d["name"].replace("Training ", ""), "best": _pct(d.get("best"))})
+        if a.kind == "training_crashed":
+            return self.speak("alert_training_crashed", {"name": d["name"].replace("Training ", ""), "error": d.get("error", "")})
+        if a.kind == "training_stalled":
+            return self.speak("alert_training_stalled", {"name": d["name"].replace("Training ", ""),
+                                                         "minutes": str(d["minutes"])})
+        if a.kind == "unusual":
+            label = {"cpu": "CPU load", "ram": "memory use", "gpu": "GPU load", "gpu_temp": "GPU temperature"}[d["metric"]]
+            return self.speak("alert_unusual", {"metric": label, "value": str(d["value"]), "typical": str(d["typical"])})
+        return a.kind
+
     def delay(self, seconds: int) -> str:
         if seconds < 60:
             return f"{self._num(seconds, False)} seconds"
@@ -264,6 +310,12 @@ def render_template(tpl: str, fields: dict, address: str = "") -> str:
             f.setdefault(_cap(k), _cap(f[k]))
     out = tpl.format_map(_Defaults(f))
     return _cap(re.sub(r"\s+([.,?:])", r"\1", out).strip())
+
+
+def _pct(x) -> str:
+    if x is None:
+        return "unknown"
+    return f"{x * 100:.1f} percent" if x <= 1 else f"{x:.1f} percent"
 
 
 def _basename(path: str) -> str:

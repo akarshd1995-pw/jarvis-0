@@ -90,6 +90,11 @@ RULES: list[tuple[re.Pattern, callable]] = [
      lambda m, t: f'play_media(query="{m.group(1)}", site=youtube)'),
     (re.compile(r"^(?:google|search(?: google)? for) (.+)$", re.I),
      lambda m, t: f'search_web(query="{m.group(1)}", site=google)'),
+    # ---- phase 23: training control
+    (re.compile(r"^(?:pause|hold) (?:the )?training$", re.I), lambda m, t: "training(action=pause)"),
+    (re.compile(r"^(?:resume|continue|unpause) (?:the )?training$", re.I), lambda m, t: "training(action=resume)"),
+    (re.compile(r"^(?:training status|how(?:'s| is) (?:the )?training(?: going)?|is (?:the )?training (?:done|finished)"
+                r"|training kitna hua|training ka status)\??$", re.I), lambda m, t: "training(action=status)"),
     # ---- phase 5: system control (before the generic "open/start X" rule)
     (re.compile(r"^(?:take (?:a )?|grab (?:a )?)?screenshot(?: (?:of )?(?:the |my )?(?:whole )?screen)?$", re.I),
      lambda m, t: "screenshot(mode=full)"),

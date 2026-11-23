@@ -21,6 +21,8 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
+from jarvis.actions.training import wait_if_paused
+
 from jarvis.nlg.checker import check, parse_src
 from training.model import IntentTransformer, ModelConfig
 from training.tokenizer import BOS, EOS, PAD, BPETokenizer
@@ -114,6 +116,7 @@ def main():
     model.train()
     while step < args.steps:
         for batch in batches(train_rows, args.batch, max_tokens=args.max_tokens):
+            wait_if_paused(args.out.parent / "PAUSE")      # "pause training" from Jarvis
             src, src_pad, tin, tout = collate(batch, device)
             for g in opt.param_groups:
                 g["lr"] = lr_at(step)

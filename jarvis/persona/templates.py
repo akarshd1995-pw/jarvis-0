@@ -219,3 +219,46 @@ ACTION_PHRASES.update({"window": "arrange that window", "desktop": "switch deskt
                        "brightness": "change the brightness", "set_volume": "set the volume",
                        "radio": "change that setting", "screenshot": "take a screenshot",
                        "screen_record": "record the screen", "power": "do that"})
+
+# ------------------------------------------------------------------ phase 23: monitoring, alerts, training control
+_MON = {
+    "butler": {
+        "training_paused": ["Training paused{A}. Say resume training when you're ready.", "The {name} run is on hold{A}."],
+        "training_resumed": ["Training resumed{A}.", "Back to work. Training has resumed."],
+        "training_resume_none": ["Nothing was paused{A}."], "training_pause_none": ["No training is running right now{A}."],
+        "training_status": ["The {name} run is {pct} done{A}, about {eta} to go.", "{Name} training: {pct} complete, roughly {eta} left."],
+        "training_status_paused": ["The {name} run is paused at {pct}{A}."],
+        "training_status_done": ["The {name} run has finished{A}. Best score {best}."],
+        "training_status_none": ["No training is running at the moment{A}."],
+        "alert_gpu_hot": ["The GPU is at {temp} degrees{A}. You may want to give it a rest."],
+        "alert_gpu_hot_training": ["The GPU is at {temp} degrees{A}. Shall I pause training? Just say pause training."],
+        "alert_disk_low": ["Your C drive is down to {free_gb} gigabytes free{A}. Time for a clean-up."],
+        "alert_battery_low": ["Battery is at {pct} percent and not charging{A}."],
+        "alert_ram_high": ["Memory has been at {pct} percent for a while{A}. Something may be using too much."],
+        "alert_training_done": ["Training finished{A}. The {name} scored {best}.", "Good news{A}. The {name} run is done, best score {best}."],
+        "alert_training_crashed": ["The {name} run has stopped with an error{A}: {error}"],
+        "alert_training_stalled": ["The {name} run hasn't moved in {minutes} minutes{A}. It may be stuck."],
+        "alert_unusual": ["{Metric} is at {value} percent{A}, well above your usual {typical} for this time of day."],
+    },
+    "friendly": {
+        "training_paused": ["Training paused! Say resume training to carry on."], "training_resumed": ["And we're back! Training resumed."],
+        "training_status": ["{Name} training is {pct} done, about {eta} left."],
+        "alert_gpu_hot_training": ["Whoa, the GPU is at {temp} degrees. Want me to pause training?"],
+        "alert_training_done": ["Training's done! The {name} scored {best}."],
+        "alert_disk_low": ["Heads up, only {free_gb} gigabytes left on C."],
+    },
+    "minimal": {
+        "training_paused": ["Training paused."], "training_resumed": ["Training resumed."],
+        "training_resume_none": ["Nothing paused."], "training_pause_none": ["No training running."],
+        "training_status": ["{Name}: {pct}, {eta} left."], "training_status_paused": ["{Name}: paused at {pct}."],
+        "training_status_done": ["{Name}: done, best {best}."], "training_status_none": ["No training running."],
+        "alert_gpu_hot": ["GPU {temp} degrees."], "alert_gpu_hot_training": ["GPU {temp} degrees. Pause training?"],
+        "alert_disk_low": ["C: {free_gb} GB free."], "alert_battery_low": ["Battery {pct} percent."],
+        "alert_ram_high": ["RAM {pct} percent."], "alert_training_done": ["{Name} done: {best}."],
+        "alert_training_crashed": ["{Name} crashed: {error}"], "alert_training_stalled": ["{Name} stalled {minutes} min."],
+        "alert_unusual": ["{Metric} {value} percent (usual {typical})."],
+    },
+}
+for _tone, _keys in _MON.items():
+    T[_tone].update(_keys)
+ACTION_PHRASES["training"] = "control training"

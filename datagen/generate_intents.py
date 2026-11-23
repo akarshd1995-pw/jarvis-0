@@ -792,13 +792,28 @@ def gen_power(c: Ctx):
     return f"power(action={a})", rng.choice(POWER_PHRASES[a]), {}
 
 
+TRAINING_PHRASES = {
+    "pause": ["pause training", "pause the training", "hold the training", "pause the training run", "training roko",
+              "training pause karo", "put training on hold"],
+    "resume": ["resume training", "continue the training", "unpause training", "resume the training run",
+               "training wapas shuru karo", "training continue karo"],
+    "status": ["how is the training going", "training status", "is the training done", "how far along is training",
+               "training kitna hua", "training ka status batao", "how much training is left"],
+}
+
+
+def gen_training(c: Ctx):
+    a = c.rng.choice(list(TRAINING_PHRASES))
+    return f"training(action={a})", c.rng.choice(TRAINING_PHRASES[a]), {}
+
+
 GENERATORS = [
     (lambda c: gen_file_op(c, "move"), 14), (lambda c: gen_file_op(c, "copy"), 7),
     (lambda c: gen_file_op(c, "delete"), 8), (lambda c: gen_file_op(c, "list"), 6),
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 9),
     (gen_window, 6), (gen_desktop, 2), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 2), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 1.5), (gen_power, 3),
+    (gen_screenshot, 3), (gen_record, 1.5), (gen_power, 3), (gen_training, 2),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",

@@ -119,7 +119,17 @@ def random_case(rng: random.Random, p: Persona) -> tuple[str, dict]:
 def _control_case(rng: random.Random, p: Persona) -> tuple[str, dict]:
     """Phase 5 system-control replies and confirmations."""
     kind = rng.choice(["window", "window", "desktop", "media", "brightness", "volume_set", "radio", "screenshot",
-                       "record", "power", "power"])
+                       "record", "power", "power", "training"])
+    if kind == "training":
+        name = rng.choice(["command model", "reply model"])
+        act = rng.choice(["pause", "resume", "status", "status"])
+        if act == "status":
+            st = rng.choice(["running", "finished", "none"])
+            jobs = [] if st == "none" else [{"name": name, "state": st, "pct": rng.uniform(1, 99),
+                                             "eta_min": rng.randint(1, 240), "best": rng.uniform(0.8, 0.999)}]
+            return p.plan(AR("", kind="training", data={"action": "status", "jobs": jobs,
+                                                        "paused": st == "running" and rng.random() < 0.2}))
+        return p.plan(AR("", kind="training", data={"action": act, "name": name, "none": rng.random() < 0.15}))
     app = rng.choice(["", "", "chrome", "vscode", "spotify", "explorer"] + LX.OTHER_APPS[:20])
     if kind == "window":
         act = rng.choice(["snap_left", "snap_right", "maximize", "minimize", "restore", "close", "minimize_all"])

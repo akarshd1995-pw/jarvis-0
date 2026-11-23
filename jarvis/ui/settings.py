@@ -15,7 +15,7 @@ class SettingsWindow:
         self.win = tk.Toplevel(parent)
         self.win.title("Jarvis-0 settings")
         self.win.attributes("-topmost", True)
-        self.win.geometry("600x980")
+        self.win.geometry("620x1080")
         pad = dict(padx=10, pady=4, sticky="w")
         f = ttk.Frame(self.win, padding=10)
         f.pack(fill="both", expand=True)
@@ -72,6 +72,18 @@ class SettingsWindow:
         self.hud_ct = tk.BooleanVar(value=config.hud_click_through)
         ttk.Checkbutton(f, text="Clicks pass through the HUD", variable=self.hud_ct).grid(
             row=27, column=0, columnspan=2, **pad)
+        ttk.Separator(f).grid(row=29, column=0, columnspan=2, sticky="ew", pady=6)
+        self.mon_on = tk.BooleanVar(value=config.monitor_enabled)
+        ttk.Checkbutton(f, text="Monitoring alerts", variable=self.mon_on).grid(row=30, column=0, **pad)
+        ttk.Label(f, text="Alert when GPU reaches (°C)").grid(row=31, column=0, **pad)
+        self.a_temp = tk.StringVar(value=f"{config.alert_gpu_temp:g}")
+        ttk.Entry(f, textvariable=self.a_temp, width=8).grid(row=31, column=1, **pad)
+        ttk.Label(f, text="Alert when C: free space below (GB)").grid(row=32, column=0, **pad)
+        self.a_disk = tk.StringVar(value=f"{config.alert_disk_free_gb:g}")
+        ttk.Entry(f, textvariable=self.a_disk, width=8).grid(row=32, column=1, **pad)
+        ttk.Label(f, text="Repeat the same alert after (minutes)").grid(row=33, column=0, **pad)
+        self.a_cool = tk.StringVar(value=f"{config.alert_cooldown_min:g}")
+        ttk.Entry(f, textvariable=self.a_cool, width=8).grid(row=33, column=1, **pad)
         self.details = tk.BooleanVar(value=config.show_details)
         ttk.Checkbutton(f, text="Show the technical command under each reply", variable=self.details).grid(
             row=20, column=0, columnspan=2, **pad)
@@ -103,7 +115,7 @@ class SettingsWindow:
         self.roots.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=10)
 
         btns = ttk.Frame(f)
-        btns.grid(row=28, column=0, columnspan=2, pady=10)
+        btns.grid(row=34, column=0, columnspan=2, pady=10)
         ttk.Button(btns, text="Save", command=self.save).pack(side="left", padx=6)
         ttk.Button(btns, text="Cancel", command=self.win.destroy).pack(side="left", padx=6)
 
@@ -133,6 +145,13 @@ class SettingsWindow:
         c.persona_model = self.p_model.get()
         c.hud_enabled, c.hud_corner = self.hud_on.get(), self.hud_corner.get()
         c.hud_opacity, c.hud_click_through = round(self.hud_alpha.get(), 2), self.hud_ct.get()
+        try:
+            c.alert_gpu_temp, c.alert_disk_free_gb = float(self.a_temp.get()), float(self.a_disk.get())
+            c.alert_cooldown_min = float(self.a_cool.get())
+        except ValueError:
+            messagebox.showerror("Alerts", "Alert thresholds must be numbers.", parent=self.win)
+            return
+        c.monitor_enabled = self.mon_on.get()
         path = c.save()
         try:
             (autostart.enable if self.auto.get() else autostart.disable)()

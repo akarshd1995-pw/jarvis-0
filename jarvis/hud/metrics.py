@@ -24,6 +24,7 @@ class Snapshot:
     ram_used_gb: float | None = None
     ram_total_gb: float | None = None
     disk: float | None = None           # percent of the system drive
+    disk_free_gb: float | None = None
     battery: float | None = None        # percent (None on desktops)
     charging: bool | None = None
     gpu: float | None = None            # percent utilization
@@ -153,6 +154,25 @@ def _tail(path: Path, n: int = 4000) -> str:
         return ""
 
 
+def job_status(path: Path) -> dict | None:
+    """State of a training log: running / finished / crashed, with progress and best score if present."""
+    tail = _tail(path, 6000)
+    if not tail:
+        return None
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return None
+    prog = parse_progress(tail) or {}
+    best = re.findall(r"best (?:score|exact-match|fact-check pass rate) = ([\d.]+)", tail)
+    if best:
+        return {"state": "finished", "best": float(best[-1]), "age_s": age, **prog}
+    lines = tail.strip().splitlines()
+    if "Traceback (most recent call last)" in tail or (lines and "Error:" in lines[-1]):
+        return {"state": "crashed", "age_s": age, "error": tail.strip().splitlines()[-1][-200:], **prog}
+    return {"state": "running", "age_s": age, **prog}
+
+
 def job_progress(logs: dict[str, Path], active_within_s: float = 180) -> list[dict]:
     jobs = []
     for name, path in logs.items():
@@ -190,6 +210,7 @@ class MetricsSampler(threading.Thread):
         try:
             du = shutil.disk_usage("C:\\" if IS_WINDOWS else "/")
             s.disk = 100.0 * du.used / du.total
+            s.disk_free_gb = du.free / 2**30
         except OSError:
             pass
         s.battery, s.charging = _battery()

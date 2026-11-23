@@ -46,6 +46,7 @@ class Jarvis:
         self.executor = Executor(config, self.store, confirm, describe=self.persona.confirm_question)
         self.data_root = data_root or PROJECT_ROOT / "data"
         self.last_text: str | None = None
+        self.monitor = None
         self.last_program: str | None = None
 
     @staticmethod
@@ -126,6 +127,11 @@ class Jarvis:
             lines.append(f"Reply model: on ({st['generated']} generated, {st['rejected']} rejected by the fact check)")
         else:
             lines.append("Reply model: off (templates)")
+        if self.monitor is not None:
+            learned = sum(1 for st in self.monitor.baseline.stats.values() if st.n >= self.monitor.baseline.min_samples)
+            lines.append(f"Monitoring: on ({learned} of {len(self.monitor.baseline.stats)} hourly baselines learned)")
+        else:
+            lines.append("Monitoring: off")
         lines.append(f"Confidence gate: {self.config.min_confidence:.2f}")
         import sys as _sys
         enc = "yes (Windows DPAPI)" if self.config.encrypt_logs and _sys.platform == "win32" else \
@@ -133,6 +139,30 @@ class Jarvis:
         lines.append(f"Activity log encrypted: {enc}")
         lines.append(f"Autostart: {'on' if autostart.is_enabled() else 'off'}")
         return "\n".join(lines)
+
+    def start_monitor(self, deliver) -> tuple:
+        """Start the metrics sampler and the alert monitor. deliver(alert, text) shows the alert."""
+        from .hud.metrics import MetricsSampler
+        from .monitor.engine import Monitor, Thresholds
+        ck = PROJECT_ROOT / "checkpoints"
+        logs = {"Training command model": ck / "train_log.txt", "Training reply model": ck / "reply_log.txt"}
+        sampler = MetricsSampler(logs)
+        sampler.start()
+        monitor = None
+        if self.config.monitor_enabled:
+            c = self.config
+            th = Thresholds(gpu_temp=c.alert_gpu_temp, disk_free_gb=c.alert_disk_free_gb, battery=c.alert_battery,
+                            cooldown_min=c.alert_cooldown_min)
+
+            def on_alert(a):
+                text = self.persona.alert(a)
+                self.store.log_event("alert", {"key": a.key, "level": a.level})
+                deliver(a, text)
+
+            monitor = Monitor(sampler, logs, on_alert, th, baseline_path=c.data_dir / "baseline.json", store=self.store)
+            monitor.start()
+        self.monitor = monitor
+        return sampler, logs
 
     def _hud(self, state: str | None = None, last: str | None = None, hold: float = 0.0):
         if state and "state" in self.hooks:
@@ -221,6 +251,7 @@ def main() -> None:
     if args.cli:
         jarvis = Jarvis(config, _cli_confirm)
         jarvis.start_background(lambda text: print(f"\n[REMINDER] {text}\n> ", end=""))
+        jarvis.start_monitor(lambda a, text: print(f"\n[{a.level.upper()}] {text}\n> ", end=""))
         print("Jarvis-0 (cli). Ctrl+C to quit.")
         try:
             while True:
@@ -257,13 +288,25 @@ def main() -> None:
             jarvis.hooks["restart"]()
 
     hud = None
+    ui: dict = {"icon": None}
+
+    def deliver_alert(a, text):
+        """Monitoring alert -> HUD flash + last line, Windows notification (tray), command bar if no tray."""
+        if hud is not None:
+            state = "alert" if a.level in ("critical", "warning") else "success"
+            bar.post("call", lambda: (hud.set_state(state, 6), hud.set_last(text)))
+        icon = ui["icon"]
+        if icon is not None:
+            try:
+                icon.notify(text, f"{config.persona_name}")
+            except Exception:
+                pass
+        elif a.level == "critical" or hud is None:
+            bar.post("message", text)
+
+    sampler, _logs = jarvis.start_monitor(deliver_alert)
     if config.hud_enabled:
-        from .hud.metrics import MetricsSampler
         from .hud.view import HUD
-        ck = PROJECT_ROOT / "checkpoints"
-        sampler = MetricsSampler({"Training command model": ck / "train_log.txt",
-                                  "Training reply model": ck / "reply_log.txt"})
-        sampler.start()
         try:
             hud = HUD(bar.root, sampler, name=config.persona_name,
                       reminders=lambda: jarvis.store.upcoming_reminders(time.time()),
@@ -289,7 +332,7 @@ def main() -> None:
 
     jarvis.start_background(on_reminder)
 
-    icon = start_tray({
+    icon = ui["icon"] = start_tray({
         "open": lambda: bar.post("open"),
         "hud": (lambda: bar.post("call", hud.toggle)) if hud else None,
         "settings": jarvis.hooks["settings"],

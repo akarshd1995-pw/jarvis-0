@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .actions import control, files, system
+from .actions import control, files, system, training
 from .actions.base import ActionResult, Ctx
 from .config import Config
 from .dsl.grammar import Program
@@ -34,6 +34,7 @@ REGISTRY: dict[str, Handler] = {
     "screenshot": control.screenshot,
     "screen_record": control.screen_record,
     "power": control.power,
+    "training": training.training,
     "list_files": files.list_files,
     "move_files": files.move_files,
     "copy_files": files.copy_files,

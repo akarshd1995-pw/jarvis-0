@@ -1,3 +1,16 @@
-# Core agent uses only the Python standard library (tkinter, sqlite3, ctypes).
-# PyTorch is installed separately; see README (cu128 build for the RTX 5070, cpu build for the laptop).
+# Core agent: Python standard library only (tkinter, sqlite3, ctypes, winreg).
+
+# Run the trained model without PyTorch (recommended on the laptop):
+onnxruntime>=1.18
+numpy>=1.26
+
+# Tray icon (optional; Jarvis works without it):
+pystray>=0.19
+pillow>=10
+
+# Tests
 pytest>=8
+
+# Training (RTX 5070 PC only), installed separately:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+#   pip install onnx            (needed by training.export_onnx)

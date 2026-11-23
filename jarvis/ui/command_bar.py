@@ -18,7 +18,7 @@ BG, FG, MUTED, ACCENT = "#1e1e24", "#f2f2f2", "#9a9aa6", "#7f77dd"
 class CommandBar:
     def __init__(self, on_submit: Callable[[str], str]):
         self.on_submit = on_submit
-        self.events: "queue.Queue[tuple[str, str]]" = queue.Queue()  # thread-safe inbox
+        self.events: "queue.Queue[tuple[str, object]]" = queue.Queue()  # thread-safe inbox
         self.history: list[str] = []
         self.hist_i = 0
 
@@ -48,8 +48,8 @@ class CommandBar:
         self.hide()
 
     # ---------------------------------------------------------- thread-safe API
-    def post(self, kind: str, payload: str = "") -> None:
-        """Called from any thread: 'toggle' or 'reminder'."""
+    def post(self, kind: str, payload: object = "") -> None:
+        """Called from any thread: toggle | open | reminder | message | call | quit."""
         self.events.put((kind, payload))
 
     def _pump(self):
@@ -58,9 +58,19 @@ class CommandBar:
                 kind, payload = self.events.get_nowait()
                 if kind == "toggle":
                     self.hide() if self.root.state() == "normal" else self.show()
+                elif kind == "open":
+                    self.show()
                 elif kind == "reminder":
                     self.show()
                     messagebox.showinfo("Jarvis reminder", payload, parent=self.root)
+                elif kind == "message":
+                    self.show()
+                    self.out.configure(text=payload, fg=FG)
+                elif kind == "call":           # run a function on the UI thread (payload = callable)
+                    payload()
+                elif kind == "quit":
+                    self.root.destroy()
+                    return
         except queue.Empty:
             pass
         self.root.after(100, self._pump)

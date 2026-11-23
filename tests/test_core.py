@@ -257,3 +257,99 @@ def test_corrections_are_saved(env, tmp_path):
     rows = (tmp_path / "d" / "user_corrections.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(rows) == 2
     assert "ext=pdf" in rows[0] and '"list_files(src=Downloads)"' in rows[1]
+
+
+# ------------------------------------------------------------------ phase 4: ONNX runtime path (fake sessions)
+def _fake_onnx(tmp_path, target_program, noise_token_text=None):
+    """A fake encoder/decoder pair that 'wants' to emit target_program, optionally preferring a
+    grammar-breaking token at every step, to exercise the numpy beam + constraints."""
+    import numpy as np
+    from jarvis.nlu.onnx_parser import ONNXParser
+    from training.tokenizer import BOS, EOS, BPETokenizer
+
+    rng = random.Random(2)
+    texts = [sample(rng)["program"] for _ in range(1500)] + [target_program]
+    tok = BPETokenizer.train(texts, 700, verbose=False)
+    tok_path = tmp_path / "tok.json"
+    tok.save(tok_path)
+    target = tok.encode(target_program) + [EOS]
+    noise = tok.encode(noise_token_text)[0] if noise_token_text else None
+    V = tok.vocab_size
+
+    class Enc:
+        def run(self, names, feeds):
+            return [np.zeros((1, feeds["src"].shape[1], 4), dtype=np.float32)]
+
+    class Dec:
+        def run(self, names, feeds):
+            seqs = feeds["tgt_in"]
+            out = np.full((seqs.shape[0], V), -20.0, dtype=np.float32)
+            for i, s in enumerate(seqs):
+                pos = len(s) - 1
+                if pos < len(target):
+                    out[i, target[pos]] = -0.05
+                if noise is not None:
+                    out[i, noise] = -0.01          # always the model's favourite, always invalid here
+            return [out]
+
+    return ONNXParser(None, None, tok_path, sessions=(Enc(), Dec()), min_confidence=0.0)
+
+
+def test_onnx_parser_decodes_target(tmp_path):
+    p = _fake_onnx(tmp_path, "move_files(dest=Archive, ext=pdf, src=Downloads)")
+    prog, conf = p.parse("move pdfs from downloads to archive")
+    assert str(prog) == "move_files(dest=Archive, ext=pdf, src=Downloads)" and conf > 0.5
+
+
+def test_constraints_block_invalid_favourite_token(tmp_path):
+    p = _fake_onnx(tmp_path, "open_app(name=chrome)", noise_token_text=";")
+    prog, _ = p.parse("open chrome")
+    assert str(prog) == "open_app(name=chrome)"
+
+
+def test_brain_without_model_files_uses_rules(tmp_path):
+    from jarvis.nlu.brain import Brain
+    b = Brain(tmp_path / "intent.pt", tmp_path / "tokenizer.json")
+    assert b.backend == "rules" and str(b.resolve("open chrome")[0]) == "open_app(name=chrome)"
+
+
+# ------------------------------------------------------------------ phase 4: runtime
+def test_store_payload_roundtrip_with_encryption_flag(tmp_path):
+    for enc in (True, False):
+        st = Store(tmp_path / f"db{enc}.db", encrypt=enc)
+        st.log_event("focus", {"app": "code.exe"})
+        raw = st._db.execute("SELECT payload FROM events").fetchone()[0]
+        assert raw.split(":", 1)[0] in ("plain", "dpapi")
+        assert st.events_since(0)[0][2] == {"app": "code.exe"}
+
+
+def test_config_save_and_reload(tmp_path):
+    cfg = Config(data_dir=tmp_path)
+    cfg.hotkey, cfg.min_confidence = "ctrl+alt+k", 0.7
+    cfg.folders["Projects"] = "D:/code"
+    cfg.save()
+    again = Config.load(tmp_path / "config.json")
+    assert again.hotkey == "ctrl+alt+k" and again.min_confidence == 0.7
+    assert again.folders["Projects"] == "D:/code"
+
+
+def test_updater_refuses_non_git_folder(tmp_path):
+    from jarvis.updater import update
+    changed, msg = update(tmp_path)
+    assert not changed and "isn't a git clone" in msg
+
+
+def test_status_and_help_commands(env, tmp_path):
+    from jarvis.daemon import Jarvis
+    cfg, store, dl, arc = env
+    j = Jarvis(cfg, lambda *a: True, data_root=tmp_path / "d")
+    assert "Model:" in j.handle("/status")
+    assert "/update" in j.handle("/help")
+
+
+def test_fragments_never_conflict_with_lock_command():
+    from datagen.generate_intents import Ctx, gen_fragment
+    rng = random.Random(0)
+    for _ in range(2000):
+        _, t = gen_fragment(Ctx(rng, "train"))
+        assert not t.lower().startswith("lock")

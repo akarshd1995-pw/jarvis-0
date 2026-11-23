@@ -42,8 +42,20 @@ class Config:
     hotkey: str = "ctrl+alt+j"
     focus_poll_seconds: float = 1.0
     watch_folders: list[str] = field(default_factory=lambda: ["Downloads"])
+    min_confidence: float = 0.55        # below this the model's answer is not executed
+    encrypt_logs: bool = True           # DPAPI-encrypt the activity log (Windows)
+    keep_window_titles: bool = False    # store full window titles (off: only app name + hash)
+    model_backend: str = "auto"         # auto | onnx | torch
     model_checkpoint: str = "checkpoints/intent.pt"
     tokenizer_path: str = "checkpoints/tokenizer.json"
+
+    def save(self, path: Path | None = None) -> Path:
+        """Write user-editable settings to config.json (used by the settings window)."""
+        path = path or (self.data_dir / "config.json")
+        keys = ["hotkey", "folders", "apps", "allowed_roots", "watch_folders", "min_confidence",
+                "encrypt_logs", "keep_window_titles", "model_backend", "focus_poll_seconds"]
+        path.write_text(json.dumps({k: getattr(self, k) for k in keys}, indent=2), encoding="utf-8")
+        return path
 
     @property
     def db_path(self) -> Path:

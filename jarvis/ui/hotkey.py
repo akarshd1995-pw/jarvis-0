@@ -43,8 +43,13 @@ class HotkeyThread(threading.Thread):
         import ctypes
         from ctypes import wintypes
         user32 = ctypes.windll.user32  # type: ignore[attr-defined]
-        if not user32.RegisterHotKey(None, 1, self.mods, self.vk):
-            self.error = f"could not register {self.spec} (already in use?)"
+        import time
+        for _ in range(20):       # retry: after /update restarts, the old process may still hold it briefly
+            if user32.RegisterHotKey(None, 1, self.mods, self.vk):
+                break
+            time.sleep(0.5)
+        else:
+            self.error = f"could not register {self.spec} (already in use by another app?)"
             return
         msg = wintypes.MSG()
         try:

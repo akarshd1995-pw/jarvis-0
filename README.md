@@ -52,6 +52,19 @@ pip install torch --index-url https://download.pytorch.org/whl/cu128
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
+## Run Jarvis without PyTorch (laptop)
+After training, the night script exports the model to ONNX (`checkpoints/intent_encoder.onnx`, `intent_decoder.onnx`).
+Copy those two files plus `tokenizer.json` and `intent_onnx.json` into the laptop's `checkpoints\` folder, then:
+```powershell
+pip install -r requirements.txt        # onnxruntime + numpy, tray icon; no PyTorch needed
+python -m jarvis                       # shows "(onnx model)" in the startup log
+python -m jarvis --autostart on        # start automatically when you log in (off: --autostart off)
+```
+- **Tray icon:** open the command bar, settings, check for updates, quit.
+- **Settings window** (tray or `/settings`): hotkey, confidence gate, model backend, encryption, window titles, folder and app aliases, allowed folders, autostart.
+- **`/update`:** `git pull --ff-only` and restart (never overwrites local changes). **`/status`:** model, accuracy, encryption, autostart.
+- **Privacy:** the activity log is encrypted at rest with Windows DPAPI (only your Windows account can read it); full window titles aren't stored unless you turn that on.
+
 ## Day 1: run the agent (laptop)
 ```bat
 python -m jarvis            :: command bar; press Ctrl+Alt+J to toggle it

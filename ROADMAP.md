@@ -24,12 +24,12 @@ Status: ✅ done · 🔨 in progress · ⬜ planned
 |---|---|---|
 | 1 | **Agent core**: command bar (Ctrl+Alt+J), file, app, URL, folder, reminder and system actions; safety tiers, previews, confirmations, undo journal; focus and Downloads logging | ✅ |
 | 2 | **Own command model**: synthetic English and Hinglish data engine, BPE tokenizer and encoder-decoder transformer from scratch, evaluation reports | ✅ |
-| 3 | **Polish**: `search_web`, `unsupported` skipped-step reporting, grammar-constrained decoding, `/fix` `/good` `/wrong` corrections, negation safety data, 2M examples, 27M-param model | ✅ (retrain pending) |
+| 3 | **Polish**: `search_web`, `unsupported` skipped-step reporting, grammar-constrained decoding, `/fix` `/good` `/wrong` corrections, negation safety data, 2M examples, 27M-param model. Result: 99.83% familiar / 99.84% unseen phrasing, 0.14% wrong actions | ✅ |
 
 ## Stage B: Feels like JARVIS
 | # | Phase | What it adds | Status |
 |---|---|---|---|
-| 4 | **Runtime & packaging** | ONNX model (no PyTorch needed), autostart with Windows, tray icon, settings window, encrypted local store, one-click update | ⬜ |
+| 4 | **Runtime & packaging** | ONNX model (no PyTorch needed), autostart with Windows, tray icon, settings window, encrypted local store, one-click update | 🔨 code done, needs first run on Windows |
 | 22 | 🆕 **Persona layer** | In-character replies for every action ("Done. Fourteen PDFs are in Archive."), confirmations and errors. Configurable name, form of address and tone. Written so voice can read the same lines later | ⬜ |
 | 25 | 🆕 **HUD interface** | Animated overlay with a status orb (idle / listening / thinking / speaking) and live widgets (system stats, reminders, running jobs, last action). Our own visual design | ⬜ |
 

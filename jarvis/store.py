@@ -1,11 +1,14 @@
 """SQLite store: event log (training data for the routine model), undo journal, reminders.
 
-Everything stays local. For encryption at rest, swap sqlite3 for SQLCipher later.
+Everything stays local. Event payloads (what you did, when) are encrypted at rest with Windows
+DPAPI, so only your Windows account on this PC can read them.
 """
 from __future__ import annotations
 
 import json
 import sqlite3
+
+from .crypto import protect, unprotect
 import threading
 import time
 from pathlib import Path
@@ -39,7 +42,8 @@ CREATE TABLE IF NOT EXISTS reminders (
 
 
 class Store:
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str, encrypt: bool = True):
+        self.encrypt = encrypt
         self._lock = threading.Lock()
         self._db = sqlite3.connect(str(path), check_same_thread=False)
         self._db.executescript(SCHEMA)
@@ -49,7 +53,7 @@ class Store:
     def log_event(self, kind: str, payload: dict, ts: float | None = None) -> None:
         with self._lock:
             self._db.execute("INSERT INTO events(ts, kind, payload) VALUES (?,?,?)",
-                             (ts or time.time(), kind, json.dumps(payload)))
+                             (ts or time.time(), kind, protect(json.dumps(payload), self.encrypt)))
             self._db.commit()
 
     def events_since(self, ts: float, kind: str | None = None) -> list[tuple[float, str, dict]]:
@@ -60,7 +64,7 @@ class Store:
             args.append(kind)
         with self._lock:
             rows = self._db.execute(q + " ORDER BY ts", args).fetchall()
-        return [(t, k, json.loads(p)) for t, k, p in rows]
+        return [(t, k, json.loads(unprotect(p))) for t, k, p in rows]
 
     # ------------------------------------------------------------ journal
     def record(self, batch_id: str, op: str, inverse: dict) -> None:

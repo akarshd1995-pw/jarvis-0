@@ -622,7 +622,8 @@ def gen_fragment(c: Ctx):
     """One or two words that are not a full command (often typo'd) -> unknown()."""
     from .noise import typo
     rng = c.rng
-    w = rng.choice(["open", "delete", "move", "copy", "show", "list", "remind", "play", "search", "lock", "find",
+    # ("lock" is excluded: "lock" alone is a valid command -> system(action=lock))
+    w = rng.choice(["open", "delete", "move", "copy", "show", "list", "remind", "play", "search", "find",
                     "launch", "start", "remove", "send", "kholo", "hatao", "dikhao", "files", "folder", "the", "it"])
     if rng.random() < 0.5:
         w = typo(w, rng)

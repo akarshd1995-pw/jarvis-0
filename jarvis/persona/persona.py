@@ -130,6 +130,11 @@ class Persona:
         if k == "play":
             mode = d.get("mode", "top")
             if d.get("fallback"):
+                reason = d.get("reason")
+                if reason == "nomatch" and d.get("closest"):
+                    return "play_nomatch", {"query": d["query"], "closest": d["closest"]}
+                if reason in ("offline", "none"):
+                    return f"play_{reason}", {"query": d["query"]}
                 return "play_fallback", {"query": d["query"]}
             if d["site"] == "spotify":
                 return "play_spotify", {"query": d["query"]}

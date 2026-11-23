@@ -908,3 +908,36 @@ def test_mood_in_training_data():
         assert mood.detect(t) is None or mood.detect(t).kind != "crisis"  # never self-harm text in the data
     m = mood.from_program(parse("mood(kind=stressed, music=yes)"), "bahut tension hai, kuch gaana lagao")
     assert m.wants_music and m.hindi and m.playlist == "soothing hindi songs"
+
+
+# ---------------------------------------------------------------- play: never a random video for an unknown name
+def _yt_page(*vids):
+    return "x".join(f'"videoRenderer":{{"videoId":"{v}","title":{{"runs":[{{"text":"{t}"}}]}},'
+                    f'"ownerText":{{"runs":[{{"text":"{c}"}}]}}' for v, t, c in vids)
+
+
+def test_best_video_matches_what_was_asked():
+    from jarvis.actions import youtube as yt
+    f = lambda *v: (lambda u: _yt_page(*v))
+    two = f(("a" * 11, "Pavizha Mazha | Athiran", "Muzik247"), ("b" * 11, "Pavazha Malli Full Video Song", "Sun Music"))
+    assert yt.best_video("pavazha malli", two)[:2] == ("ok", "b" * 11)          # the matching one, not the first
+    assert yt.best_video("pavazha malli", f(("a" * 11, "Pavizha Mazha", "M")))[0] == "nomatch"
+    assert yt.best_video("qwzlorp fandango", f(("d" * 11, "Bohemian Rhapsody", "Queen")))[0] == "nomatch"
+    assert yt.best_video("kesariyaa", f(("k" * 11, "Kesariya - Brahmastra", "Sony")))[0] == "ok"   # spelling variant
+    assert yt.best_video("how to make biryani", f(("j" * 11, "Chicken Biryani Recipe", "Lab")))[0] == "ok"
+    assert yt.best_video("funny cat videos", f(("c" * 11, "Cats being cats compilation", "Ch")))[0] == "ok"
+    assert yt.best_video("x", lambda u: 1 / 0)[0] == "offline"
+
+
+def test_play_unknown_song_shows_results_not_random(env, monkeypatch):
+    import jarvis.actions.system as S
+    from jarvis.actions.base import Ctx
+    cfg, store, dl, arc = env
+    opened = []
+    monkeypatch.setattr(S.webbrowser, "open", lambda url: opened.append(url))
+    page = _yt_page(("d" * 11, "Bohemian Rhapsody (Official Video)", "Queen"))
+    r = S.play_media({"query": "qwzlorp fandango"}, Ctx(cfg, store, "b"), False, fetch=lambda u: page)
+    assert "results?search_query=qwzlorp+fandango" in opened[-1] and r.data["reason"] == "nomatch"
+    from jarvis.persona.persona import Persona
+    reply = Persona("Jarvis", "sir", "butler").result(r)
+    assert "couldn't find" in reply.lower() and "Bohemian Rhapsody" in reply

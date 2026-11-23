@@ -190,8 +190,19 @@ def play_media(args: dict, ctx: Ctx, dry_run: bool, fetch=None) -> ActionResult:
     elif mode == "channel":
         url = yt.channel_url(query, fetch)
     else:
-        vid = yt.top_video(query, fetch)
-        url = f"https://www.youtube.com/watch?v={vid}" if vid else None
+        status, vid, title = yt.best_video(query, fetch)
+        if status == "ok":
+            url = f"https://www.youtube.com/watch?v={vid}"
+            if title:
+                data["title"] = title
+        else:
+            # Nothing that matches: never play a random video. Show the results so the user can pick or fix the spelling.
+            webbrowser.open(yt.results_url(query))
+            msg = {"offline": f'Couldn\'t reach YouTube, opened the results page for "{query}"',
+                   "none": f'YouTube has no videos for "{query}"',
+                   "nomatch": f'No video matches "{query}", showing YouTube results'}[status]
+            return ActionResult(msg, kind="play", data={**data, "fallback": True, "reason": status,
+                                                         "closest": title or ""})
     if url:
         webbrowser.open(url)
         return ActionResult(f'Playing "{query}" on YouTube ({mode})', kind="play", data=data)

@@ -45,6 +45,90 @@ def results_url(query: str, kind: str | None = None) -> str:
     return url + (f"&sp={FILTERS[kind]}" if kind else "")
 
 
+_TITLE = re.compile(r'"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"')
+_OWNER = re.compile(r'"(?:ownerText|longBylineText)":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"')
+_FILLER = {"song", "songs", "video", "videos", "music", "the", "a", "an", "of", "by", "from", "full", "official",
+           "lyrics", "lyric", "audio", "hd", "4k", "new", "latest", "and", "ft", "feat", "remix", "cover", "trailer",
+           "track", "theme", "bgm", "live", "version", "best", "top", "hindi", "tamil", "telugu", "malayalam", "kannada",
+           "how", "to", "make", "do", "does", "what", "why", "is", "are", "in", "on", "for", "with", "my", "your", "i",
+           "explained", "tutorial", "guide", "easy", "minutes", "highlights", "episode", "clips", "watch", "play",
+           "funny", "documentary", "review", "reviews", "unboxing", "recipe", "learn", "fix", "at", "home", "vs"}
+
+
+def _unescape(s: str) -> str:
+    try:
+        s = s.encode("utf-8").decode("unicode_escape").encode("latin-1").decode("utf-8")
+    except Exception:
+        pass
+    return htmllib.unescape(s)
+
+
+def search_videos(query: str, fetch=None, limit: int = 6) -> list[tuple[str, str, str]] | None:
+    """Top results as (video_id, title, channel). None = YouTube unreachable; [] = no videos."""
+    page = _get(results_url(query), fetch)
+    if page is None:
+        return None
+    out = []
+    for chunk in page.split('"videoRenderer":{')[1:limit + 1]:
+        m = re.match(r'"videoId":"([\w-]{11})"', chunk)
+        if not m:
+            continue
+        head = chunk[:6000]
+        t, o = _TITLE.search(head), _OWNER.search(head)
+        out.append((m.group(1), _unescape(t.group(1)) if t else "", _unescape(o.group(1)) if o else ""))
+    if not out:
+        m = _ANY_VIDEO.search(page)
+        if m:
+            out.append((m.group(1), "", ""))
+    return out
+
+
+def _norm_words(s: str) -> list[str]:
+    s = re.sub(r"(?<=\w)'s?\b", " ", s.lower())
+    return [w for w in re.findall(r"[^\W_]+", s) if w not in _FILLER]
+
+
+def _close(a: str, b: str) -> bool:
+    """Same word, allowing spelling variants of transliterated names (pavazha ~ pavizha, kesariya ~ kesariyaa)."""
+    from difflib import SequenceMatcher
+    if a == b or a.rstrip("s") == b.rstrip("s") or (len(a) >= 4 and len(b) >= 4 and (a.startswith(b) or b.startswith(a))):
+        return True
+    return len(a) >= 4 and len(b) >= 4 and SequenceMatcher(None, a, b).ratio() >= 0.75
+
+
+def match_score(query: str, title: str, channel: str = "") -> float:
+    """Share of the query's meaningful words found (approximately) in the video's title or channel."""
+    want = _norm_words(query)
+    if not want:
+        return 1.0
+    have = _norm_words(title + " " + channel)
+    return sum(any(_close(w, h) for h in have) for w in want) / len(want)
+
+
+def _needed(query: str) -> float:
+    """Names of 1-2 meaningful words must match fully; longer requests may miss a word ("tum hi ho by arijit singh")."""
+    n = len(_norm_words(query))
+    return 1.0 if n <= 2 else 0.5
+
+
+def best_video(query: str, fetch=None, min_score: float | None = None):
+    """('ok', vid, title) | ('nomatch', None, closest_title) | ('none', None, None) | ('offline', None, None).
+    Picks the first result that actually matches what was asked, not blindly the first result."""
+    results = search_videos(query, fetch)
+    if results is None:
+        return "offline", None, None
+    if not results:
+        return "none", None, None
+    if not any(t for _, t, _ in results):         # YouTube changed its page: can't judge, trust the ranking
+        return "ok", results[0][0], ""
+    need = _needed(query) if min_score is None else min_score
+    scored = [(match_score(query, t, c), -i, vid, t) for i, (vid, t, c) in enumerate(results)]
+    score, _, vid, title = max(scored)                 # best match; earlier (higher-ranked) wins ties
+    if score >= need:
+        return "ok", vid, title
+    return "nomatch", None, results[0][1]
+
+
 def top_video(query: str, fetch=None) -> str | None:
     page = _get(results_url(query), fetch)
     if not page:

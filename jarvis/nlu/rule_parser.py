@@ -66,10 +66,16 @@ _SITES = "youtube|google|amazon|flipkart|spotify|github|wikipedia|reddit"
 
 RULES: list[tuple[re.Pattern, callable]] = [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
-    (re.compile(rf"^(?:open (?:{_SITES}) and )?(?:play|search(?: for)?|find|look up) (.+?) on ({_SITES})$", re.I),
+    (re.compile(r"^(?:open (?:youtube|spotify) and )?(?:play|put on|stream) (.+?) on (youtube|spotify)$", re.I),
+     lambda m, t: f'play_media(query="{m.group(1)}", site={m.group(2).lower()})'),
+    (re.compile(r"^open (youtube|spotify) and (?:play|put on|stream) (.+)$", re.I),
+     lambda m, t: f'play_media(query="{m.group(2)}", site={m.group(1).lower()})'),
+    (re.compile(rf"^(?:open (?:{_SITES}) and )?(?:search(?: for)?|find|look up) (.+?) on ({_SITES})$", re.I),
      lambda m, t: f'search_web(query="{m.group(1)}", site={m.group(2).lower()})'),
-    (re.compile(rf"^open ({_SITES}) and (?:play|search(?: for)?|find|look up) (.+)$", re.I),
+    (re.compile(rf"^open ({_SITES}) and (?:search(?: for)?|find|look up) (.+)$", re.I),
      lambda m, t: f'search_web(query="{m.group(2)}", site={m.group(1).lower()})'),
+    (re.compile(r"^(?:play|put on) (?!.* on \w+$)(.+)$", re.I),
+     lambda m, t: f'play_media(query="{m.group(1)}", site=youtube)'),
     (re.compile(r"^(?:google|search(?: google)? for) (.+)$", re.I),
      lambda m, t: f'search_web(query="{m.group(1)}", site=google)'),
     (re.compile(r"^(?:open|launch|start) (?:the )?(?:website |site )?((?:https?://)?[\w\-]+\.[\w.\-/]+)$", re.I),
@@ -101,7 +107,7 @@ RULES: list[tuple[re.Pattern, callable]] = [
 
 def rule_parse(text: str) -> Program | None:
     text = text.strip().rstrip(".!")
-    for pattern, build in RULES[:4]:   # whole-sentence search rules ("open youtube and play X") go first
+    for pattern, build in RULES[:7]:   # whole-sentence play/search rules ("open youtube and play X") go first
         m = pattern.search(text)
         if m:
             try:

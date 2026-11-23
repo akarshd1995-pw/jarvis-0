@@ -9,7 +9,7 @@ from .actions import files, system
 from .actions.base import ActionResult, Ctx
 from .config import Config
 from .dsl.grammar import Program
-from .safety import Tier, tier_of
+from .safety import Tier, needs_confirmation, tier_of
 from .store import Store
 
 Handler = Callable[[dict, Ctx, bool], ActionResult]
@@ -24,6 +24,7 @@ REGISTRY: dict[str, Handler] = {
     "unknown": system.unknown,
     "unsupported": system.unsupported,
     "search_web": system.search_web,
+    "play_media": system.play_media,
     "list_files": files.list_files,
     "move_files": files.move_files,
     "copy_files": files.copy_files,
@@ -62,7 +63,7 @@ class Executor:
                     continue
                 handler = REGISTRY[call.action]
                 tier = tier_of(call.action)
-                if tier >= Tier.CONFIRM:
+                if needs_confirmation(call.action, getattr(self.config, "confirm_actions", None)):
                     preview = handler(call.args, ctx, True)          # dry run
                     if not self.confirm(tier, preview.summary, preview.items):
                         report.skipped.append(preview.summary)
@@ -79,7 +80,8 @@ class Executor:
         if not last:
             return ActionResult("Nothing to undo.")
         batch_id, entries = last
-        if not self.confirm(Tier.CONFIRM, f"Undo {len(entries)} operation(s) from last command?", []):
+        if needs_confirmation("undo", getattr(self.config, "confirm_actions", None)) and \
+                not self.confirm(Tier.CONFIRM, f"Undo {len(entries)} operation(s) from last command?", []):
             return ActionResult("Undo cancelled.")
         done = []
         for entry_id, _op, inverse in entries:   # newest first

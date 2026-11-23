@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 import subprocess
 import sys
 import time
@@ -142,3 +143,43 @@ def search_web(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
 
 def unsupported(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     return ActionResult(f'Skipped "{args["request"]}": I can\'t do that yet.')
+
+
+# ------------------------------------------------------------ play media
+_YT_VIDEO = re.compile(r'"videoRenderer":\{"videoId":"([\w-]{11})"')
+_YT_ANY = re.compile(r'"videoId":"([\w-]{11})"')
+
+
+def first_youtube_video(query: str, fetch=None, timeout: float = 5.0) -> str | None:
+    """Find the top video for a query by reading YouTube's public results page (no API key).
+    Returns a video id, or None if the page can't be fetched or parsed (YouTube may change it)."""
+    url = search_url(query, "youtube")
+    try:
+        if fetch is None:
+            import urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                                                       "Accept-Language": "en-US,en;q=0.9"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                html = r.read().decode("utf-8", "ignore")
+        else:
+            html = fetch(url)
+    except Exception:
+        return None
+    m = _YT_VIDEO.search(html) or _YT_ANY.search(html)
+    return m.group(1) if m else None
+
+
+def play_media(args: dict, ctx: Ctx, dry_run: bool, fetch=None) -> ActionResult:
+    query, site = args["query"], str(args.get("site", "youtube"))
+    if site == "spotify":
+        if not dry_run:
+            _startfile(f"spotify:search:{quote(query)}")   # opens the Spotify app on the search
+        return ActionResult(f'Opening "{query}" in Spotify')
+    if dry_run:
+        return ActionResult(f'Will play "{query}" on YouTube')
+    vid = first_youtube_video(query, fetch=fetch)
+    if vid:
+        webbrowser.open(f"https://www.youtube.com/watch?v={vid}")
+        return ActionResult(f'Playing "{query}" on YouTube')
+    webbrowser.open(search_url(query, "youtube"))
+    return ActionResult(f'Couldn\'t pick a video automatically, opened YouTube results for "{query}"')

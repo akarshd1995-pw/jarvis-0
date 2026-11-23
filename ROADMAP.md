@@ -79,5 +79,4 @@ Status: ✅ done · 🔨 in progress · ⬜ planned
 | 21 | **Personal autocomplete** | Tiny GPT trained on your own writing; Hinglish-aware suggestions across Windows | ⬜ |
 
 ## Backlog (small items to fold into phases)
-- Auto-play the first YouTube result (needs the API or browser control; today `search_web` opens the results page)
 - Copy mechanism or bigger model if very long multi-path commands still mangle names in real use

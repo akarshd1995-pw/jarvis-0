@@ -21,10 +21,11 @@ ACTION_TIERS: dict[str, Tier] = {
     "unknown": Tier.SAFE,
     "unsupported": Tier.SAFE,
     "search_web": Tier.SAFE,
+    "play_media": Tier.SAFE,
     "undo": Tier.CONFIRM,
     "move_files": Tier.CONFIRM,
-    "copy_files": Tier.CONFIRM,
-    "system": Tier.CONFIRM,
+    "copy_files": Tier.SAFE,      # non-destructive and undoable
+    "system": Tier.SAFE,          # mute, volume, lock, display off: harmless, run instantly
     "delete_files": Tier.DESTRUCTIVE,
 }
 
@@ -34,6 +35,15 @@ MAX_FILES_PER_ACTION = 500
 
 class SafetyError(PermissionError):
     pass
+
+
+DEFAULT_CONFIRM = ["move_files", "undo"]   # user-editable in settings; delete ALWAYS asks
+
+
+def needs_confirmation(action: str, confirm_actions: list[str] | None = None) -> bool:
+    if tier_of(action) >= Tier.DESTRUCTIVE:
+        return True
+    return action in (DEFAULT_CONFIRM if confirm_actions is None else confirm_actions)
 
 
 def tier_of(action: str) -> Tier:

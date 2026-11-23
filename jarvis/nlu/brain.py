@@ -10,10 +10,25 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import re
+
 from ..dsl.grammar import DSLError, Program, parse
 from .rule_parser import rule_parse
 
 log = logging.getLogger(__name__)
+
+PLAY_WORDS = re.compile(r"\b(play|put on|stream|start playing|chalao|chala do|bajao|lagao|sunao|play karo)\b", re.I)
+
+
+def upgrade_play(prog: Program, text: str) -> Program:
+    """Models trained before play_media existed emit search_web(site=youtube) for "play X".
+    If the user actually asked to play, turn it into play_media so the video starts."""
+    if not PLAY_WORDS.search(text):
+        return prog
+    for call in prog.calls:
+        if call.action == "search_web" and str(call.args.get("site", "")) in ("youtube", "spotify"):
+            call.action = "play_media"
+    return prog
 
 
 class Brain:
@@ -56,7 +71,7 @@ class Brain:
             prog, conf = self.model.parse(text)
             if prog is not None:
                 if str(prog) != "unknown()":
-                    return prog, f"model {conf:.0%}"
+                    return upgrade_play(prog, text), f"model {conf:.0%}"
                 model_unknown = (prog, f"model {conf:.0%}")
         prog = rule_parse(text)
         if prog is not None:

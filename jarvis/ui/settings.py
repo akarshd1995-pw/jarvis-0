@@ -15,7 +15,7 @@ class SettingsWindow:
         self.win = tk.Toplevel(parent)
         self.win.title("Jarvis-0 settings")
         self.win.attributes("-topmost", True)
-        self.win.geometry("560x640")
+        self.win.geometry("560x720")
         pad = dict(padx=10, pady=4, sticky="w")
         f = ttk.Frame(self.win, padding=10)
         f.pack(fill="both", expand=True)
@@ -39,6 +39,12 @@ class SettingsWindow:
         self.backend = tk.StringVar(value=config.model_backend)
         ttk.Combobox(f, textvariable=self.backend, values=["auto", "onnx", "torch"], state="readonly",
                      width=10).grid(row=2, column=1, **pad)
+
+        ttk.Label(f, text="Ask before (comma-separated)").grid(row=13, column=0, **pad)
+        self.confirm = tk.StringVar(value=", ".join(config.confirm_actions))
+        ttk.Entry(f, textvariable=self.confirm).grid(row=13, column=1, sticky="ew", padx=10)
+        ttk.Label(f, text="e.g. move_files, copy_files, system, undo. Deleting always asks.",
+                  foreground="gray").grid(row=14, column=0, columnspan=2, **pad)
 
         self.encrypt = tk.BooleanVar(value=config.encrypt_logs)
         ttk.Checkbutton(f, text="Encrypt activity log (Windows DPAPI)", variable=self.encrypt).grid(
@@ -67,7 +73,7 @@ class SettingsWindow:
         self.roots.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=10)
 
         btns = ttk.Frame(f)
-        btns.grid(row=12, column=0, columnspan=2, pady=10)
+        btns.grid(row=15, column=0, columnspan=2, pady=10)
         ttk.Button(btns, text="Save", command=self.save).pack(side="left", padx=6)
         ttk.Button(btns, text="Cancel", command=self.win.destroy).pack(side="left", padx=6)
 
@@ -90,6 +96,7 @@ class SettingsWindow:
         c.hotkey, c.min_confidence, c.model_backend = self.hotkey.get().strip(), round(self.conf.get(), 2), self.backend.get()
         c.encrypt_logs, c.keep_window_titles = self.encrypt.get(), self.titles.get()
         c.folders, c.apps, c.allowed_roots = folders, apps, roots
+        c.confirm_actions = [a.strip() for a in self.confirm.get().split(",") if a.strip()]
         path = c.save()
         try:
             (autostart.enable if self.auto.get() else autostart.disable)()

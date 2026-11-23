@@ -545,7 +545,9 @@ def gen_search(c: Ctx):
 
 
 # ---------------------------------------------------------------- web search ("play X on youtube")
-WEB_V = {"music": ["play", "put on", "stream", "search for", "find", "look up", "start playing"],
+# "play" verbs -> play_media (the video actually starts); "search" verbs -> search_web (results page)
+WEB_V = {"play": ["play", "put on", "stream", "start playing", "play me"],
+         "music_search": ["search for", "find", "look up", "look for"],
          "other": ["search for", "look up", "find", "search", "check", "look for"]}
 WEB_EN = frames("WEB_EN", [
     "{v} {qs} on {site}",
@@ -570,7 +572,8 @@ WEB_EN = frames("WEB_EN", [
 ])
 WEB_HI = ["{site} pe {qs} {hv}", "{site} kholo aur {qs} {hv}", "{qs} {site} pe {hv}", "{site} khol ke {qs} {hv}",
           "zara {site} pe {qs} {hv}", "{site} me {qs} {hv}"]
-WEB_HV = {"music": ["chalao", "bajao", "lagao", "play karo", "chala do"],
+WEB_HV = {"play": ["chalao", "bajao", "lagao", "play karo", "chala do", "sunao"],
+          "music_search": ["search karo", "dhundo", "search kar do"],
           "other": ["search karo", "dhundo", "dhoondho", "search kar do", "dekho"]}
 NOSITE_MUSIC = ["play {qs}", "put on {qs}", "play the song {qs}", "{qs} chalao", "{qs} bajao", "can you play {qs}",
                 "play {qs} for me", "i want to listen to {qs}", "{qs} gaana lagao"]
@@ -582,18 +585,25 @@ def gen_search_web(c: Ctx):
     rng = c.rng
     site = rng.choice(list(LX.SEARCH_SITES))
     r = rng.random()
-    if r < 0.15:                                  # "play X" with no site -> YouTube
-        site, query = "youtube", LX.web_query(rng, "youtube")
-        return f"search_web(query={q(query)}, site=youtube)", rng.choice(NOSITE_MUSIC).format(qs=slot(query)), {}
+    if r < 0.15:                                  # "play X" with no site -> play it on YouTube
+        query = LX.web_query(rng, "youtube")
+        return f"play_media(query={q(query)}, site=youtube)", rng.choice(NOSITE_MUSIC).format(qs=slot(query)), {}
     if r < 0.25:                                  # "google X" -> Google
         query = LX.web_query(rng, "google")
         return f"search_web(query={q(query)}, site=google)", rng.choice(NOSITE_GOOGLE).format(qs=slot(query)), {}
     query = LX.web_query(rng, site)
-    kind = "music" if site in ("youtube", "spotify") else "other"
     tpl = c.T(WEB_HI if c.hing else WEB_EN)
+    if site in ("youtube", "spotify"):
+        kind = "play" if rng.random() < 0.6 else "music_search"
+        if "{v}" not in tpl and "{hv}" not in tpl:   # e.g. "search {site} for {qs}"
+            kind = "music_search"
+    else:
+        kind = "other"
     text = tpl.format(v=rng.choice(WEB_V[kind]), hv=rng.choice(WEB_HV[kind]), qs=slot(query),
                       site=slot(rng.choice(LX.SEARCH_SITES[site])))
-    return f"search_web(query={q(query)}, site={site})", text, {}
+    action = "play_media" if kind == "play" else "search_web"
+    return f"{action}(query={q(query)}, site={site})", text, {}
+
 
 # ---------------------------------------------------------------- safety data: negations and fragments -> unknown()
 

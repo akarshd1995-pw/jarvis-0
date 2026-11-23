@@ -213,8 +213,10 @@ def test_search_web_and_unsupported(env):
 
 
 @pytest.mark.parametrize("text,expected", [
-    ("open youtube and play dear god", 'search_web(query="dear god", site=youtube)'),
-    ("play dear god on youtube", 'search_web(query="dear god", site=youtube)'),
+    ("open youtube and play dear god", 'play_media(query="dear god", site=youtube)'),
+    ("play dear god on youtube", 'play_media(query="dear god", site=youtube)'),
+    ("play dear god", 'play_media(query="dear god", site=youtube)'),
+    ("search dear god on youtube", 'search_web(query="dear god", site=youtube)'),
     ("google best biryani near me", 'search_web(query="best biryani near me", site=google)'),
 ])
 def test_rule_parser_web(text, expected):
@@ -353,3 +355,49 @@ def test_fragments_never_conflict_with_lock_command():
     for _ in range(2000):
         _, t = gen_fragment(Ctx(rng, "train"))
         assert not t.lower().startswith("lock")
+
+
+
+# ------------------------------------------------------------------ direct execution + play
+def test_harmless_actions_run_without_asking(env):
+    cfg, store, dl, arc = env
+    asked = []
+    ex = Executor(cfg, store, lambda *a: asked.append(a) or True)
+    ex.run(parse("copy_files(src=Downloads, dest=Archive, ext=png)"))
+    ex.run(parse('remind(text="stretch", after=5m)'))
+    assert asked == []
+    ex.run(parse("move_files(src=Downloads, dest=Archive, ext=png)"))   # move asks by default
+    ex.run(parse("delete_files(src=Downloads, ext=png)"))               # delete always asks
+    assert len(asked) == 2
+
+
+def test_confirm_actions_are_configurable_but_delete_always_asks(env):
+    cfg, store, dl, arc = env
+    cfg.confirm_actions = []
+    asked = []
+    ex = Executor(cfg, store, lambda *a: asked.append(a) or True)
+    ex.run(parse("move_files(src=Downloads, dest=Archive, ext=png)"))
+    assert asked == []
+    ex.run(parse("delete_files(src=Downloads, ext=png)"))
+    assert len(asked) == 1
+
+
+def test_play_media_opens_top_video(env, monkeypatch):
+    import jarvis.actions.system as S
+    from jarvis.actions.base import Ctx
+    cfg, store, dl, arc = env
+    opened = []
+    monkeypatch.setattr(S.webbrowser, "open", lambda url: opened.append(url))
+    html = 'x "videoRenderer":{"videoId":"abcDEF12345","thumb" y'
+    r = S.play_media({"query": "dear god", "site": "youtube"}, Ctx(cfg, store, "b"), False, fetch=lambda u: html)
+    assert opened[-1] == "https://www.youtube.com/watch?v=abcDEF12345" and "Playing" in r.summary
+    S.play_media({"query": "dear god"}, Ctx(cfg, store, "b"), False, fetch=lambda u: 1 / 0)
+    assert "results?search_query=dear+god" in opened[-1]
+
+
+def test_brain_upgrades_play_requests_from_older_models():
+    from jarvis.nlu.brain import upgrade_play
+    p = upgrade_play(parse('search_web(query="dear god", site=youtube)'), "play dear god on youtube")
+    assert str(p) == 'play_media(query="dear god", site=youtube)'
+    p = upgrade_play(parse('search_web(query="dear god", site=youtube)'), "search dear god on youtube")
+    assert str(p) == 'search_web(query="dear god", site=youtube)'

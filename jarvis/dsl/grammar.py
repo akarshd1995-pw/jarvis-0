@@ -69,7 +69,9 @@ SCHEMA: dict[str, dict] = {
     "search_web":    {"args": {"query": "str", "site": "ident"}, "required": ["query"],
                       "enum": {"site": ["google", "youtube", "amazon", "flipkart", "swiggy", "zomato", "github",
                                         "stackoverflow", "wikipedia", "spotify", "maps", "reddit", "linkedin"]}},
-    "unsupported":   {"args": {"request": "str"}, "required": ["request"]},  # part of a command Jarvis can't do
+    "unsupported":   {"args": {"request": "str"}, "required": ["request"]},
+    "play_media":    {"args": {"query": "str", "site": "ident"}, "required": ["query"],   # play, not just search
+                      "enum": {"site": ["youtube", "spotify"]}},  # part of a command Jarvis can't do
     "undo":          {"args": {}, "required": []},
     "unknown":       {"args": {}, "required": []},   # out-of-scope request: decline, never guess
 }

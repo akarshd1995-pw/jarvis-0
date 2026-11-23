@@ -143,6 +143,6 @@ python -m pytest -q
 ```
 
 ## Roadmap
-Jarvis-0 is heading toward a JARVIS-style assistant in the spirit of the Iron Man films: voice, in-character replies, an animated HUD, machine monitoring, briefings, offline Q&A and a small conversation model of its own. Everything is built 100% from scratch. The full plan lives in [ROADMAP.md](ROADMAP.md).
+Jarvis-0 is heading toward a JARVIS-style assistant in the spirit of the Iron Man films: in-character replies, an animated HUD, machine monitoring, briefings, offline Q&A, a small conversation model of its own, and voice last. Everything is built 100% from scratch. The full plan lives in [ROADMAP.md](ROADMAP.md).
 
-Phases 1–3 are done. Next, in order: **4 Runtime → 15 Voice → 22 Persona → 25 HUD → 5 System control → 23 Monitoring → 24 Briefings → 14 Self-improving loop → 26 Offline Q&A → 7 Memory → 6 Conversation → 27 Jarvis-LM → 12 Automations**.
+Phases 1–3 are done. Next, in order: **4 Runtime → 22 Persona → 25 HUD → 5 System control → 23 Monitoring → 24 Briefings → 14 Self-improving loop → 26 Offline Q&A → 7 Memory → 6 Conversation → 27 Jarvis-LM → 12 Automations → 15 Voice**.

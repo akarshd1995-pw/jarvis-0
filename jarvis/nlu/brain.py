@@ -66,6 +66,50 @@ def upgrade_play(prog: Program, text: str) -> Program:
     return normalize_media(prog)
 
 
+# Words the model may legitimately drop from a free-text slot ("play dear god song" -> query="dear god")
+_FILLER = {"song", "songs", "video", "videos", "music", "the", "a", "an", "some", "please", "pls", "jarvis",
+           "on", "in", "youtube", "spotify", "yt", "for", "me", "now", "track", "gaana", "gana", "wala", "vala",
+           "chalao", "bajao", "lagao", "sunao", "karo", "do", "chala", "play", "search", "up", "look"}
+_TEXT_SLOTS = {"play_media": "query", "search_web": "query"}
+
+
+def _words(s: str) -> list[str]:
+    return re.findall(r"\w+", re.sub(r"(?<=\w)'s?\b", " ", s.lower()))
+
+
+def slot_faithful(prog: Program, text: str) -> bool:
+    """A free-text slot must be copied from what the user typed: whole words, nothing cut off.
+    Catches a model that starts copying an unfamiliar name and stops early ("super machi" -> "sup")."""
+    said = _words(text)
+    joined = " " + " ".join(said) + " "
+    for call in prog.calls:
+        key = _TEXT_SLOTS.get(call.action)
+        if not key or key not in call.args:
+            continue
+        got = _words(str(call.args[key]))
+        if not got or " " + " ".join(got) + " " not in joined:
+            return False          # not a whole-word span of the input (cut mid-word or invented)
+    return True
+
+
+def repair_slots(prog: Program, text: str) -> Program | None:
+    """If the rules read the same request and kept content words the model dropped, take the rules' slot.
+    Returns the repaired program, or None if nothing needed repair."""
+    ruled = rule_parse(text)
+    if ruled is None or len(ruled.calls) != len(prog.calls):
+        return None
+    changed = False
+    for mc, rc in zip(prog.calls, ruled.calls):
+        key = _TEXT_SLOTS.get(mc.action)
+        if not key or rc.action not in _TEXT_SLOTS or key not in mc.args or key not in rc.args:
+            continue
+        lost = set(_words(str(rc.args[key]))) - set(_words(str(mc.args[key]))) - _FILLER
+        if lost:
+            mc.args[key] = rc.args[key]
+            changed = True
+    return prog if changed else None
+
+
 class Brain:
     def __init__(self, checkpoint: Path | None = None, tokenizer: Path | None = None,
                  min_confidence: float = 0.55, prefer: str = "auto"):
@@ -112,6 +156,13 @@ class Brain:
             if prog is not None:
                 gave_up = any(c.action in ("unknown", "unsupported") for c in prog.calls)
                 if not gave_up:
+                    if not slot_faithful(prog, text):
+                        ruled = rule_parse(text)
+                        if ruled is not None and slot_faithful(ruled, text):
+                            return upgrade_play(ruled, text), "rules (model cut the name short)"
+                    fixed = repair_slots(prog, text)
+                    if fixed is not None:
+                        return upgrade_play(fixed, text), f"model {conf:.0%} + rules slot"
                     return upgrade_play(prog, text), f"model {conf:.0%}"
                 # The model says it can't: a newer rule may know better (e.g. actions added after it was trained)
                 ruled = rule_parse(text)

@@ -838,3 +838,32 @@ def test_persona_play_latest_mentions_channel_and_title():
             "query": "yes theory", "site": "youtube", "mode": "latest", "title": "We Lived With Strangers",
             "channel": "Yes Theory"}))
         assert "Yes Theory" in out and "We Lived With Strangers" in out
+
+
+# ---------------------------------------------------------------- free-text slots must be copied whole
+def test_slot_faithful_catches_truncated_names():
+    from jarvis.nlu.brain import slot_faithful
+    assert not slot_faithful(parse('play_media(query="sup", site=youtube)'), "play super machi")
+    assert slot_faithful(parse('play_media(query="super machi", site=youtube)'), "play super machi")
+    assert slot_faithful(parse('play_media(mode=latest, query="Yes Theory", site=youtube)'), "play Yes Theory's newest video")
+
+
+def test_brain_repairs_model_that_cuts_the_name():
+    from jarvis.nlu.brain import Brain
+
+    class Fake:
+        def __init__(self, out): self.out = out
+        def parse(self, text): return parse(self.out), 0.9
+
+    for model_out in ['play_media(query="sup", site=youtube)', 'play_media(query="super", site=youtube)']:
+        b = Brain(); b.model = Fake(model_out)
+        prog, _ = b.resolve("play super machi")
+        assert str(prog) == 'play_media(query="super machi", site=youtube)'
+    b = Brain(); b.model = Fake('play_media(query="dear god", site=youtube)')
+    assert str(b.resolve("play dear god song")[0]) == 'play_media(query="dear god", site=youtube)'  # dropping "song" is fine
+
+
+def test_hinglish_and_polite_play_rules():
+    from jarvis.nlu.rule_parser import rule_parse
+    for text in ["super machi chalao", "super machi song bajao", "can you play super machi please", "jarvis play super machi"]:
+        assert str(rule_parse(text)) == 'play_media(query="super machi", site=youtube)', text

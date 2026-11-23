@@ -603,9 +603,11 @@ def gen_search_web(c: Ctx):
 PLAY_TOP_EN = ["play {q}", "put on {q}", "play {q} on youtube", "can you play {q}", "i want to listen to {q}",
                "play me {q}", "play the song {q}", "play the video {q}", "watch {q}", "i want to watch {q}",
                "play {q} for me", "youtube {q} play karo", "open youtube and play {q}", "play {q} please",
-               "could you put on {q}", "let's listen to {q}", "throw on {q}"]
+               "could you put on {q}", "let's listen to {q}", "throw on {q}", "jarvis play {q}",
+               "play {q} song", "play {q} video", "can you play {q} please", "play {q} now", "pls play {q}"]
 PLAY_TOP_HI = ["{q} chalao", "{q} bajao", "{q} lagao", "youtube pe {q} chalao", "{q} play karo", "{q} sunao",
-               "zara {q} chala do", "{q} ka gaana bajao", "youtube pe {q} lagao"]
+               "zara {q} chala do", "{q} ka gaana bajao", "youtube pe {q} lagao", "{q} song chalao",
+               "{q} gaana lagao", "{q} play kar do", "{q} baja do", "{q} video chalao"]
 PLAY_LATEST_EN = ["play {c} latest video", "play the latest video from {c}", "play {c}'s newest video",
                   "play {c}'s latest upload", "play the new {c} video", "watch {c}'s latest video",
                   "play the most recent {c} video", "put on the newest {c} upload", "play {c} latest video on youtube",
@@ -628,7 +630,8 @@ def gen_play(c: Ctx):
     rng = c.rng
     r = rng.random()
     if r < 0.38:                                                   # the top result
-        query = LX.song_query(rng) if rng.random() < 0.6 else LX.video_query(rng)
+        rq = rng.random()
+        query = LX.song_query(rng) if rq < 0.5 else LX.open_query(rng) if rq < 0.65 else LX.video_query(rng)
         tpl = rng.choice(PLAY_TOP_HI if c.hing else PLAY_TOP_EN)
         return f"play_media(query={q(query)}, site=youtube)", tpl.format(q=slot(query)), {}
     if r < 0.65:                                                   # newest upload of a channel

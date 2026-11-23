@@ -101,6 +101,10 @@ RULES: list[tuple[re.Pattern, callable]] = [
      lambda m, t: f'search_web(query="{m.group(1)}", site={m.group(2).lower()})'),
     (re.compile(rf"^open ({_SITES}) and (?:search(?: for)?|find|look up) (.+)$", re.I),
      lambda m, t: f'search_web(query="{m.group(2)}", site={m.group(1).lower()})'),
+    (re.compile(r"^(?:youtube pe |yt pe )?(.+?) (?:song |gaana |gana |video )?(?:chalao|chala do|bajao|baja do|lagao|laga do|sunao|play karo|play kar do)$", re.I),
+     lambda m, t: f'play_media(query="{m.group(1)}", site=youtube)'),
+    (re.compile(r"^(?:(?:jarvis,? |hey jarvis,? )(?:can you |could you |please |pls )*|(?:can you |could you |please |pls )+)(?:play|put on) (?!.* on \w+$)(.+?)(?: please| pls)?\??$", re.I),
+     lambda m, t: f'play_media(query="{m.group(1)}", site=youtube)'),
     (re.compile(r"^(?:play|put on) (?!.* on \w+$)(.+)$", re.I),
      lambda m, t: f'play_media(query="{m.group(1)}", site=youtube)'),
     (re.compile(r"^(?:google|search(?: google)? for) (.+)$", re.I),
@@ -183,9 +187,12 @@ RULES: list[tuple[re.Pattern, callable]] = [
 ]
 
 
+_WHOLE_SENTENCE = next(i for i, (p, _) in enumerate(RULES) if p.pattern.startswith('^(?:google|search(?: google)? for)')) + 1
+
+
 def rule_parse(text: str) -> Program | None:
     text = text.strip().rstrip(".!")
-    for pattern, build in RULES[:13]:  # whole-sentence play/search rules ("open youtube and play X") go first
+    for pattern, build in RULES[:_WHOLE_SENTENCE]:  # whole-sentence play/search rules ("open youtube and play X") go first
         m = pattern.search(text)
         if m:
             try:

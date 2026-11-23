@@ -385,8 +385,39 @@ LIVE_THINGS = ["lofi girl", "nasa", "isro launch", "ipl match", "aaj tak", "bbc 
                "cricket score", "sky news", "al jazeera english"]
 
 
+# Regional and less-known titles: names the model must copy whole, word by word
+SONGS_REGIONAL = [
+    "super machi", "vaathi coming", "arabic kuthu", "why this kolaveri di", "rowdy baby", "kutti story", "naatu naatu",
+    "oo antava", "srivalli", "butta bomma", "ramuloo ramulaa", "samajavaragamana", "inkem inkem", "kalaavathi",
+    "jimikki kammal", "malare", "entammede jimikki", "kannu kannu", "belageddu", "bombe helutaite", "chuttamalle",
+    "hukum", "jailer theme", "naa ready", "badass", "kaavaalaa", "ranjithame", "jalabulajangu", "aaluma doluma",
+    "maari thara local", "en jeevan", "vaa vaathi", "munbe vaa", "nenjukkul peidhidum", "kanimozhiye", "otha sollaala",
+    "ainvayi ainvayi", "lehanga", "brown munde", "excuses", "insane", "with you", "softly", "335", "52 bars",
+    "mann mera", "maiyya mainu", "pasoori", "kahani suno", "jhol", "tu hai kahan", "sajni", "o maahi", "husn",
+    "tauba tauba", "aaj ki raat", "khalasi", "dil tu jaan tu", "big dawgs", "millionaire", "winning speech",
+]
+# Common words that are also the start of longer names ("sup" -> "super machi"): copy all of it
+OPEN_WORDS = ["super", "sup", "hey", "ok", "yo", "hi", "top", "big", "old", "my", "one", "two", "red", "blue",
+              "baby", "love", "night", "dil", "mera", "tera", "jaan", "raja", "rani", "machi", "thala", "anna",
+              "pyaar", "ishq", "kanne", "nanba", "chinna", "maa", "bro", "boss", "king", "queen", "street", "local",
+              "mass", "theme", "bgm", "song", "dance", "party", "rap", "beat", "vibe", "mood", "golden", "silver"]
+
+
+def open_query(rng: random.Random) -> str:
+    """1-4 words mixing real words and never-seen pseudo-words, so the model copies any name in full."""
+    n = rng.choice([1, 2, 2, 2, 3, 3, 4])
+    words = [rng.choice(OPEN_WORDS) if rng.random() < 0.45 else pseudo_word(rng).lower().strip("_-") for _ in range(n)]
+    if rng.random() < 0.25:
+        words.append(rng.choice(["song", "bgm", "theme", "remix", "trailer", "lyrics", "full song", "cover"]))
+    return " ".join(w for w in words if w) or pseudo_word(rng)
+
+
 def song_query(rng: random.Random) -> str:
     r = rng.random()
+    if r < 0.2:
+        return rng.choice(SONGS_REGIONAL) + rng.choice(SONG_EXTRA)
+    if r < 0.42:
+        return open_query(rng)
     if r < 0.5:
         return rng.choice(SONGS_MORE) + rng.choice(SONG_EXTRA)
     if r < 0.7:

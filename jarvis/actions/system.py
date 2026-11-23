@@ -29,7 +29,7 @@ def open_app(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     target = ctx.config.apps.get(name.lower(), name)
     if not dry_run:
         _startfile(target)
-    return ActionResult(f"Opening {name}")
+    return ActionResult(f"Opening {name}", kind="open", data={"what": "app", "name": name})
 
 
 def open_url(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
@@ -38,14 +38,14 @@ def open_url(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
         url = "https://" + url
     if not dry_run:
         webbrowser.open(url)
-    return ActionResult(f"Opening {url}")
+    return ActionResult(f"Opening {url}", kind="open", data={"what": "url", "name": args["url"]})
 
 
 def open_folder(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     p = check_path(ctx.config.resolve_folder(str(args["path"])), ctx.config.allowed_roots)
     if not dry_run:
         _startfile(str(p))
-    return ActionResult(f"Opening {p}")
+    return ActionResult(f"Opening {p}", kind="open", data={"what": "folder", "name": str(args["path"])})
 
 
 def _due_timestamp(args: dict, now: float) -> float:
@@ -65,7 +65,8 @@ def remind(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     when = dt.datetime.fromtimestamp(due).strftime("%a %H:%M")
     if not dry_run:
         ctx.store.add_reminder(due, args["text"])
-    return ActionResult(f"Reminder set for {when}: {args['text']}")
+    return ActionResult(f"Reminder set for {when}: {args['text']}", kind="remind",
+                        data={"text": args["text"], "due": due, "relative": "after" in args})
 
 
 # ------------------------------------------------------------ system controls
@@ -84,9 +85,10 @@ def _press(vk: int, times: int = 1) -> None:
 def system(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     action = str(args["action"])
     if dry_run:
-        return ActionResult(f"Will run system action: {action}")
+        return ActionResult(f"Will run system action: {action}", kind="system", data={"action": action, "dry": True})
     if not IS_WINDOWS:
-        return ActionResult(f"(system action {action} only supported on Windows)")
+        return ActionResult(f"(system action {action} only supported on Windows)", kind="system",
+                            data={"action": action, "unsupported_os": True})
     import ctypes
     user32 = ctypes.windll.user32  # type: ignore[attr-defined]
     if action == "lock":
@@ -100,16 +102,18 @@ def system(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     elif action == "sleep_display":
         HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER = 0xFFFF, 0x0112, 0xF170
         user32.PostMessageW(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, 2)
-    return ActionResult(f"Done: {action}")
+    return ActionResult(f"Done: {action}", kind="system", data={"action": action})
 
 
 def search_memory(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
-    return ActionResult("Memory search arrives in phase 3 (own embeddings + HNSW).")
+    return ActionResult("Memory search arrives in phase 3 (own embeddings + HNSW).", kind="memory",
+                        data={"query": args["query"]})
 
 
 def unknown(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     return ActionResult("I can't do that yet. I can manage files (move/copy/delete/list), open apps, "
-                        "websites and folders, set reminders, and lock/mute/change volume.")
+                        "websites and folders, set reminders, play and search, and lock/mute/change volume.",
+                        kind="unknown")
 
 
 SEARCH_URLS = {
@@ -138,11 +142,13 @@ def search_web(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     url = search_url(args["query"], site)
     if not dry_run:
         webbrowser.open(url)
-    return ActionResult(f'Searching {site} for "{args["query"]}"')
+    return ActionResult(f'Searching {site} for "{args["query"]}"', kind="search",
+                        data={"query": args["query"], "site": site})
 
 
 def unsupported(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
-    return ActionResult(f'Skipped "{args["request"]}": I can\'t do that yet.')
+    return ActionResult(f'Skipped "{args["request"]}": I can\'t do that yet.', kind="unsupported",
+                        data={"request": args["request"]})
 
 
 # ------------------------------------------------------------ play media
@@ -174,12 +180,13 @@ def play_media(args: dict, ctx: Ctx, dry_run: bool, fetch=None) -> ActionResult:
     if site == "spotify":
         if not dry_run:
             _startfile(f"spotify:search:{quote(query)}")   # opens the Spotify app on the search
-        return ActionResult(f'Opening "{query}" in Spotify')
+        return ActionResult(f'Opening "{query}" in Spotify', kind="play", data={"query": query, "site": "spotify"})
     if dry_run:
-        return ActionResult(f'Will play "{query}" on YouTube')
+        return ActionResult(f'Will play "{query}" on YouTube', kind="play", data={"query": query, "site": "youtube"})
     vid = first_youtube_video(query, fetch=fetch)
     if vid:
         webbrowser.open(f"https://www.youtube.com/watch?v={vid}")
-        return ActionResult(f'Playing "{query}" on YouTube')
+        return ActionResult(f'Playing "{query}" on YouTube', kind="play", data={"query": query, "site": "youtube"})
     webbrowser.open(search_url(query, "youtube"))
-    return ActionResult(f'Couldn\'t pick a video automatically, opened YouTube results for "{query}"')
+    return ActionResult(f'Couldn\'t pick a video automatically, opened YouTube results for "{query}"', kind="play",
+                        data={"query": query, "site": "youtube", "fallback": True})

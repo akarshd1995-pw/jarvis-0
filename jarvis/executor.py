@@ -41,6 +41,8 @@ class RunReport:
     results: list[ActionResult] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    declined: list[ActionResult] = field(default_factory=list)          # user said No at the preview
+    failures: list[tuple[str, Exception]] = field(default_factory=list)  # (action, exception)
 
     def text(self) -> str:
         lines = [r.summary for r in self.results]
@@ -50,8 +52,10 @@ class RunReport:
 
 
 class Executor:
-    def __init__(self, config: Config, store: Store, confirm: ConfirmFn):
+    def __init__(self, config: Config, store: Store, confirm: ConfirmFn, describe=None):
         self.config, self.store, self.confirm = config, store, confirm
+        # describe(preview: ActionResult) -> str: in-character confirmation question (persona layer)
+        self.describe = describe
 
     def run(self, prog: Program) -> RunReport:
         report = RunReport(batch_id=uuid.uuid4().hex[:12])
@@ -65,12 +69,15 @@ class Executor:
                 tier = tier_of(call.action)
                 if needs_confirmation(call.action, getattr(self.config, "confirm_actions", None)):
                     preview = handler(call.args, ctx, True)          # dry run
-                    if not self.confirm(tier, preview.summary, preview.items):
+                    question = self.describe(preview) if self.describe else preview.summary
+                    if not self.confirm(tier, question, preview.items):
                         report.skipped.append(preview.summary)
+                        report.declined.append(preview)
                         continue
                 report.results.append(handler(call.args, ctx, False))
             except Exception as e:  # report and keep going with the next call
                 report.errors.append(f"{call.action}: {e}")
+                report.failures.append((call.action, e))
         self.store.log_event("command_run", {"program": str(prog), "batch": report.batch_id,
                                              "errors": report.errors, "skipped": len(report.skipped)})
         return report
@@ -78,14 +85,14 @@ class Executor:
     def undo(self) -> ActionResult:
         last = self.store.last_batch()
         if not last:
-            return ActionResult("Nothing to undo.")
+            return ActionResult("Nothing to undo.", kind="undo", data={"count": 0})
         batch_id, entries = last
         if needs_confirmation("undo", getattr(self.config, "confirm_actions", None)) and \
                 not self.confirm(Tier.CONFIRM, f"Undo {len(entries)} operation(s) from last command?", []):
-            return ActionResult("Undo cancelled.")
+            return ActionResult("Undo cancelled.", kind="undo", data={"count": 0, "cancelled": True})
         done = []
         for entry_id, _op, inverse in entries:   # newest first
             files.apply_inverse(inverse)
             done.append(entry_id)
         self.store.mark_undone(done)
-        return ActionResult(f"Undid {len(done)} operation(s).")
+        return ActionResult(f"Undid {len(done)} operation(s).", kind="undo", data={"count": len(done)})

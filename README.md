@@ -119,6 +119,14 @@ That script runs four steps:
 
 Supported search sites: google, youtube, amazon, flipkart, swiggy, zomato, github, stackoverflow, wikipedia, spotify, maps, reddit, linkedin.
 
+## Persona
+Every reply is in character and built from the real result, so counts, folders and skipped steps are always exact:
+> "Fourteen PDFs are now in Archive, sir." · "Shall I move three ZIP files older than 2 months from Downloads to Archive?" · "I can't send an email to Rahul yet." · "It's 2:37 PM, sir."
+
+- **Tones:** `butler` (default), `friendly`, `minimal`. Set the assistant's name and how it addresses you (sir, ma'am, your name, or nothing) in Settings.
+- **Small talk without a language model:** greetings, time and date, thanks, "who are you", "what can you do", and a few jokes. Open conversation comes with Jarvis-LM (phase 27).
+- **Details line:** the technical command shows under each reply (`[model 98%] move_files(...)`). Turn it off in Settings once you trust it.
+
 ## Teaching it your own phrasing
 The fastest way: right in the command bar, after Jarvis gets something wrong, type
 ```

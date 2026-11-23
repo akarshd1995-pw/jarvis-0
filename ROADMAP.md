@@ -30,7 +30,7 @@ Status: ✅ done · 🔨 in progress · ⬜ planned
 | # | Phase | What it adds | Status |
 |---|---|---|---|
 | 4 | **Runtime & packaging** | ONNX model (no PyTorch needed), autostart with Windows, tray icon, settings window, encrypted local store, one-click update | 🔨 code done, needs first run on Windows |
-| 22 | 🆕 **Persona layer** | In-character replies for every action ("Done. Fourteen PDFs are in Archive."), confirmations and errors. Configurable name, form of address and tone. Written so voice can read the same lines later | ⬜ |
+| 22 | 🆕 **Persona layer** | In-character replies for every action ("Done. Fourteen PDFs are in Archive."), confirmations and errors. Configurable name, form of address and tone. Written so voice can read the same lines later | 🔨 code done, try it |
 | 25 | 🆕 **HUD interface** | Animated overlay with a status orb (idle / listening / thinking / speaking) and live widgets (system stats, reminders, running jobs, last action). Our own visual design | ⬜ |
 
 ## Stage C: Runs and watches your machines
@@ -68,7 +68,7 @@ Status: ✅ done · 🔨 in progress · ⬜ planned
 | # | Phase | What it adds | Status |
 |---|---|---|---|
 | 16 | **Phone remote** | Control your PCs from your phone over LAN or a Telegram bot ("lock my PC", "is training done?") | ⬜ |
-| 17 | **Two-PC mesh** | Laptop and RTX 5070 PC share corrections and models; heavy jobs go to the 5070 automatically | ⬜ |
+| 17 | **Two-PC mesh** | Laptop and RTX 5070 PC share corrections and models; heavy jobs go to the 5070 automatically. Deprioritized: the RTX 5070 PC is now the single main machine | ⬜ (last) |
 
 ## Stage H: Platform
 | # | Phase | What it adds | Status |

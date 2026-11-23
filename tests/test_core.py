@@ -401,3 +401,83 @@ def test_brain_upgrades_play_requests_from_older_models():
     assert str(p) == 'play_media(query="dear god", site=youtube)'
     p = upgrade_play(parse('search_web(query="dear god", site=youtube)'), "search dear god on youtube")
     assert str(p) == 'search_web(query="dear god", site=youtube)'
+
+
+# ------------------------------------------------------------------ phase 22: persona
+def _results():
+    from jarvis.actions.base import ActionResult as AR
+    fd = lambda **k: {"op": "move", "count": 14, "src": "Downloads", "dest": "Archive", "ext": "pdf",
+                      "older_than": "30d", "newer_than": None, "name_contains": None, **k}
+    return [
+        AR("", kind="files", data=fd()), AR("", kind="files", data=fd(op="copy")),
+        AR("", kind="files", data=fd(op="delete", dest=None)), AR("", kind="files", data=fd(count=0)),
+        AR("", ["a.pdf", "b.pdf"], kind="list", data=fd(op="list", count=2, dest=None)),
+        AR("", [], kind="list", data=fd(op="list", count=0, dest=None)),
+        AR("", kind="open", data={"what": "app", "name": "chrome"}),
+        AR("", kind="open", data={"what": "url", "name": "github.com"}),
+        AR("", kind="open", data={"what": "folder", "name": "D:/work/college/notes/2025"}),
+        AR("", kind="remind", data={"text": "call mom", "due": time.time() + 1200, "relative": True}),
+        AR("", kind="remind", data={"text": "stretch", "due": time.time() + 86400, "relative": False}),
+        *[AR("", kind="system", data={"action": a}) for a in ("mute", "volume_up", "volume_down", "lock", "sleep_display")],
+        AR("", kind="system", data={"action": "mute", "unsupported_os": True}),
+        AR("", kind="search", data={"query": "biryani", "site": "swiggy"}),
+        AR("", kind="play", data={"query": "dear god", "site": "youtube"}),
+        AR("", kind="play", data={"query": "lofi", "site": "spotify"}),
+        AR("", kind="play", data={"query": "x", "site": "youtube", "fallback": True}),
+        AR("", kind="memory", data={"query": "the blue chart"}),
+        AR("", kind="unsupported", data={"request": "Send an email to Rahul"}),
+        AR("", kind="unknown"), AR("", kind="undo", data={"count": 3}), AR("", kind="undo", data={"count": 0}),
+        AR("", kind="undo", data={"count": 0, "cancelled": True}),
+    ]
+
+
+@pytest.mark.parametrize("tone", ["butler", "friendly", "minimal"])
+def test_persona_renders_every_result_kind(tone):
+    from jarvis.persona import Persona
+    p = Persona(tone=tone, seed=0)
+    for r in _results():
+        out = p.result(r)
+        assert out and "{" not in out and "}" not in out and "  " not in out, (tone, r.kind, out)
+        assert out[0].isupper() or out[0].isdigit(), out
+
+
+def test_persona_facts_are_exact():
+    from jarvis.persona import Persona
+    p = Persona(tone="minimal", seed=0)
+    rs = _results()
+    assert p.result(rs[0]) == "Moved 14 PDFs to Archive."
+    assert "No PDFs older than 1 month in Downloads" in p.result(rs[3])
+    unsupported = next(r for r in rs if r.kind == "unsupported")
+    assert "send an email to Rahul" in p.result(unsupported)
+
+
+def test_persona_avoids_repeating_itself():
+    from jarvis.persona import Persona
+    p = Persona(tone="butler", seed=3)
+    outs = [p.result(_results()[0]) for _ in range(30)]
+    assert all(a != b for a, b in zip(outs, outs[1:]))
+
+
+def test_confirmation_question_comes_from_persona(env):
+    from jarvis.daemon import Jarvis
+    cfg, store, dl, arc = env
+    asked = []
+    j = Jarvis(cfg, lambda tier, q, items: asked.append(q) or False)
+    reply = j.handle("move_files(src=Downloads, dest=Archive, ext=pdf)")
+    assert asked and "PDF" in asked[0] and "Archive" in asked[0] and asked[0].endswith("?")
+    assert "cancel" in reply.lower() or "left them" in reply.lower()
+
+
+def test_smalltalk_and_details_toggle(env):
+    import datetime as dt
+    from jarvis.daemon import Jarvis
+    from jarvis.persona import Persona, smalltalk
+    p = Persona(tone="butler", address="sir", seed=0)
+    now = dt.datetime(2026, 11, 23, 14, 37)
+    assert smalltalk("jarvis what time is it", p, now) == "It's 2:37 PM, sir."
+    assert smalltalk("hello", p, now).startswith("Good afternoon")
+    assert smalltalk("write a poem about rain", p, now) is None
+    cfg, store, dl, arc = env
+    cfg.show_details = False
+    j = Jarvis(cfg, lambda *a: True)
+    assert "[" not in j.handle("thanks")

@@ -12,8 +12,10 @@ from .collectors.focus import FocusCollector
 from .collectors.folders import FolderWatcher
 from .config import Config
 from .dsl.grammar import DSLError, canonical
+from .actions.base import ActionResult
 from .executor import Executor
 from .nlu.brain import Brain
+from .persona import Persona, smalltalk
 from .safety import Tier
 from .store import Store
 
@@ -38,7 +40,8 @@ class Jarvis:
         self.brain = Brain(PROJECT_ROOT / config.model_checkpoint, PROJECT_ROOT / config.tokenizer_path,
                            min_confidence=config.min_confidence, prefer=config.model_backend)
         self.hooks: dict = {}   # UI callbacks: settings, restart
-        self.executor = Executor(config, self.store, confirm)
+        self.persona = Persona(config.persona_name, config.persona_address, config.persona_tone)
+        self.executor = Executor(config, self.store, confirm, describe=self.persona.confirm_question)
         self.data_root = data_root or PROJECT_ROOT / "data"
         self.last_text: str | None = None
         self.last_program: str | None = None
@@ -110,10 +113,21 @@ class Jarvis:
         self.last_text, self.last_program = text.strip(), (str(prog) if prog else None)
         self.store.log_event("command", {"text_len": len(text), "source": source,
                                          "program": str(prog) if prog else None})
-        if prog is None:
-            return "Sorry, I couldn't understand that yet. (Tip: you can also type raw DSL.)"
+        if prog is None or str(prog) == "unknown()":
+            reply = smalltalk(text, self.persona)
+            if reply is not None:
+                source = "smalltalk"
+            else:
+                reply = self.persona.result(ActionResult("", kind="unknown")) if prog else self.persona.unparsed()
+            return self._with_details(reply, source, prog)
         report = self.executor.run(prog)
-        return f"[{source}] {prog}\n{report.text()}"
+        return self._with_details(self.persona.report(report), source, prog, report)
+
+    def _with_details(self, reply: str, source: str, prog, report=None) -> str:
+        if not self.config.show_details:
+            return reply
+        detail = f"[{source}] {prog}" if prog is not None else f"[{source}]"
+        return f"{reply}\n\n{detail}"
 
     def start_background(self, on_reminder) -> list[threading.Thread]:
         threads: list[threading.Thread] = [
@@ -128,7 +142,7 @@ class Jarvis:
     def _reminder_loop(self, on_reminder):
         while True:
             for _id, text in self.store.due_reminders(time.time()):
-                on_reminder(text)
+                on_reminder(self.persona.reminder_due(text))
             time.sleep(10)
 
 

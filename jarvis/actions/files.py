@@ -19,6 +19,15 @@ def _unique_target(dest_dir: Path, name: str) -> Path:
     return target
 
 
+def _facts(args: dict, count: int, op: str = "list", dry: bool = False) -> dict:
+    return {"op": op, "count": count, "dry": dry, "src": str(args.get("src", "")),
+            "dest": str(args["dest"]) if "dest" in args else None,
+            "ext": str(args["ext"]) if "ext" in args else None,
+            "older_than": str(args["older_than"]) if "older_than" in args else None,
+            "newer_than": str(args["newer_than"]) if "newer_than" in args else None,
+            "name_contains": args.get("name_contains")}
+
+
 def select_files(ctx: Ctx, args: dict) -> tuple[Path, list[Path]]:
     src = check_path(ctx.config.resolve_folder(str(args["src"])), ctx.config.allowed_roots)
     if not src.is_dir():
@@ -50,7 +59,8 @@ def select_files(ctx: Ctx, args: dict) -> tuple[Path, list[Path]]:
 
 def list_files(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     src, files = select_files(ctx, args)
-    return ActionResult(f"{len(files)} file(s) in {src}", [f.name for f in files])
+    return ActionResult(f"{len(files)} file(s) in {src}", [f.name for f in files], kind="list",
+                        data=_facts(args, len(files)))
 
 
 def _transfer(args: dict, ctx: Ctx, dry_run: bool, copy: bool) -> ActionResult:
@@ -59,7 +69,8 @@ def _transfer(args: dict, ctx: Ctx, dry_run: bool, copy: bool) -> ActionResult:
     verb = "copy" if copy else "move"
     preview = [f"{f.name} -> {dest}" for f in files]
     if dry_run:
-        return ActionResult(f"Will {verb} {len(files)} file(s) from {src} to {dest}", preview)
+        return ActionResult(f"Will {verb} {len(files)} file(s) from {src} to {dest}", preview, kind="files",
+                            data=_facts(args, len(files), op=verb, dry=True))
     dest.mkdir(parents=True, exist_ok=True)
     for f in files:
         target = _unique_target(dest, f.name)
@@ -69,7 +80,8 @@ def _transfer(args: dict, ctx: Ctx, dry_run: bool, copy: bool) -> ActionResult:
         else:
             shutil.move(str(f), str(target))
             ctx.store.record(ctx.batch_id, "move", {"op": "move", "src": str(target), "dest": str(f)})
-    return ActionResult(f"{verb.capitalize()}d {len(files)} file(s) to {dest}", preview)
+    return ActionResult(f"{verb.capitalize()}d {len(files)} file(s) to {dest}", preview, kind="files",
+                        data=_facts(args, len(files), op=verb))
 
 
 def move_files(args, ctx, dry_run):
@@ -85,14 +97,16 @@ def delete_files(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     src, files = select_files(ctx, args)
     preview = [f.name for f in files]
     if dry_run:
-        return ActionResult(f"Will delete {len(files)} file(s) from {src} (recoverable via undo)", preview)
+        return ActionResult(f"Will delete {len(files)} file(s) from {src} (recoverable via undo)", preview,
+                            kind="files", data=_facts(args, len(files), op="delete", dry=True))
     trash = ctx.config.trash_dir / ctx.batch_id
     trash.mkdir(parents=True, exist_ok=True)
     for f in files:
         target = _unique_target(trash, f.name)
         shutil.move(str(f), str(target))
         ctx.store.record(ctx.batch_id, "delete", {"op": "move", "src": str(target), "dest": str(f)})
-    return ActionResult(f"Deleted {len(files)} file(s) (kept in Jarvis trash)", preview)
+    return ActionResult(f"Deleted {len(files)} file(s) (kept in Jarvis trash)", preview, kind="files",
+                        data=_facts(args, len(files), op="delete"))
 
 
 def apply_inverse(inv: dict) -> None:

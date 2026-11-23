@@ -15,7 +15,7 @@ class SettingsWindow:
         self.win = tk.Toplevel(parent)
         self.win.title("Jarvis-0 settings")
         self.win.attributes("-topmost", True)
-        self.win.geometry("560x720")
+        self.win.geometry("580x860")
         pad = dict(padx=10, pady=4, sticky="w")
         f = ttk.Frame(self.win, padding=10)
         f.pack(fill="both", expand=True)
@@ -46,6 +46,21 @@ class SettingsWindow:
         ttk.Label(f, text="e.g. move_files, copy_files, system, undo. Deleting always asks.",
                   foreground="gray").grid(row=14, column=0, columnspan=2, **pad)
 
+        ttk.Separator(f).grid(row=16, column=0, columnspan=2, sticky="ew", pady=6)
+        ttk.Label(f, text="Assistant name").grid(row=17, column=0, **pad)
+        self.p_name = tk.StringVar(value=config.persona_name)
+        ttk.Entry(f, textvariable=self.p_name).grid(row=17, column=1, sticky="ew", padx=10)
+        ttk.Label(f, text="Call me (sir, ma'am, a name, or blank)").grid(row=18, column=0, **pad)
+        self.p_addr = tk.StringVar(value=config.persona_address)
+        ttk.Entry(f, textvariable=self.p_addr).grid(row=18, column=1, sticky="ew", padx=10)
+        ttk.Label(f, text="Tone").grid(row=19, column=0, **pad)
+        self.p_tone = tk.StringVar(value=config.persona_tone)
+        ttk.Combobox(f, textvariable=self.p_tone, values=["butler", "friendly", "minimal"], state="readonly",
+                     width=10).grid(row=19, column=1, **pad)
+        self.details = tk.BooleanVar(value=config.show_details)
+        ttk.Checkbutton(f, text="Show the technical command under each reply", variable=self.details).grid(
+            row=20, column=0, columnspan=2, **pad)
+
         self.encrypt = tk.BooleanVar(value=config.encrypt_logs)
         ttk.Checkbutton(f, text="Encrypt activity log (Windows DPAPI)", variable=self.encrypt).grid(
             row=3, column=0, columnspan=2, **pad)
@@ -73,7 +88,7 @@ class SettingsWindow:
         self.roots.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=10)
 
         btns = ttk.Frame(f)
-        btns.grid(row=15, column=0, columnspan=2, pady=10)
+        btns.grid(row=21, column=0, columnspan=2, pady=10)
         ttk.Button(btns, text="Save", command=self.save).pack(side="left", padx=6)
         ttk.Button(btns, text="Cancel", command=self.win.destroy).pack(side="left", padx=6)
 
@@ -97,11 +112,14 @@ class SettingsWindow:
         c.encrypt_logs, c.keep_window_titles = self.encrypt.get(), self.titles.get()
         c.folders, c.apps, c.allowed_roots = folders, apps, roots
         c.confirm_actions = [a.strip() for a in self.confirm.get().split(",") if a.strip()]
+        c.persona_name = self.p_name.get().strip() or "Jarvis"
+        c.persona_address, c.persona_tone = self.p_addr.get().strip(), self.p_tone.get()
+        c.show_details = self.details.get()
         path = c.save()
         try:
             (autostart.enable if self.auto.get() else autostart.disable)()
         except OSError as e:
             messagebox.showwarning("Autostart", f"Couldn't change autostart: {e}", parent=self.win)
-        messagebox.showinfo("Saved", f"Saved to {path}.\nRestart Jarvis for hotkey and model changes.",
+        messagebox.showinfo("Saved", f"Saved to {path}.\nRestart Jarvis for hotkey, model and persona changes.",
                             parent=self.win)
         self.win.destroy()

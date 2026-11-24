@@ -1056,3 +1056,33 @@ def test_brain_adds_missing_file_type():
         'move_files(ext=video, new_folder="videos", src=Downloads)'
     b = Brain(); b.model = Fake("move_files(dest=Videos, src=Downloads)")
     assert str(b.resolve("move everything from downloads to videos")[0]) == "move_files(dest=Videos, src=Downloads)"
+
+
+# ---------------------------------------------------------------- trained model first, rules only as a backup
+def test_model_decides_what_it_was_trained_on():
+    from jarvis.nlu.brain import Brain
+
+    class Fake:
+        def __init__(self, out, knows=None): self.out, self.knows = out, knows
+        def parse(self, text): return parse(self.out), 0.95
+
+    old = Brain(); old.model = Fake("unknown()")                      # trained before briefings: rules cover it
+    assert old.resolve("good morning")[1].startswith("rules")
+    new = Brain(); new.model = Fake("briefing(kind=morning)", {"actions": ["briefing"], "features": []})
+    prog, src = new.resolve("good morning")
+    assert src.startswith("model") and str(prog) == "briefing(kind=morning)"
+    # categories: an old model gets the repair, a trained one is trusted as-is
+    old = Brain(); old.model = Fake("move_files(dest=Videos, src=Downloads)")
+    assert "ext=video" in str(old.resolve("move all video files in downloads to videos")[0])
+    new = Brain(); new.model = Fake("move_files(dest=Videos, ext=video, src=Downloads)",
+                                    {"actions": ["move_files"], "features": ["file_categories"]})
+    prog, src = new.resolve("move all video files in downloads to videos")
+    assert src.startswith("model") and str(prog) == "move_files(dest=Videos, ext=video, src=Downloads)"
+
+
+def test_generator_records_what_it_teaches(tmp_path):
+    import json, subprocess, sys
+    subprocess.run([sys.executable, "-m", "datagen.generate_intents", "--n", "3000", "--n-eval", "100",
+                    "--out", str(tmp_path)], check=True, capture_output=True)
+    meta = json.loads((tmp_path / "meta.json").read_text())
+    assert {"briefing", "move_files", "mood"} <= set(meta["actions"]) and "file_categories" in meta["features"]

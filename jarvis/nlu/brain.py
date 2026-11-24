@@ -168,6 +168,21 @@ class Brain:
             except Exception as e:  # torch missing, bad checkpoint, ...
                 log.warning("intent model unavailable (%s); using rules only", e)
 
+    # ------------------------------------------------------------ what the loaded model has learned
+    def knows(self, what: str) -> bool:
+        """True if the model was trained on this action ('briefing') or feature ('file_categories').
+        Models trained before this was recorded know none of the newer things, so rules cover those."""
+        k = getattr(self.model, "knows", None) if self.model is not None else None
+        return bool(k) and (what in k.get("actions", []) or what in k.get("features", []))
+
+    def _post(self, prog: Program, text: str) -> Program:
+        """Hand-written repairs, only for what the model hasn't learned."""
+        if not self.knows("file_categories"):
+            prog = repair_file_kind(prog, text)
+        if not self.knows("play_modes"):
+            prog = upgrade_play(prog, text)
+        return prog
+
     def resolve(self, text: str) -> tuple[Program | None, str]:
         text = text.strip()
         if not text:
@@ -179,8 +194,9 @@ class Brain:
         # System-control actions (phase 5) are matched by precise rules first, so they work even with a
         # model trained before they existed. After retraining, the model and the rules agree.
         ruled_first = rule_parse(text)
-        if ruled_first is not None and any(c.action in RULES_FIRST for c in ruled_first.calls):
-            return ruled_first, "rules"
+        if ruled_first is not None and any(c.action in RULES_FIRST and not self.knows(c.action)
+                                           for c in ruled_first.calls):
+            return ruled_first, "rules (model not trained on this yet)"
         model_unknown = None
         if self.model is not None:
             prog, conf = self.model.parse(text)
@@ -190,21 +206,21 @@ class Brain:
                     if not slot_faithful(prog, text):
                         ruled = rule_parse(text)
                         if ruled is not None and slot_faithful(ruled, text):
-                            return upgrade_play(ruled, text), "rules (model cut the name short)"
+                            return self._post(ruled, text), "rules (model cut the name short)"
                     fixed = repair_slots(prog, text)
                     if fixed is not None:
-                        return upgrade_play(fixed, text), f"model {conf:.0%} + rules slot"
-                    return upgrade_play(repair_file_kind(prog, text), text), f"model {conf:.0%}"
+                        return self._post(fixed, text), f"model {conf:.0%} + name check"
+                    return self._post(prog, text), f"model {conf:.0%}"
                 # The model says it can't: a newer rule may know better (e.g. actions added after it was trained)
                 ruled = rule_parse(text)
                 if ruled is not None and not any(c.action in ("unknown", "unsupported") for c in ruled.calls):
                     return ruled, "rules"
                 if str(prog) != "unknown()":
-                    return upgrade_play(repair_file_kind(prog, text), text), f"model {conf:.0%}"
+                    return self._post(prog, text), f"model {conf:.0%}"
                 model_unknown = (prog, f"model {conf:.0%}")
         prog = rule_parse(text)
         if prog is not None:
-            return prog, "rules"
+            return prog, "rules (model unsure)" if self.model is not None else "rules (no model)"
         if model_unknown:
             return model_unknown       # model is confident this is out of scope -> polite decline
         return None, "unparsed"

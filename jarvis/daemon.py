@@ -175,6 +175,17 @@ class Jarvis:
             m = json.loads(onnx_meta.read_text(encoding="utf-8")).get("metrics") or {}
             if m:
                 lines.append(f"  validation exact {m.get('exact', 0):.2%}, unseen phrasing {m.get('val_ood_exact', 0):.2%}")
+        k = getattr(self.brain.model, "knows", None) if self.brain.model is not None else None
+        if k:
+            lines.append(f"  trained on {len(k.get('actions', []))} commands + {', '.join(k.get('features', []))}")
+        elif self.brain.model is not None:
+            lines.append("  trained before Jarvis recorded what models learn: rules cover the newest commands"
+                         " until you retrain")
+        today = self.store.events_since(time.time() - 86400, "command")
+        by_model = sum(1 for _, _, p in today if str(p.get("source", "")).startswith("model"))
+        by_rules = sum(1 for _, _, p in today if str(p.get("source", "")).startswith("rules"))
+        if by_model or by_rules:
+            lines.append(f"  last 24 h: {by_model} commands understood by the model, {by_rules} by backup rules")
         rm = self.persona.model
         if rm is not None:
             st = rm.stats
@@ -242,7 +253,10 @@ class Jarvis:
         offer, self._mood_offer = getattr(self, "_mood_offer", None), None
         if offer is not None and mood.YES.match(text.strip()):
             return self._play_mood(offer, empathy_first=False)
-        m = mood.detect(text) or mood.from_program(prog, text)
+        m = mood.detect(text)
+        if m is not None and m.kind != "crisis" and self.brain.knows("mood"):
+            m = None                                   # the trained model decides; only crisis words stay fixed
+        m = m or mood.from_program(prog, text)
         if m is None:
             return None
         self.store.log_event("mood", {"kind": m.kind})       # only the kind, never the text

@@ -26,6 +26,7 @@ class ModelParser:
         self.model = IntentTransformer(ModelConfig(**ckpt["config"]))
         self.model.load_state_dict(ckpt["model"])
         self.model.eval()
+        self.knows = ckpt.get("knows")
         self.beam = beam
         # geometric-mean token probability below this -> treat as "not sure" and fall back
         self.min_confidence = min_confidence

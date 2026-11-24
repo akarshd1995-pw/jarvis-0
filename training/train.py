@@ -164,6 +164,10 @@ def main():
     cfg = ModelConfig(vocab_size=tok.vocab_size, d_model=args.d_model, n_enc=args.layers, n_dec=args.layers,
                       d_ff=3 * args.d_model)
     train_rows = load_split(args.data / "train.jsonl", tok, cfg)
+    try:                                   # what this data teaches (actions + features), saved with the model
+        knows = json.loads((args.data / "meta.json").read_text())
+    except (OSError, ValueError):
+        knows = None
     val_rows = load_split(args.data / "val.jsonl", tok, cfg)
     # val_ood = held-out sentence frames used ONLY for picking the checkpoint.
     # test_ood is never touched here; it is reported by training.evaluate.
@@ -231,7 +235,7 @@ def main():
                 if score > best:
                     best, stale = score, 0
                     torch.save({"config": cfg.to_dict(), "model": model.state_dict(), "step": step,
-                                "metrics": m}, args.out)
+                                "metrics": m, "knows": knows}, args.out)
                     print(f"  saved {args.out} (score={best:.4f})")
                 else:
                     stale += 1

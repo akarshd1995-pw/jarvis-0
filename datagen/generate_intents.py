@@ -964,6 +964,12 @@ def gen_mood(c: Ctx):
     return f"mood(kind={kind}, music=no)", feel
 
 
+# What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
+# files and only uses its hand-written rules/repairs for what the model has NOT learned.
+TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
+           "training_control", "song_suffix"]
+
+
 # ---------------------------------------------------------------- briefings (phase 24)
 BRIEF_MORNING_EN = frames("BRIEF_MORNING_EN", [
     "good morning", "good morning jarvis", "morning briefing", "give me my morning briefing", "what's my day look like",
@@ -1174,7 +1180,9 @@ def main():
             for ex in data:
                 f.write(json.dumps(ex, ensure_ascii=False) + "\n")
         print(f"{name:9s} {len(data):>9,d}")
-    print(f"dropped {n_conf} ambiguous texts")
+    actions = sorted({a for ex in splits["train"] for a in re.findall(r"(\w+)\(", ex["program"])})
+    (args.out / "meta.json").write_text(json.dumps({"actions": actions, "features": TEACHES}, indent=2))
+    print(f"dropped {n_conf} ambiguous texts; teaches {len(actions)} actions + {', '.join(TEACHES)}")
 
 
 if __name__ == "__main__":

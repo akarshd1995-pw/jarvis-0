@@ -7,6 +7,8 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import json
+
 import numpy as np
 
 from training.tokenizer import BOS, EOS, PAD, BPETokenizer
@@ -29,6 +31,12 @@ class ONNXParser:
             sessions = (ort.InferenceSession(str(encoder), opts, providers=providers),
                         ort.InferenceSession(str(decoder), opts, providers=providers))
         self.enc, self.dec = sessions
+        self.knows = None
+        try:
+            meta = json.loads((Path(encoder).parent / "intent_onnx.json").read_text(encoding="utf-8"))
+            self.knows = meta.get("knows")
+        except (OSError, ValueError, TypeError):
+            pass
         self.beam, self.min_confidence = beam, min_confidence
         self.max_src, self.max_tgt = max_src, max_tgt
 

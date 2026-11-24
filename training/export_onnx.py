@@ -69,7 +69,8 @@ def export(checkpoint: Path, out_dir: Path, prefix: str = "intent") -> tuple[Pat
         _export(DecoderStepGraph(model), (tgt, mem, pad), dec_path, ["tgt_in", "mem", "src_pad"], ["logprobs"],
                 {"tgt_in": {0: "b", 1: "t"}, "mem": {0: "b", 1: "s"}, "src_pad": {0: "b", 1: "s"},
                  "logprobs": {0: "b"}})
-    meta = {"config": ckpt["config"], "step": ckpt.get("step"), "metrics": ckpt.get("metrics")}
+    meta = {"config": ckpt["config"], "step": ckpt.get("step"), "metrics": ckpt.get("metrics"),
+            "knows": ckpt.get("knows")}
     (out_dir / f"{prefix}_onnx.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return enc_path, dec_path
 

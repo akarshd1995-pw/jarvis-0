@@ -33,5 +33,7 @@ def update(root: Path = PROJECT_ROOT) -> tuple[bool, str]:
 
 
 def restart() -> None:
-    """Replace the current process with a fresh Jarvis."""
+    """Start a fresh Jarvis: the supervisor restarts us on exit code 3; without one, replace this process."""
+    if os.environ.get("JARVIS_SUPERVISED") == "1":
+        os._exit(3)
     os.execv(sys.executable, [sys.executable, *sys.argv])

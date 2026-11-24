@@ -80,6 +80,14 @@ def _window(action: str, target: str) -> str:
 
 RULES: list[tuple[re.Pattern, callable]] = [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
+    (re.compile(r"^(?:(?:hey )?jarvis,? )?(?:run |do |start )?(?:a |the |your )?(?:health ?check|self[- ]?check|diagnostics?"
+                r"|system check)(?: please| pls| now)?$|^(?:are you|is everything) (?:ok|okay|working|healthy|fine)\??$"
+                r"|^check yourself$|^(?:apna )?health check karo$", re.I),
+     lambda m, t: "maintenance(action=health_check)"),
+    (re.compile(r"^(?:(?:hey )?jarvis,? )?(?:back ?up|take a backup of|make a backup of|save a backup of) (?:yourself|jarvis"
+                r"|your (?:data|settings|brain|models))(?: now| please)?$|^(?:make|take|create) a backup(?: of jarvis)?(?: now)?$"
+                r"|^jarvis ka backup (?:lo|bana do|karo)$", re.I),
+     lambda m, t: "maintenance(action=backup)"),
     # briefings (phase 24)
     (re.compile(r"^(?:(?:hey |ok )?jarvis,? )?(?:good morning|gm)(?:,? jarvis)?[!. ]*$"
                 r"|^(?:(?:hey )?jarvis,? )?(?:(?:give|read) me |start |run |play )?(?:my |the |a |today'?s )?morning (?:briefing|brief|summary|update|report)(?: please| pls)?$"

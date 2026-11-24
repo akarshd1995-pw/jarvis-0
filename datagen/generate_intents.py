@@ -1018,7 +1018,41 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve", "memory_filters"]
+           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance"]
+
+
+# ---------------------------------------------------------------- maintenance (phase 29)
+HEALTH = frames("HEALTH", [
+    "run a health check", "health check", "check yourself", "are you working properly", "run diagnostics",
+    "is everything ok with you", "do a self check",                       # 6 val_ood, 7 test_ood
+    "run a system check", "check if everything is fine", "jarvis are you ok", "run the doctor",
+    "check your models and files", "diagnose yourself", "is everything working",
+    "are you healthy",                                                     # val_ood
+    "something feels off, check yourself",                                 # test_ood
+    "apna health check karo", "sab theek hai kya check karo", "run a health check please",
+    "do a quick self check", "check everything is ok", "self check now",
+    "check yourself please", "run a health check now",                  # (22, 23: held out)
+    "system check please", "something is off, are you healthy", "feels slow, check yourself",
+])
+BACKUP = frames("BACKUP", [
+    "back up yourself", "make a backup", "back up jarvis", "take a backup of your data", "save a backup now",
+    "create a backup", "backup your settings and models",                 # 6 val_ood, 7 test_ood
+    "back up your brain", "make a backup of jarvis", "take a backup now", "jarvis ka backup lo",
+    "save your data somewhere safe", "backup everything",
+    "can you back yourself up",                                            # val_ood
+    "please make a fresh backup",                                          # test_ood
+    "backup bana do", "back up your models", "take a backup of jarvis please", "make a backup now",
+    "back up my jarvis", "create a fresh backup",
+    "back up your settings and your brain",                              # 21
+    "make a backup please", "take a backup",                              # (22, 23: held out)
+    "backup do", "backup bana lo",
+])
+
+
+def gen_maintenance(c: Ctx):
+    if c.rng.random() < 0.6:
+        return "maintenance(action=health_check)", c.T(HEALTH), {}
+    return "maintenance(action=backup)", c.T(BACKUP), {}
 
 
 # ---------------------------------------------------------------- briefings (phase 24)
@@ -1072,7 +1106,7 @@ GENERATORS = [
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",

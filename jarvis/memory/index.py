@@ -332,3 +332,11 @@ def get(data_dir: Path) -> MemoryIndex:
     if key not in _instances:
         _instances[key] = MemoryIndex(data_dir / "memory.sqlite")
     return _instances[key]
+
+
+def close(data_dir: Path) -> None:
+    """Close the cached index for data_dir (so the health check can move a damaged file aside)."""
+    idx = _instances.pop(str(data_dir), None)
+    if idx is not None:
+        with idx.lock:
+            idx.db.close()

@@ -1392,3 +1392,111 @@ def test_saved_folders_that_dont_exist_use_the_real_ones(tmp_path):
     assert out["Desktop"] == str(real)                 # the saved path is gone: use where Windows says it is
     assert out["Work"] == str(tmp_path)                # your own aliases stay
     assert merge_folders({"Desktop": str(real)}, {"Desktop": str(tmp_path)})["Desktop"] == str(tmp_path)  # yours win
+
+
+# ---------------------------------------------------------------- reliability (phase 29)
+def test_single_instance():
+    from jarvis.reliability import SingleInstance
+    shown = []
+    a = SingleInstance(port=47999)
+    assert a.acquire()
+    a.on_show = lambda: shown.append(1)
+    b = SingleInstance(port=47999)
+    assert not b.acquire() and b.ping_existing()
+    import time
+    time.sleep(0.2)
+    assert shown == [1]
+    a.release()
+
+
+def test_watchdog_restarts_dead_services():
+    import threading
+    from jarvis.reliability import Watchdog
+    wd = Watchdog()
+    dead = threading.Thread(target=lambda: None)
+    dead.start()
+    dead.join()
+    alive = threading.Event()
+
+    def restart():
+        t = threading.Thread(target=alive.wait, daemon=True)
+        t.start()
+        return t
+    wd.register("indexer", dead, restart)
+    assert wd.check() == ["indexer"] and wd.status() == {"indexer": True}
+    assert wd.check() == []
+    alive.set()
+
+
+def test_crash_reports_and_counting(tmp_path):
+    import sys
+    from jarvis.reliability import CrashLog, recent_crashes, write_crash_report
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        p = write_crash_report(tmp_path, *sys.exc_info())
+    assert "ValueError: boom" in p.read_text() and recent_crashes(tmp_path) == [p]
+    c = CrashLog(tmp_path / "crashes.json")
+    for _ in range(3):
+        c.add()
+    assert c.recent(600) == 3
+    c.clear()
+    assert c.recent(600) == 0
+
+
+def test_supervisor_restarts_and_goes_safe(tmp_path, monkeypatch):
+    import jarvis.supervisor as S
+    runs = []
+    codes = iter([1, 1, 1, 3, 0])                     # crash x3 -> safe mode, restart request, quit
+    monkeypatch.setattr(S.subprocess, "call", lambda cmd, env=None: (runs.append(cmd), next(codes))[1])
+    monkeypatch.setattr(S.time, "sleep", lambda s: None)
+    assert S.run([], tmp_path) == 0
+    assert ["--safe-mode" in r for r in runs] == [False, False, False, True, True]
+
+
+def test_doctor_repairs(tmp_path):
+    import sqlite3
+    from jarvis import doctor
+    from jarvis.config import Config
+    cfg = Config(data_dir=tmp_path)
+    (tmp_path / "config.json").write_text("{ broken json")
+    (tmp_path / "memory.sqlite").write_bytes(b"this is not a database" * 100)
+    con = sqlite3.connect(str(cfg.db_path))
+    con.execute("create table t(x)")
+    con.commit()
+    con.close()
+    checks = {c.name: c for c in doctor.run(cfg, {"indexer": True, "briefings": False}, ck=tmp_path / "ck")}
+    assert checks["Settings"].status == "fixed" and not (tmp_path / "config.json").exists()
+    assert checks["Memory index"].status == "fixed" and not (tmp_path / "memory.sqlite").exists()
+    assert list(tmp_path.glob("memory.sqlite.broken-*"))                     # kept, not deleted
+    assert checks["Activity log"].status == "ok"
+    assert checks["Command model"].status == "warn"                          # nothing trained in this folder
+    assert checks["Background services"].status == "warn" and "briefings" in checks["Background services"].detail
+    text = doctor.summary(list(checks.values()))
+    assert text.startswith("Health check done") and "🔧 Settings" in text
+
+
+def test_backup_roundtrip(tmp_path, monkeypatch):
+    import jarvis.backup as B
+    from jarvis.config import Config
+    proj = tmp_path / "proj"
+    (proj / "data").mkdir(parents=True)
+    (proj / "data" / "user_corrections.jsonl").write_text("fix1\n")
+    monkeypatch.setattr(B, "PROJECT_ROOT", proj)
+    data = tmp_path / "data"
+    data.mkdir()
+    cfg = Config(data_dir=data, folders={"Documents": str(tmp_path / "Docs")})
+    (data / "config.json").write_text('{"persona_tone": "friendly"}')
+    z = B.create(cfg)
+    assert z.exists() and B.backups(cfg) == [z]
+    (data / "config.json").write_text("{}")
+    (proj / "data" / "user_corrections.jsonl").write_text("")
+    msg = B.restore(cfg, z)
+    assert (data / "config.json").read_text() == '{"persona_tone": "friendly"}'
+    assert (proj / "data" / "user_corrections.jsonl").read_text() == "fix1\n" and "before-restore" in msg
+
+
+def test_health_and_backup_commands():
+    from jarvis.nlu.rule_parser import rule_parse
+    assert str(rule_parse("run a health check")) == "maintenance(action=health_check)"
+    assert str(rule_parse("back up yourself")) == "maintenance(action=backup)"

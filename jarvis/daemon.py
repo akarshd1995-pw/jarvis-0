@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import sys
+import os
 import json
 import logging
 import threading
@@ -28,6 +30,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 HELP = """Commands:
   /fix <program>  save the correct program for your last command (trains the next model)
   /improve        fine-tune on your corrections now (switches only if better)
+  /doctor         health check: tests every part of Jarvis and repairs what it can
+  /backup         back up your settings, history, corrections and models now
   /models         model versions · /rollback [vNNN] go back to an earlier one
   /good           confirm the last result was right (also saved as training data)
   /wrong          flag the last command as wrong, to label later
@@ -56,6 +60,8 @@ class Jarvis:
         self.last_program: str | None = None
         from .executor import REGISTRY
         REGISTRY["briefing"] = self._briefing_action
+        REGISTRY["maintenance"] = self._maintenance_action
+        self.watchdog = None
         self.briefings = briefing.Scheduler(config.data_dir / "briefing_state.json", config.briefing_morning,
                                             config.briefing_evening, enabled=config.briefing_auto)
 
@@ -298,6 +304,12 @@ class Jarvis:
                 self.hooks["settings"]()
                 return "Opening settings."
             return f"Settings live in {self.config.data_dir / 'config.json'} (the window needs the command bar)."
+        if cmd == "/doctor":
+            return self.health_report()
+        if cmd == "/backup":
+            from . import backup
+            p = backup.create(self.config)
+            return f"Backed up: {p}"
         if cmd in ("/improve", "/rollback", "/models"):
             import sys as _sys
             _sys.path.insert(0, str(PROJECT_ROOT))
@@ -507,6 +519,47 @@ class Jarvis:
             t.start()
         return threads
 
+    def restart_reminders(self, on_reminder) -> threading.Thread:
+        t = threading.Thread(target=self._reminder_loop, args=(on_reminder,), daemon=True, name="reminders")
+        t.start()
+        return t
+
+    def start_maintenance(self) -> threading.Thread:
+        """Weekly backup of your Jarvis (when you're not using the PC)."""
+        from . import backup
+
+        def loop():
+            while True:
+                try:
+                    idle = not self.store.events_since(time.time() - 1200, "command")
+                    if idle and backup.due(self.config):
+                        p = backup.create(self.config)
+                        log.info("weekly backup saved: %s", p)
+                except Exception as e:
+                    log.warning("backup failed: %s", e)
+                time.sleep(3600)
+
+        t = threading.Thread(target=loop, daemon=True, name="backups")
+        t.start()
+        return t
+
+    def health_report(self) -> str:
+        from . import doctor
+        wd = getattr(self, "watchdog", None)
+        return doctor.summary(doctor.run(self.config, wd.status() if wd else None), self.config.persona_address)
+
+    def _maintenance_action(self, args, ctx, dry_run: bool):
+        action = str(args.get("action", "health_check"))
+        if action == "backup":
+            from . import backup
+            if dry_run:
+                return ActionResult("Would back up Jarvis", kind="report", data={"text": "I'd make a backup now."})
+            p = backup.create(self.config)
+            text = f"Backed up, {self.config.persona_address}: {p.name} in {p.parent} ({p.stat().st_size / 2**20:.0f} MB)."
+            return ActionResult(text, kind="report", data={"text": text})
+        text = self.health_report()
+        return ActionResult(text.splitlines()[0], kind="report", data={"text": text})
+
     def _reminder_loop(self, on_reminder):
         while True:
             for _id, text in self.store.due_reminders(time.time()):
@@ -529,14 +582,26 @@ def main() -> None:
     ap.add_argument("--config", type=Path, default=None)
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--autostart", choices=["on", "off"], help="start Jarvis when you log in to Windows")
+    ap.add_argument("--child", action="store_true", help=argparse.SUPPRESS)       # run by the supervisor
+    ap.add_argument("--safe-mode", action="store_true", help="rules only, no HUD or background services")
+    ap.add_argument("--no-supervisor", action="store_true", help="don't restart automatically after a crash")
     args = ap.parse_args()
     if args.autostart:
         from . import autostart
         print(autostart.enable() if args.autostart == "on" else autostart.disable())
         return
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
-                        format="%(asctime)s %(name)s %(levelname)s %(message)s")
     config = Config.load(args.config)
+    if not (args.child or args.cli or args.no_supervisor or os.environ.get("JARVIS_SUPERVISED")):
+        from .supervisor import run as supervise                # keeps Jarvis running (phase 29)
+        child = (["--config", str(args.config)] if args.config else []) + (["-v"] if args.verbose else [])
+        sys.exit(supervise(child, config.data_dir))
+    from .reliability import SingleInstance, Watchdog, setup_logging
+    setup_logging(config.data_dir, args.verbose)
+    if args.safe_mode:
+        config.model_backend, config.persona_model, config.hud_enabled = "rules", False, False
+        config.monitor_enabled = config.memory_enabled = config.briefing_auto = config.improve_auto = False
+        log.warning("safe mode: rules only, no HUD or background services")
+    watchdog = Watchdog()
 
     if args.cli:
         jarvis = Jarvis(config, _cli_confirm)
@@ -545,6 +610,7 @@ def main() -> None:
         jarvis.start_briefings(lambda kind, text: print(f"\n[{kind.upper()} BRIEFING] {text}\n> ", end=""))
         jarvis.start_improver(lambda text: print(f"\n[MODEL] {text}\n> ", end=""))
         jarvis.start_indexer()
+        jarvis.start_maintenance()
         print("Jarvis-0 (cli). Ctrl+C to quit.")
         try:
             while True:
@@ -559,10 +625,18 @@ def main() -> None:
     from .ui.tray import start_tray
     from .updater import restart, update
 
+    single = SingleInstance()
+    if not single.acquire():
+        if single.ping_existing():
+            log.info("Jarvis is already running: opened its command bar instead")
+            return
+        log.warning("port %s is taken by another program; starting anyway", single.port)
     bar_ref: dict = {}
     jarvis = Jarvis(config, lambda *a: bar_ref["bar"].confirm(*a))
+    jarvis.watchdog = watchdog
     bar = CommandBar(jarvis.handle)
     bar_ref["bar"] = bar
+    single.on_show = lambda: bar.post("open")
     jarvis.hooks["settings"] = lambda: bar.post("call", lambda: SettingsWindow(bar.root, config))
     jarvis.hooks["restart"] = lambda: bar.post("call", lambda: (bar.root.destroy(), restart()))
     from .actions.control import remember_foreground
@@ -597,7 +671,10 @@ def main() -> None:
         elif a.level == "critical" or hud is None:
             bar.post("message", text)
 
-    sampler, _logs = jarvis.start_monitor(deliver_alert)
+    sampler, _logs = jarvis.start_monitor(deliver_alert) if config.monitor_enabled else (None, {})
+    if sampler is None:
+        from .hud.metrics import MetricsSampler
+        sampler = MetricsSampler({})
     if config.hud_enabled:
         from .hud.view import HUD
         try:
@@ -620,7 +697,8 @@ def main() -> None:
         if hud is not None:
             bar.post("call", lambda: (hud.set_state("alert", 4), hud.set_last(text)))
 
-    jarvis.start_background(on_reminder)
+    bg = jarvis.start_background(on_reminder)
+    watchdog.register("reminders", bg[-1], lambda: jarvis.restart_reminders(on_reminder))
 
     def deliver_briefing(kind, text):
         """Full text in the command bar, the gist on the HUD and as a Windows notification."""
@@ -634,11 +712,17 @@ def main() -> None:
             except Exception:
                 pass
 
-    jarvis.start_briefings(deliver_briefing)
-    jarvis.start_indexer()
-    bar.results_provider = jarvis.take_results
     from .ui.command_bar import Toast
-    jarvis.start_improver(lambda text: bar.post("call", lambda: Toast(bar.root, "Model update", text, seconds=30)))
+    improver_msg = lambda text: bar.post("call", lambda: Toast(bar.root, "Model update", text, seconds=30))  # noqa
+    if not args.safe_mode:
+        watchdog.register("briefings", jarvis.start_briefings(deliver_briefing),
+                          lambda: jarvis.start_briefings(deliver_briefing))
+        watchdog.register("indexer", jarvis.start_indexer(), jarvis.start_indexer)
+        watchdog.register("self-improvement", jarvis.start_improver(improver_msg),
+                          lambda: jarvis.start_improver(improver_msg))
+        watchdog.register("backups", jarvis.start_maintenance(), jarvis.start_maintenance)
+    watchdog.start()
+    bar.results_provider = jarvis.take_results
 
     icon = ui["icon"] = start_tray({
         "open": lambda: bar.post("open"),
@@ -651,9 +735,14 @@ def main() -> None:
     if hk.error:
         log.warning(hk.error)
     bar.show()
+    if args.safe_mode:
+        bar.post("message", "I restarted in safe mode after crashing several times: rules only, no HUD or "
+                            "background services. Type /doctor to check what's wrong; the next start is normal "
+                            "once I've run without trouble for 15 minutes.")
     try:
         bar.mainloop()
     finally:
+        single.release()
         if icon is not None:
             icon.stop()
 

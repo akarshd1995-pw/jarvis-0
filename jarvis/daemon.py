@@ -43,6 +43,7 @@ HELP = """Commands:
   /settings       open the settings window
   /update         get the latest version: it's tested first (tests + self-test) and only then switched to;
                   if it can't start, I go back by myself. /update force skips the tests.
+  /quit           close Jarvis completely (same as tray > Quit Jarvis)
   /selftest       run every action in a throwaway folder to check everything works
   /hud            show or hide the HUD overlay
   /help           this message"""
@@ -460,6 +461,11 @@ class Jarvis:
                 self.hooks["restart"]()
                 return msg + "\nRestarting..."
             return msg + ("\nRestart Jarvis to use the new version." if changed else "")
+        if cmd in ("/quit", "/exit"):                  # close Jarvis completely (the supervisor won't restart it)
+            if "quit" in self.hooks:
+                threading.Timer(0.8, self.hooks["quit"]).start()
+                return "Shutting down. Start me again from the Start menu or run_jarvis.bat."
+            return "Use the tray icon > Quit Jarvis."
         if cmd == "/selftest":
             from . import selftest
             return selftest.summary(selftest.run(log=lambda s: None))
@@ -1058,6 +1064,7 @@ def main() -> None:
     jarvis.hooks["settings"] = lambda: bar.post("call", lambda: SettingsWindow(bar.root, config))
     jarvis.hooks["restart"] = lambda: bar.post("call", lambda: (bar.root.destroy(), restart()))
     jarvis.hooks["message"] = lambda text: bar.post("message", text)
+    jarvis.hooks["quit"] = lambda: bar.post("quit")
 
     def open_review():
         from .ui.review import ReviewSession, ReviewWindow

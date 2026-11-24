@@ -383,7 +383,10 @@ def _directions(text: str) -> str:
                 break
         else:
             dest = t
-    dest = re.sub(r"^(?:the |reach |get to |go to )", "", dest.strip(), flags=re.I)
+    dest = re.sub(r"^(?:(?:is |was )?it (?:to |till )?|the |reach |get to |go to )+", "", dest.strip(), flags=re.I)
+    if origin:
+        origin = re.sub(r"^(?:my |the )", "", origin.strip(), flags=re.I) if origin.strip().lower() in (
+            "my home", "my office", "the office") else origin
     dest = re.sub(r"\s+(?:from here|right now|now|today)$", "", dest, flags=re.I).strip()
     if re.fullmatch(r"(?:get |go )?home|ghar", dest, re.I):
         dest = "home"

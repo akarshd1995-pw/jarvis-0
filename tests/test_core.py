@@ -2042,3 +2042,20 @@ def test_context_training_data():
     assert any("src=this" in p for p in progs) and any("src=here" in p for p in progs)
     assert any("dest=here" in p for p in progs) and any("query=this" in p for p in progs)
     assert any(p.startswith("open_result(") for p in progs)
+
+
+def test_directions_place_cleanup(tmp_path):
+    from jarvis.actions.maps import clean_place, directions
+    from jarvis.nlu.rule_parser import rule_parse
+    assert str(rule_parse("how far is it to sira, tumkur from home")) == 'directions(destination="sira, tumkur", origin="home")'
+    assert str(rule_parse("how far is it to ayodhya from home")) == 'directions(destination="ayodhya", origin="home")'
+    assert clean_place("it to sira, tumkur") == "sira, tumkur" and clean_place("home") == "home"
+    sent, opened = [], []
+
+    def http(url, data=None, headers=None, timeout=8):
+        sent.append(data)
+        return {"routes": [{"duration": "7200s", "distanceMeters": 120000}]}
+    directions({"destination": "it to ayodhya", "origin": "home"}, _maps_ctx(tmp_path, maps_api_key="plain:K"), False,
+               http=http, open_url=opened.append)
+    assert sent[0]["destination"]["address"] == "ayodhya" and sent[0]["origin"]["address"] == "HSR Layout, Bengaluru"
+    assert "destination=ayodhya" in opened[0] and "it+to" not in opened[0]

@@ -1054,6 +1054,8 @@ DIR_EN = frames("DIR_EN", [
     "how long will it take to get to {d}",                                  # test_ood
     "what's the time to {d} from {o}", "the best way to reach {d}{m}", "eta from {o} to {d}",
     "quickest route from {o} to {d}", "how much time from {o} to {d}{m}", "travel time to {d}",
+    "how far is it to {d}", "how far is it to {d} from {o}", "how long is it to {d}{m}",
+    "how far is it from {o} to {d}", "how long will it take to get to {d} from {o}{m}", "how much distance is it to {d}",
 ])
 DIR_HI = frames("DIR_HI", [
     "{d} tak kitna time lagega", "{o} se {d} kaise jaun", "{d} kitna door hai", "{d} kaise pahunchu",

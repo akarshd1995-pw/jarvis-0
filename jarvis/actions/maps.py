@@ -7,6 +7,9 @@ Our own command model understands the request; only the route itself comes from 
 """
 from __future__ import annotations
 
+import re
+import sys
+
 import json
 import time
 import urllib.parse
@@ -45,6 +48,9 @@ def google_route(origin: str, destination: str, mode: str, key: str, http=_http)
     body = {"origin": {"address": origin}, "destination": {"address": destination},
             "travelMode": API_MODE.get(mode, "DRIVE"), "computeAlternativeRoutes": mode != "transit",
             "languageCode": "en-IN", "units": "METRIC"}
+    region = region_code()
+    if region:
+        body["regionCode"] = region
     if mode in ("driving", "two_wheeler"):
         body["routingPreference"] = "TRAFFIC_AWARE"
     res = http("https://routes.googleapis.com/directions/v2:computeRoutes", body,
@@ -100,9 +106,38 @@ def osm_route(origin: str, destination: str, mode: str, near=None, http=_http) -
 
 
 # ------------------------------------------------------------------ the action
+_LEAD = re.compile(r"^(?:(?:is |was )?it (?:to|from|till|until) |it |to |till |until |the place (?:called )?|a place called "
+                   r"|(?:get|go|reach|drive|travel|ride|walk) (?:to )?)+", re.I)
+_TAIL = re.compile(r"(?:\s+(?:please|pls|right now|now|today|from here|from my location|by road|tak|se))+\s*[?.!]*$", re.I)
+
+
+def clean_place(name: str | None) -> str | None:
+    """'it to sira, tumkur' -> 'sira, tumkur'. Filler words make Google pick a different place."""
+    if not name:
+        return name
+    t = _TAIL.sub("", _LEAD.sub("", name.strip())).strip(" ,?.!")
+    return t or name.strip()
+
+
+def region_code() -> str | None:
+    """Your Windows region (e.g. IN), so 'Sira' means the one in your country first."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(16)
+        if ctypes.windll.kernel32.GetUserDefaultGeoName(buf, 16):
+            v = buf.value.strip().upper()
+            return v if re.fullmatch(r"[A-Z]{2}", v) else None
+    except Exception:
+        pass
+    return None
+
+
 def resolve_place(name: str | None, places: dict[str, str]) -> str | None:
     if not name:
         return None
+    name = clean_place(name)
     key = name.strip().lower()
     key = {"my home": "home", "ghar": "home", "my house": "home", "my office": "work", "office": "work",
            "my work": "work", "workplace": "work"}.get(key, key)
@@ -112,8 +147,8 @@ def resolve_place(name: str | None, places: dict[str, str]) -> str | None:
 def directions(args: dict, ctx, dry_run: bool, http=_http, open_url=webbrowser.open):
     from .base import ActionResult
     places = {k.lower(): v for k, v in (getattr(ctx.config, "places", None) or {}).items() if v}
-    dest_said = str(args["destination"])
-    origin_said = str(args["origin"]) if "origin" in args else None
+    dest_said = clean_place(str(args["destination"]))
+    origin_said = clean_place(str(args["origin"])) if "origin" in args else None
     mode = str(args.get("mode", "driving"))
     dest = resolve_place(dest_said, places)
     origin = resolve_place(origin_said, places) if origin_said else places.get("home")

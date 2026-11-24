@@ -1086,3 +1086,79 @@ def test_generator_records_what_it_teaches(tmp_path):
                     "--out", str(tmp_path)], check=True, capture_output=True)
     meta = json.loads((tmp_path / "meta.json").read_text())
     assert {"briefing", "move_files", "mood"} <= set(meta["actions"]) and "file_categories" in meta["features"]
+
+
+# ---------------------------------------------------------------- self-improving loop (phase 14)
+def _sc(fam, uns, dang=0.001, corr=None):
+    d = {"familiar": {"exact": fam, "dangerous": dang, "n": 1000, "missed": 0},
+         "unseen": {"exact": uns, "dangerous": dang, "n": 1000, "missed": 0}}
+    if corr is not None:
+        d["your corrections"] = {"exact": corr, "dangerous": 0, "n": 10, "missed": 0}
+    return d
+
+
+def test_loop_decides_only_better_and_no_riskier():
+    from training.loop import decide
+    assert decide({"live": _sc(.998, .997), "candidate": _sc(.9985, .998)})[0]
+    assert decide({"live": _sc(.998, .997, corr=.5), "candidate": _sc(.998, .997, corr=1.0)})[0]   # learned your fixes
+    ok, why = decide({"live": _sc(.998, .997), "candidate": _sc(.999, .990)})
+    assert not ok and "worse on unseen" in why
+    ok, why = decide({"live": _sc(.998, .997), "candidate": _sc(.999, .998, dang=0.004)})
+    assert not ok and "risky" in why
+    assert not decide({"live": _sc(.998, .997), "candidate": _sc(.998, .997)})[0]                # no gain: keep
+
+
+def test_loop_versions_and_rollback(tmp_path, monkeypatch):
+    import training.loop as L
+    ck = tmp_path / "checkpoints"
+    ck.mkdir()
+    monkeypatch.setattr(L, "CK", ck)
+    monkeypatch.setattr(L, "VERSIONS", ck / "versions")
+    monkeypatch.setattr(L, "STATE", ck / "improve_state.json")
+    for f in L.LIVE:
+        (ck / f).write_text("original")
+    v0 = L.archive_live("baseline")
+    L.make_live_state(v0)
+    v1 = ck / "versions" / "v001-new"
+    v1.mkdir()
+    for f in L.LIVE:
+        (v1 / f).write_text("improved")
+    L.make_live(v1)
+    assert (ck / "intent.pt").read_text() == "improved" and L.current_version() == "v001-new"
+    assert L.rollback() == "Rolled back to v000-baseline." and (ck / "intent.pt").read_text() == "original"
+    assert "oldest" in L.rollback()
+    assert L.rollback("v001").startswith("Rolled back to v001")
+
+
+def test_loop_regression_set(tmp_path, monkeypatch):
+    import json
+    import training.loop as L
+    monkeypatch.setattr(L, "REGRESSION", tmp_path / "regression.jsonl")
+    errs = [{"text": "open zomato", "gold": 'open_url(url="zomato.com")', "pred": "unknown()"}]
+    L._save_mistakes(errs)
+    L._save_mistakes(errs)                                                # no duplicates
+    rows = [json.loads(x) for x in (tmp_path / "regression.jsonl").read_text().splitlines()]
+    assert rows == [{"text": "open zomato", "program": 'open_url(url="zomato.com")'}]
+
+
+def test_loop_knows_when_there_is_something_new(tmp_path, monkeypatch):
+    import json
+    import training.loop as L
+    ck = tmp_path / "ck"
+    ck.mkdir()
+    monkeypatch.setattr(L, "CK", ck)
+    monkeypatch.setattr(L, "STATE", ck / "state.json")
+    monkeypatch.setattr(L, "CORRECTIONS", tmp_path / "corr.jsonl")
+    from datagen.generate_intents import TEACHES
+    (ck / "intent_onnx.json").write_text(json.dumps({"knows": {"actions": [], "features": TEACHES}}))
+    assert L.what_is_new() == []
+    (tmp_path / "corr.jsonl").write_text('{"text": "a", "program": "undo()"}\n')
+    assert L.what_is_new() == ["1 new correction(s)"]
+    (ck / "intent_onnx.json").write_text(json.dumps({"knows": None}))
+    assert any("new skills" in r for r in L.what_is_new())
+
+
+def test_improve_and_rollback_commands():
+    from jarvis.nlu.rule_parser import rule_parse
+    assert str(rule_parse("improve yourself")) == "training(action=improve)"
+    assert str(rule_parse("roll back the model")) == "training(action=rollback)"

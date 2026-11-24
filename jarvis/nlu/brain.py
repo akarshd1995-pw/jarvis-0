@@ -144,6 +144,40 @@ def repair_file_kind(prog: Program, text: str) -> Program:
 class Brain:
     def __init__(self, checkpoint: Path | None = None, tokenizer: Path | None = None,
                  min_confidence: float = 0.55, prefer: str = "auto"):
+        self._args = (checkpoint, tokenizer, min_confidence, prefer)
+        self._stamp = self._files_stamp()
+        self._load(*self._args)
+
+    def _files_stamp(self) -> tuple:
+        checkpoint, tokenizer = self._args[0], self._args[1]
+        if not tokenizer:
+            return ()
+        d = (checkpoint or tokenizer).parent
+        out = []
+        for name in ("intent_onnx.json", "intent.pt"):
+            try:
+                out.append((d / name).stat().st_mtime)
+            except OSError:
+                out.append(None)
+        return tuple(out)
+
+    def maybe_reload(self) -> bool:
+        """The self-improving loop (or a rollback) swapped the model files: load the new model, no restart."""
+        stamp = self._files_stamp()
+        if stamp == self._stamp:
+            return False
+        self._stamp = stamp
+        old_model, old_backend = self.model, self.backend
+        try:
+            self._load(*self._args)
+            log.info("switched to the updated intent model (%s)", self.backend)
+            return True
+        except Exception as e:
+            self.model, self.backend = old_model, old_backend
+            log.warning("couldn't load the updated model (%s); keeping the previous one", e)
+            return False
+
+    def _load(self, checkpoint, tokenizer, min_confidence, prefer):
         self.model = None
         self.backend = "rules"
         if not (tokenizer and tokenizer.exists()):
@@ -184,6 +218,7 @@ class Brain:
         return prog
 
     def resolve(self, text: str) -> tuple[Program | None, str]:
+        self.maybe_reload()
         text = text.strip()
         if not text:
             return None, "empty"

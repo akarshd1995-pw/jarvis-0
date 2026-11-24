@@ -232,6 +232,12 @@ ACTION_PHRASES.update({"window": "arrange that window", "desktop": "switch deskt
 _MON = {
     "butler": {
         "training_paused": ["Training paused{A}. Say resume training when you're ready.", "The {name} run is on hold{A}."],
+        "training_improve_started": ["Very good{A}. I'm fine-tuning myself on your corrections in the background, "
+                                     "about half an hour. I'll only switch if the new model scores better."],
+        "training_improve_running": ["I'm already improving{A}. You'll hear the result when it's done."],
+        "training_improve_nomodel": ["There's no trained model to improve yet{A}. Run train_night.bat once first."],
+        "training_rollback": ["Done{A}. I'm back on {version}."],
+        "training_rollback_none": ["{msg}"],
         "training_resumed": ["Training resumed{A}.", "Back to work. Training has resumed."],
         "training_resume_none": ["Nothing was paused{A}."], "training_pause_none": ["No training is running right now{A}."],
         "training_status": ["The {name} run is {pct} done{A}, about {eta} to go.", "{Name} training: {pct} complete, roughly {eta} left."],
@@ -257,6 +263,7 @@ _MON = {
     },
     "minimal": {
         "training_paused": ["Training paused."], "training_resumed": ["Training resumed."],
+        "training_improve_started": ["Improving in the background. ~30 min."], "training_rollback": ["Back on {version}."],
         "training_resume_none": ["Nothing paused."], "training_pause_none": ["No training running."],
         "training_status": ["{Name}: {pct}, {eta} left."], "training_status_paused": ["{Name}: paused at {pct}."],
         "training_status_done": ["{Name}: done, best {best}."], "training_status_none": ["No training running."],

@@ -58,6 +58,7 @@ class Facts:
     training: list[dict] = field(default_factory=list)   # [{name, state, best, pct, eta, iid, ood, ago_h}]
     clutter: dict = field(default_factory=dict)  # files, gb, old, old_gb, new_today
     apps: list[tuple[str, int]] = field(default_factory=list)   # [(label, minutes)]
+    improve: str = ""                          # what the self-improving loop did overnight
     active_min: int = 0
     commands: int = 0
     alerts: int = 0
@@ -168,7 +169,13 @@ def gather(kind: str, store, snapshot, logs: dict[str, Path], eval_report: Path 
     f.reminders = f.reminders[:5]
     if snapshot is not None:
         f.health, f.issues = health_facts(snapshot)
-    f.training = training_facts(logs, eval_report, now)
+    f.training = training_facts({k: v for k, v in logs.items() if "improve" not in k.lower()}, eval_report, now)
+    try:
+        rp = Path(eval_report).parent / "improve_report.json" if eval_report else None
+        if rp and rp.exists() and now - rp.stat().st_mtime < 18 * 3600:
+            f.improve = improve_line(json.loads(rp.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        pass
     if downloads is not None:
         f.clutter = folder_clutter(downloads, now, today_start=day_start)
     events = store.events_since(day_start)
@@ -178,6 +185,24 @@ def gather(kind: str, store, snapshot, logs: dict[str, Path], eval_report: Path 
     f.commands = sum(1 for _, k, _ in events if k == "command_run")
     f.alerts = sum(1 for _, k, _ in events if k == "alert")
     return f
+
+
+def improve_line(r: dict) -> str:
+    """'Overnight I fine-tuned on 7 of your corrections: 99.84% vs 99.80% before, so I switched to v004.'"""
+    sc = r.get("scores") or {}
+    live, cand = sc.get("live", {}), sc.get("candidate", {})
+    why = []
+    if r.get("corrections"):
+        why.append(f"{r['corrections']} correction{'s' * (r['corrections'] != 1)} of yours")
+    if any("skills" in x for x in r.get("reasons", [])):
+        why.append("the newest skills")
+    on = " and ".join(why) or "fresh examples"
+    nums = ""
+    if "unseen" in live and "unseen" in cand:
+        nums = f" ({cand['unseen']['exact']:.2%} on new phrasing, was {live['unseen']['exact']:.2%})"
+    if r.get("promoted"):
+        return f"I fine-tuned myself on {on}{nums} and switched to the better model, {r.get('version', 'a new version')}."
+    return f"I tried fine-tuning on {on}, but {r.get('reason', 'it was not better')}, so I kept the current model."
 
 
 # ------------------------------------------------------------------ writing it in character
@@ -271,6 +296,9 @@ def render(f: Facts, name: str = "Jarvis", address: str = "sir", tone: str = "bu
             lines.append(f"{who.capitalize()} crashed{addr}. The log has the error.")
         elif t["state"] == "stalled":
             lines.append(f"{who.capitalize()} hasn't written to its log in a while; it may be stuck or paused.")
+
+    if f.improve:
+        lines.append(f.improve)
 
     # Downloads clutter
     c = f.clutter

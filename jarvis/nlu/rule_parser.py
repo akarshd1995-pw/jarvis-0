@@ -125,6 +125,13 @@ RULES: list[tuple[re.Pattern, callable]] = [
     (re.compile(r"^(?:google|search(?: google)? for) (.+)$", re.I),
      lambda m, t: f'search_web(query="{m.group(1)}", site=google)'),
     # ---- phase 23: training control
+    (re.compile(r"^(?:(?:hey )?jarvis,? )?(?:improve yourself|learn from my (?:corrections|fixes)|get better|self[- ]?improve"
+                r"|(?:fine[- ]?tune|retrain|update|improve) (?:the |your |my )?(?:command )?model(?: now)?"
+                r"|khud ko improve karo|apne aap ko behtar karo)(?: please| pls| now)?$", re.I),
+     lambda m, t: "training(action=improve)"),
+    (re.compile(r"^(?:roll ?back|revert|undo) (?:the |your )?(?:model|model update|last model|update)"
+                r"|^(?:go back|switch back) to the (?:previous|old|last) model|^purana model wapas (?:lao|lagao)", re.I),
+     lambda m, t: "training(action=rollback)"),
     (re.compile(r"^(?:pause|hold) (?:the )?training$", re.I), lambda m, t: "training(action=pause)"),
     (re.compile(r"^(?:resume|continue|unpause) (?:the )?training$", re.I), lambda m, t: "training(action=resume)"),
     (re.compile(r"^(?:training status|how(?:'s| is) (?:the )?training(?: going)?|is (?:the )?training (?:done|finished)"

@@ -2,6 +2,6 @@
 __pycache__/
 *.pyc
 data/
-checkpoints/*.pt
-checkpoints/train_log.txt
+checkpoints/*
+!checkpoints/.gitkeep
 .pytest_cache/

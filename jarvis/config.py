@@ -55,6 +55,8 @@ class Config:
     briefing_auto: bool = True            # morning / evening briefing on its own, once a day each
     briefing_morning: str = "07:00"       # first time you're at the PC after this (until noon)
     briefing_evening: str = "21:00"       # after this, if you're at the PC
+    improve_auto: bool = True             # self-improving loop: fine-tune at night when there's something new
+    improve_at: str = "02:00"             # earliest start (runs within 3 h of this, only when idle and plugged in)
     persona_name: str = "Jarvis"
     persona_address: str = "sir"        # how Jarvis addresses you: "sir", "ma'am", your name, or ""
     persona_tone: str = "butler"        # butler | friendly | minimal

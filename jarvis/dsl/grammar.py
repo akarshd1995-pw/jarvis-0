@@ -94,7 +94,7 @@ SCHEMA: dict[str, dict] = {
                       "enum": {"kind": ["low", "stressed", "tired", "bored", "angry", "lonely", "happy", "focus", "sleep"],
                                "music": ["yes", "no"]}},
     "training":      {"args": {"action": "ident"}, "required": ["action"],          # phase 23
-                      "enum": {"action": ["pause", "resume", "status"]}},
+                      "enum": {"action": ["pause", "resume", "status", "improve", "rollback"]}},
     "power":         {"args": {"action": "ident", "after": "dur"}, "required": ["action"],
                       "enum": {"action": ["shutdown", "restart", "sleep", "sign_out", "cancel"]}},  # part of a command Jarvis can't do
     "undo":          {"args": {}, "required": []},

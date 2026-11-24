@@ -27,6 +27,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 HELP = """Commands:
   /fix <program>  save the correct program for your last command (trains the next model)
+  /improve        fine-tune on your corrections now (switches only if better)
+  /models         model versions · /rollback [vNNN] go back to an earlier one
   /good           confirm the last result was right (also saved as training data)
   /wrong          flag the last command as wrong, to label later
   /status         model backend, accuracy, autostart and encryption status
@@ -60,7 +62,78 @@ class Jarvis:
     @property
     def job_logs(self) -> dict:
         ck = PROJECT_ROOT / "checkpoints"
-        return {"Training command model": ck / "train_log.txt", "Training reply model": ck / "reply_log.txt"}
+        return {"Training command model": ck / "train_log.txt", "Training reply model": ck / "reply_log.txt",
+                "Self-improvement": ck / "improve_log.txt"}
+
+    # ------------------------------------------------------------ self-improving loop (phase 14)
+    def start_improver(self, deliver) -> threading.Thread:
+        """At night (improve_at, within 3 h), if you're away, the PC is plugged in, no training is running and
+        there's something new to learn: fine-tune in the background. deliver(text) gets the outcome."""
+        from datetime import datetime
+        from .actions.training import start_improving
+        state_path = self.config.data_dir / "improve_auto.json"
+
+        def due(now: datetime) -> bool:
+            if not self.config.improve_auto:
+                return False
+            try:
+                h, m = (int(x) for x in self.config.improve_at.split(":"))
+            except ValueError:
+                h, m = 2, 0
+            if (now.hour * 60 + now.minute - (h * 60 + m)) % 1440 >= 180:
+                return False                                     # only within 3 h after improve_at
+            try:
+                if json.loads(state_path.read_text()).get("date") == now.strftime("%Y-%m-%d"):
+                    return False
+            except (OSError, ValueError):
+                pass
+            t = time.time()
+            if self.store.events_since(t - 1200, "focus") or self.store.events_since(t - 1200, "command"):
+                return False                                     # you're using the PC
+            snap = self.sampler.snapshot if self.sampler else None
+            if snap is not None and snap.battery is not None and not snap.charging:
+                return False                                     # on battery
+            ck = PROJECT_ROOT / "checkpoints"
+            for log_name in ("train_log.txt", "reply_log.txt"):
+                p = ck / log_name
+                if p.exists() and t - p.stat().st_mtime < 600:
+                    return False                                 # a training run is going
+            import sys as _sys
+            _sys.path.insert(0, str(PROJECT_ROOT))
+            from training.loop import what_is_new
+            return bool(what_is_new())
+
+        def loop():
+            while True:
+                try:
+                    now = datetime.now()
+                    if due(now):
+                        state_path.write_text(json.dumps({"date": now.strftime("%Y-%m-%d")}))
+                        self.store.log_event("improve", {"auto": True})
+                        proc = start_improving(force=False)
+                        if proc is not None:
+                            proc.wait()
+                            text = self.improve_summary()
+                            if text:
+                                deliver(text)
+                except Exception as e:
+                    log.warning("self-improvement check failed: %s", e)
+                time.sleep(300)
+
+        t = threading.Thread(target=loop, daemon=True, name="improver")
+        t.start()
+        return t
+
+    def improve_summary(self, max_age_h: float = 18) -> str:
+        """One line about the last improvement run, for alerts and briefings."""
+        rp = PROJECT_ROOT / "checkpoints" / "improve_report.json"
+        try:
+            r = json.loads(rp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        if time.time() - rp.stat().st_mtime > max_age_h * 3600:
+            return ""
+        return briefing.improve_line(r)
 
     def briefing_text(self, kind: str, now: float | None = None) -> str:
         try:
@@ -140,6 +213,20 @@ class Jarvis:
                 self.hooks["settings"]()
                 return "Opening settings."
             return f"Settings live in {self.config.data_dir / 'config.json'} (the window needs the command bar)."
+        if cmd in ("/improve", "/rollback", "/models"):
+            import sys as _sys
+            _sys.path.insert(0, str(PROJECT_ROOT))
+            if cmd == "/improve":
+                from .actions.training import start_improving
+                return ("Improving in the background (about 30 minutes). I'll switch only if the new model is better."
+                        if start_improving(force=True) else "An improvement run is already going.")
+            from training import loop as L
+            if cmd == "/rollback":
+                return L.rollback(arg.strip() or None)
+            live = L.current_version()
+            rows = [f"{'*' if v.name == live else ' '} {v.name}  {json.loads((v / 'report.json').read_text()).get('reason', '') if (v / 'report.json').exists() else 'starting point'}"
+                    for v in L.versions()]
+            return "\n".join(rows) if rows else "No model versions yet: the first improvement run creates them."
         if cmd == "/update":
             from .updater import update
             changed, msg = update()
@@ -210,8 +297,7 @@ class Jarvis:
         from .hud.metrics import MetricsSampler
         from .monitor.engine import Monitor, Thresholds
         ck = PROJECT_ROOT / "checkpoints"
-        logs = {"Training command model": ck / "train_log.txt", "Training reply model": ck / "reply_log.txt"}
-        sampler = MetricsSampler(logs)
+        sampler = MetricsSampler(self.job_logs)
         sampler.start()
         self.sampler = sampler
         monitor = None
@@ -368,6 +454,7 @@ def main() -> None:
         jarvis.start_background(lambda text: print(f"\n[REMINDER] {text}\n> ", end=""))
         jarvis.start_monitor(lambda a, text: print(f"\n[{a.level.upper()}] {text}\n> ", end=""))
         jarvis.start_briefings(lambda kind, text: print(f"\n[{kind.upper()} BRIEFING] {text}\n> ", end=""))
+        jarvis.start_improver(lambda text: print(f"\n[MODEL] {text}\n> ", end=""))
         print("Jarvis-0 (cli). Ctrl+C to quit.")
         try:
             while True:
@@ -458,6 +545,8 @@ def main() -> None:
                 pass
 
     jarvis.start_briefings(deliver_briefing)
+    from .ui.command_bar import Toast
+    jarvis.start_improver(lambda text: bar.post("call", lambda: Toast(bar.root, "Model update", text, seconds=30)))
 
     icon = ui["icon"] = start_tray({
         "open": lambda: bar.post("open"),

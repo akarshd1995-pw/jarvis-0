@@ -151,6 +151,8 @@ def main():
     ap.add_argument("--layers", type=int, default=6)
     ap.add_argument("--compile", action="store_true", help="torch.compile (needs Triton; skip on Windows if it errors)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--init", type=Path, default=None,
+                    help="fine-tune: start from this checkpoint (keeps its size; use a lower --lr, e.g. 1.5e-4)")
     args = ap.parse_args()
 
     random.seed(args.seed)
@@ -161,8 +163,16 @@ def main():
         print("GPU:", torch.cuda.get_device_name(0))
 
     tok = BPETokenizer.load(args.tokenizer)
-    cfg = ModelConfig(vocab_size=tok.vocab_size, d_model=args.d_model, n_enc=args.layers, n_dec=args.layers,
-                      d_ff=3 * args.d_model)
+    init = None
+    if args.init:
+        init = torch.load(args.init, map_location="cpu", weights_only=True)
+        cfg = ModelConfig(**init["config"])
+        if cfg.vocab_size != tok.vocab_size:
+            raise SystemExit("fine-tuning needs the tokenizer the model was trained with (vocab sizes differ)")
+        print(f"fine-tuning from {args.init} (step {init.get('step')})")
+    else:
+        cfg = ModelConfig(vocab_size=tok.vocab_size, d_model=args.d_model, n_enc=args.layers, n_dec=args.layers,
+                          d_ff=3 * args.d_model)
     train_rows = load_split(args.data / "train.jsonl", tok, cfg)
     try:                                   # what this data teaches (actions + features), saved with the model
         knows = json.loads((args.data / "meta.json").read_text())
@@ -176,6 +186,8 @@ def main():
     print(f"train={len(train_rows)} val={len(val_rows)} val_ood={len(ood_rows)}")
 
     model = IntentTransformer(cfg).to(device)
+    if init is not None:
+        model.load_state_dict(init["model"])
     print(f"params: {model.n_params() / 1e6:.2f}M")
     fwd = torch.compile(model) if args.compile else model
 
@@ -193,6 +205,16 @@ def main():
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     best, step, t0, stale = -1.0, 0, time.time(), 0
+    if init is not None:                     # the starting model is the bar to beat; always leaves a checkpoint
+        m = evaluate(model, val_rows, tok, device)
+        best = m["exact"]
+        if ood_rows:
+            o = evaluate(model, ood_rows, tok, device)
+            m["val_ood_exact"] = o["exact"]
+            best = (m["exact"] + o["exact"]) / 2
+        print(f"  start  exact {m['exact']:.4f}  score {best:.4f}")
+        torch.save({"config": cfg.to_dict(), "model": model.state_dict(), "step": 0, "metrics": m,
+                    "knows": init.get("knows")}, args.out)
     model.train()
     while step < args.steps:
         for batch in batches(train_rows, args.batch, max_tokens=args.max_tokens):

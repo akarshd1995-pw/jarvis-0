@@ -877,6 +877,13 @@ TRAINING_PHRASES = {
                "training wapas shuru karo", "training continue karo"],
     "status": ["how is the training going", "training status", "is the training done", "how far along is training",
                "training kitna hua", "training ka status batao", "how much training is left"],
+    "improve": ["improve yourself", "learn from my corrections", "fine tune the model now", "retrain your model",
+                "get better from my fixes", "update the command model", "self improve tonight", "improve the model",
+                "train yourself on my corrections", "khud ko improve karo", "apne aap ko behtar karo",
+                "model ko fine tune karo", "learn from your mistakes"],
+    "rollback": ["roll back the model", "go back to the previous model", "undo the model update", "revert the model",
+                 "switch back to the old model", "the new model is worse, roll it back", "purana model wapas lao",
+                 "model rollback karo", "restore the previous model"],
 }
 
 
@@ -967,7 +974,7 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix"]
+           "training_control", "song_suffix", "self_improve"]
 
 
 # ---------------------------------------------------------------- briefings (phase 24)

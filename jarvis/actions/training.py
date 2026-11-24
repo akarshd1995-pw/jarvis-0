@@ -12,7 +12,23 @@ from .base import ActionResult, Ctx
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CHECKPOINTS = PROJECT_ROOT / "checkpoints"
 PAUSE_FLAG = CHECKPOINTS / "PAUSE"
-JOB_LOGS = {"command model": CHECKPOINTS / "train_log.txt", "reply model": CHECKPOINTS / "reply_log.txt"}
+JOB_LOGS = {"command model": CHECKPOINTS / "train_log.txt", "reply model": CHECKPOINTS / "reply_log.txt",
+            "self-improvement": CHECKPOINTS / "improve_log.txt"}
+
+
+def start_improving(force: bool = True):
+    """Run the self-improving loop in the background at low priority (phase 14). Returns the Popen or None."""
+    import subprocess
+    import sys
+    if (CHECKPOINTS / "improve.lock").exists():
+        return None
+    flags = 0
+    if sys.platform == "win32":
+        flags = 0x00004000 | 0x08000000          # BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW
+    exe = sys.executable.replace("pythonw.exe", "python.exe")
+    cmd = [exe, "-u", "-m", "training.loop"] + (["--force"] if force else [])
+    out = open(CHECKPOINTS / "improve_stdout.txt", "w", encoding="utf-8")
+    return subprocess.Popen(cmd, cwd=PROJECT_ROOT, stdout=out, stderr=subprocess.STDOUT, creationflags=flags)
 
 
 def jobs(running_within_s: float = 300) -> list[dict]:
@@ -39,6 +55,21 @@ def training(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
         PAUSE_FLAG.parent.mkdir(parents=True, exist_ok=True)
         PAUSE_FLAG.write_text("paused by Jarvis\n", encoding="utf-8")
         return ActionResult("Training paused", kind="training", data={"action": "pause", "name": running[0]["name"]})
+    if action == "improve":
+        if (CHECKPOINTS / "improve.lock").exists():
+            return ActionResult("Already improving", kind="training", data={"action": "improve", "running": True})
+        if not (CHECKPOINTS / "intent.pt").exists():
+            return ActionResult("No model to improve yet", kind="training", data={"action": "improve", "nomodel": True})
+        start_improving(force=True)
+        return ActionResult("Started improving the model", kind="training", data={"action": "improve"})
+    if action == "rollback":
+        import sys
+        sys.path.insert(0, str(PROJECT_ROOT))
+        from training.loop import rollback
+        msg = rollback()
+        ok = msg.startswith("Rolled back")
+        return ActionResult(msg, kind="training", data={"action": "rollback", "ok": ok, "msg": msg,
+                                                         "version": msg.split()[-1].rstrip(".") if ok else ""})
     was = PAUSE_FLAG.exists()
     PAUSE_FLAG.unlink(missing_ok=True)
     return ActionResult("Training resumed", kind="training", data={"action": "resume", "none": not was})

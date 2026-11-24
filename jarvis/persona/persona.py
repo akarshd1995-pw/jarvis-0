@@ -261,6 +261,12 @@ class Persona:
         return f"at {clock} {day}"
 
     def _plan_training(self, d: dict) -> tuple[str, dict]:
+        if d["action"] == "improve":
+            key = "running" if d.get("running") else "nomodel" if d.get("nomodel") else "started"
+            return f"training_improve_{key}", {}
+        if d["action"] == "rollback":
+            return ("training_rollback", {"version": d["version"]}) if d.get("ok") else \
+                ("training_rollback_none", {"msg": d.get("msg", "")})
         if d["action"] == "pause":
             return ("training_pause_none", {}) if d.get("none") else ("training_paused", {"name": d.get("name", "")})
         if d["action"] == "resume":

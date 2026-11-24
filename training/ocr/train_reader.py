@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import math
 import random
 import time
@@ -166,3 +167,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # The data workers render forever; on Windows the process can hang waiting for them after training.
+    # Everything is saved by now, so leave immediately.
+    sys.stdout.flush()
+    os._exit(0)

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import math
 import random
 import time
@@ -97,10 +98,11 @@ def evaluate(model, vals, device, show: int = 0) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--steps", type=int, default=60_000)
+    ap.add_argument("--steps", type=int, default=40_000)
     ap.add_argument("--batch", type=int, default=96)
     ap.add_argument("--lr", type=float, default=1e-3)
-    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--workers", type=int, default=max(2, min(14, (os.cpu_count() or 8) - 2)),
+                    help="CPU processes rendering training images (default: all but 2 threads)")
     ap.add_argument("--eval-every", type=int, default=3000)
     ap.add_argument("--out", type=Path, default=Path("checkpoints/ocr_reader.pt"))
     ap.add_argument("--seed", type=int, default=0)

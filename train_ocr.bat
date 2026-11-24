@@ -1,10 +1,10 @@
 @echo off
 REM Phase 7 step 2: train our own OCR (line finder + reader) on text rendered with your fonts, then export.
-REM   train_ocr.bat          full run: reader ~40-60 min, finder ~15-25 min
+REM   train_ocr.bat          full run: reader ~1.5-2 h, finder ~15-25 min
 REM   train_ocr.bat quick    2-minute check that everything runs (models won't be good yet)
 REM Pause any time: "pause training" in Jarvis (or create checkpoints\PAUSE).
 call .venv\Scripts\activate
-set RSTEPS=60000
+set RSTEPS=40000
 set FSTEPS=15000
 if /I "%1"=="quick" (
   set RSTEPS=300

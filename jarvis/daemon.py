@@ -88,6 +88,7 @@ class Jarvis:
                         if self.config.memory_browser:
                             idx.add_history(browser.history())
                         self._ocr_pass(idx)
+                        self._embed_pass(idx)
                         log.info("memory index: %s (%s)", idx.count(), st)
                     except Exception as e:
                         log.warning("memory indexing failed: %s", e)
@@ -120,12 +121,34 @@ class Jarvis:
             done += 1
         return done
 
+    def _embed_pass(self, idx, limit: int = 3000) -> int:
+        """Meaning vectors for new/changed items (if the meaning model is trained)."""
+        if not self.config.memory_meaning:
+            return 0
+        from .memory.meaning import chunks, get_embedder
+        emb = get_embedder(PROJECT_ROOT / "checkpoints")
+        if emb is None:
+            return 0
+        done = 0
+        for doc_id, title, body in idx.needs_embed(limit):
+            try:
+                idx.add_vectors(doc_id, emb.embed(chunks(title, body)))
+            except Exception as e:
+                log.warning("embedding failed for %s: %s", title, e)
+                continue
+            done += 1
+            if done % 200 == 0:
+                idx.commit()
+        idx.commit()
+        return done
+
     # ------------------------------------------------------------ briefings (phase 24)
     @property
     def job_logs(self) -> dict:
         ck = PROJECT_ROOT / "checkpoints"
         return {"Training command model": ck / "train_log.txt", "Training reply model": ck / "reply_log.txt",
-                "Self-improvement": ck / "improve_log.txt", "Training OCR": ck / "ocr_log.txt"}
+                "Self-improvement": ck / "improve_log.txt", "Training OCR": ck / "ocr_log.txt",
+                "Training meaning model": ck / "meaning_log.txt"}
 
     # ------------------------------------------------------------ self-improving loop (phase 14)
     def start_improver(self, deliver) -> threading.Thread:

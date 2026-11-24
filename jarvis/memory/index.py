@@ -62,8 +62,11 @@ class MemoryIndex:
             CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(title, body, place,
                 tokenize = 'porter unicode61 remove_diacritics 2');
             CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+            CREATE TABLE IF NOT EXISTS vecs (doc_id INTEGER, k INTEGER, v BLOB, PRIMARY KEY (doc_id, k));
         """)
         self.db.commit()
+        self._vec_version = 0
+        self._vec_cache: tuple[int, object, object] | None = None
 
     # ------------------------------------------------------------ writing
     def _upsert(self, source: str, path: str, title: str, body: str, place: str, ext: str, folder: str,
@@ -75,6 +78,8 @@ class MemoryIndex:
                             "ocr=0 WHERE id=?", (title, ext, folder, mtime, size, int(screenshot), int(bool(body)),
                                                  row[0]))
             self.db.execute("DELETE FROM fts WHERE rowid = ?", (row[0],))
+            self.db.execute("DELETE FROM vecs WHERE doc_id = ?", (row[0],))
+            self._vec_version += 1
             rid = row[0]
         else:
             rid = self.db.execute("INSERT INTO docs (source, path, title, ext, folder, mtime, size, screenshot, "
@@ -84,6 +89,8 @@ class MemoryIndex:
         self.db.execute("INSERT INTO fts (rowid, title, body, place) VALUES (?,?,?,?)", (rid, title, body, place))
 
     def _delete(self, rid: int) -> None:
+        self.db.execute("DELETE FROM vecs WHERE doc_id = ?", (rid,))
+        self._vec_version += 1
         self.db.execute("DELETE FROM fts WHERE rowid = ?", (rid,))
         self.db.execute("DELETE FROM docs WHERE id = ?", (rid,))
 
@@ -156,6 +163,9 @@ class MemoryIndex:
             self.db.execute("INSERT INTO fts (rowid, title, body, place) VALUES (?,?,?,?)",
                             (row[0], row[1], text, words_of_name(row[1]) + " " + words_of_name(row[2] or "")))
             self.db.execute("UPDATE docs SET has_text=?, ocr=? WHERE id=?", (int(bool(text)), int(ocr), row[0]))
+            if text:                                   # new words: its meaning vectors need redoing
+                self.db.execute("DELETE FROM vecs WHERE doc_id = ?", (row[0],))
+                self._vec_version += 1
             self.db.commit()
 
     def needs_ocr(self, limit: int = 100) -> list[str]:
@@ -168,13 +178,50 @@ class MemoryIndex:
                 f"({','.join('?' * len(exts))}) ORDER BY screenshot DESC, mtime DESC LIMIT ?", exts + [limit]).fetchall()
         return [r[0] for r in rows]
 
+    def needs_embed(self, limit: int = 2000) -> list[tuple[int, str, str]]:
+        """Items without meaning vectors yet, newest first: [(id, title, body)]."""
+        with self.lock:
+            return self.db.execute(
+                "SELECT d.id, fts.title, fts.body FROM docs d JOIN fts ON fts.rowid = d.id "
+                "WHERE NOT EXISTS (SELECT 1 FROM vecs v WHERE v.doc_id = d.id) ORDER BY d.mtime DESC LIMIT ?",
+                (limit,)).fetchall()
+
+    def add_vectors(self, doc_id: int, mat) -> None:
+        import numpy as np
+        with self.lock:
+            self.db.execute("DELETE FROM vecs WHERE doc_id = ?", (doc_id,))
+            for k, v in enumerate(np.asarray(mat, np.float16)):
+                self.db.execute("INSERT INTO vecs VALUES (?,?,?)", (doc_id, k, v.tobytes()))
+            self._vec_version += 1
+
+    def commit(self) -> None:
+        with self.lock:
+            self.db.commit()
+
+    def _vectors(self):
+        """(doc_ids, matrix) of all meaning vectors, cached until something changes."""
+        import numpy as np
+        if self._vec_cache and self._vec_cache[0] == self._vec_version:
+            return self._vec_cache[1], self._vec_cache[2]
+        with self.lock:
+            rows = self.db.execute("SELECT doc_id, v FROM vecs").fetchall()
+        if not rows:
+            ids, mat = np.zeros(0, np.int64), np.zeros((0, 0), np.float32)
+        else:
+            ids = np.array([r[0] for r in rows], np.int64)
+            mat = np.stack([np.frombuffer(r[1], np.float16) for r in rows]).astype(np.float32)
+        self._vec_cache = (self._vec_version, ids, mat)
+        return ids, mat
+
     # ------------------------------------------------------------ reading
     def count(self) -> dict:
         with self.lock:
             rows = dict(self.db.execute("SELECT source, COUNT(*) FROM docs GROUP BY source").fetchall())
             shots = self.db.execute("SELECT COUNT(*) FROM docs WHERE screenshot = 1").fetchone()[0]
             read = self.db.execute("SELECT COUNT(*) FROM docs WHERE ocr = 1").fetchone()[0]
-        return {"files": rows.get("file", 0), "web": rows.get("web", 0), "screenshots": shots, "images_read": read}
+            vec = self.db.execute("SELECT COUNT(DISTINCT doc_id) FROM vecs").fetchone()[0]
+        return {"files": rows.get("file", 0), "web": rows.get("web", 0), "screenshots": shots, "images_read": read,
+                "with_meaning": vec}
 
     @staticmethod
     def _fts_query(query: str, any_word: bool = False) -> str:
@@ -183,7 +230,7 @@ class MemoryIndex:
 
     def search(self, query: str, ext: str | None = None, newer_than_s: float | None = None,
                older_than_s: float | None = None, where: str | None = None, limit: int = 8,
-               now: float | None = None) -> list[Hit]:
+               now: float | None = None, embedder=None, min_sim: float = 0.45) -> list[Hit]:
         now = time.time() if now is None else now
         cond, args = [], []
         if where == "web":
@@ -221,15 +268,60 @@ class MemoryIndex:
                     "SELECT d.title, d.path, d.source, d.ext, d.mtime, d.screenshot, '', 0 "
                     f"FROM docs d WHERE 1=1{where_sql} ORDER BY d.mtime DESC LIMIT ?", args + [limit]).fetchall()
         qwords = set(re.findall(r"\w+", query.lower()))
-        hits = []
-        for title, path, source, e, mtime, shot, snip, bm in rows:
+
+        def boosts(title, mtime):
             age_days = max(0.0, (now - (mtime or 0)) / 86400)
             name_words = set(re.findall(r"\w+", words_of_name(title).lower()))
-            in_name = len(qwords & name_words) / max(1, len(qwords))
-            score = -bm + 2.0 * in_name + 1.5 * math.exp(-age_days / 30)
-            hits.append(Hit(title, path, source, e or "", mtime or 0, snip or "", bool(shot), score))
+            return len(qwords & name_words) / max(1, len(qwords)), math.exp(-age_days / 30)
+
+        hits = []
+        for title, path, source, e, mtime, shot, snip, bm in rows:
+            in_name, fresh = boosts(title, mtime)
+            hits.append(Hit(title, path, source, e or "", mtime or 0, snip or "", bool(shot),
+                            -bm + 2.0 * in_name + 1.5 * fresh))
         hits.sort(key=lambda h: -h.score)
-        return hits[:limit]
+        if not (embedder is not None and query.strip()):
+            return hits[:limit]
+        # meaning search: nearest vectors, same filters, merged with the word results (reciprocal rank fusion)
+        sem = self._semantic(query, embedder, where_sql, args, min_sim)
+        fused: dict[str, list] = {}
+        for rank, h in enumerate(hits[:60]):
+            fused.setdefault(h.path, [h, 0.0])[1] += 1.0 / (60 + rank)
+        for rank, (h, sim) in enumerate(sem):
+            fused.setdefault(h.path, [h, 0.0])[1] += 1.0 / (60 + rank)
+        out = []
+        for h, rrf in fused.values():
+            in_name, fresh = boosts(h.title, h.mtime)
+            h.score = rrf + 0.004 * in_name + 0.002 * fresh
+            out.append(h)
+        out.sort(key=lambda h: -h.score)
+        return out[:limit]
+
+    def _semantic(self, query: str, embedder, where_sql: str, args: list, min_sim: float) -> list:
+        import numpy as np
+        ids, mat = self._vectors()
+        if not len(ids):
+            return []
+        q = embedder.embed([query])[0]
+        sims = mat @ q
+        best: dict[int, float] = {}
+        for i in np.argsort(-sims)[:400]:
+            if sims[i] < min_sim:
+                break
+            d = int(ids[i])
+            best[d] = max(best.get(d, -1.0), float(sims[i]))
+        if not best:
+            return []
+        marks = ",".join("?" * len(best))
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT d.id, d.title, d.path, d.source, d.ext, d.mtime, d.screenshot, substr(fts.body, 1, 120) "
+                f"FROM docs d JOIN fts ON fts.rowid = d.id WHERE d.id IN ({marks}){where_sql}",
+                list(best) + args).fetchall()
+        out = [(Hit(t, p, src, e or "", m or 0, (b or "")[:120], bool(sh), best[i]), best[i])
+               for i, t, p, src, e, m, sh, b in rows]
+        out.sort(key=lambda x: -x[1])
+        return out[:60]
 
 
 _instances: dict[str, MemoryIndex] = {}

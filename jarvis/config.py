@@ -57,6 +57,7 @@ class Config:
     briefing_evening: str = "21:00"       # after this, if you're at the PC
     memory_enabled: bool = True           # phase 7: index files + browser history for "find ..." (all local)
     memory_browser: bool = True           # include Chrome/Edge/Brave/Firefox history
+    memory_meaning: bool = True           # search by meaning too, with our meaning model (once trained)
     memory_ocr: bool = True               # read the text in screenshots/images with our OCR models (once trained)
     memory_folders: list[str] = field(default_factory=lambda: ["Downloads", "Documents", "Desktop", "Pictures",
                                                                "Videos"])

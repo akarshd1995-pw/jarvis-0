@@ -1329,3 +1329,55 @@ def test_ocr_drops_invented_text():
     assert looks_like_text("Rainfall amount (mm)", 0.93) and looks_like_text("40%", 0.95)
     for junk, conf in [("_<", 0.99), ("|{||", 0.95), ("/9QQ%#\\\\'", 0.9), ("Hello world", 0.5), ("ab", 0.8)]:
         assert not looks_like_text(junk, conf), junk
+
+
+# ---------------------------------------------------------------- meaning search (phase 7 step 3)
+class _ConceptEmbedder:
+    """Stand-in for the meaning model: words of the same concept group share a direction."""
+    def __init__(self):
+        import numpy as np
+        from training.meaning.concepts import CONCEPTS
+        self.np = np
+        self.word = {}
+        for g, group in enumerate(CONCEPTS):
+            for phrase in group:
+                for w in phrase.split():
+                    self.word.setdefault(w, g)
+        self.n = len(CONCEPTS) + 1
+
+    def embed(self, texts):
+        np = self.np
+        out = np.zeros((len(texts), self.n), np.float32)
+        for i, t in enumerate(texts):
+            for w in t.lower().replace("_", " ").split():
+                out[i, self.word.get(w.strip(".,"), self.n - 1)] += 1.0 if w in self.word else 0.05
+            out[i] /= max(1e-6, np.linalg.norm(out[i]))
+        return out
+
+
+def test_meaning_search_finds_other_words(tmp_path):
+    from jarvis.memory.index import MemoryIndex
+    from jarvis.memory.meaning import chunks
+    d = tmp_path / "Downloads"
+    d.mkdir()
+    (d / "swiggy_receipt_march.txt").write_text("payment receipt order 4821 total 459 paid by upi")
+    (d / "trip_photos.txt").write_text("goa vacation pictures beach")
+    (d / "notes.txt").write_text("meeting minutes with rahul about the transformer training run")
+    idx = MemoryIndex(tmp_path / "m.sqlite")
+    idx.crawl([d])
+    emb = _ConceptEmbedder()
+    todo = idx.needs_embed()
+    assert len(todo) == 3
+    for doc_id, title, body in todo:
+        idx.add_vectors(doc_id, emb.embed(chunks(title, body)))
+    idx.commit()
+    assert idx.needs_embed() == [] and idx.count()["with_meaning"] == 3
+    assert [h.title for h in idx.search("bill")] == []                                   # words alone: nothing
+    assert idx.search("bill", embedder=emb)[0].title == "swiggy_receipt_march.txt"       # meaning: the receipt
+    assert idx.search("holiday", embedder=emb)[0].title == "trip_photos.txt"
+    assert idx.search("notes from the call", embedder=emb)[0].title == "notes.txt"
+    import os, time
+    (d / "notes.txt").write_text("changed text")
+    os.utime(d / "notes.txt", (time.time() + 10,) * 2)
+    idx.crawl([d])
+    assert len(idx.needs_embed()) == 1                                                   # re-embed what changed

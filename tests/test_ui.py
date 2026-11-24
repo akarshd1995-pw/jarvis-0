@@ -42,7 +42,10 @@ def texts(widget) -> str:
     """All label/text on screen under a widget, for checking what you'd see."""
     out = []
     try:
-        out.append(str(widget.cget("text")))
+        if widget.winfo_class() == "Text":          # replies are in a selectable Text box, not a label
+            out.append(widget.get("1.0", "end"))
+        else:
+            out.append(str(widget.cget("text")))
     except Exception:
         pass
     try:

@@ -1381,3 +1381,14 @@ def test_meaning_search_finds_other_words(tmp_path):
     os.utime(d / "notes.txt", (time.time() + 10,) * 2)
     idx.crawl([d])
     assert len(idx.needs_embed()) == 1                                                   # re-embed what changed
+
+
+def test_saved_folders_that_dont_exist_use_the_real_ones(tmp_path):
+    from jarvis.config import merge_folders
+    real = tmp_path / "OneDrive" / "Desktop"
+    real.mkdir(parents=True)
+    out = merge_folders({"Desktop": str(real), "Documents": str(tmp_path)},
+                        {"Desktop": str(tmp_path / "missing" / "Desktop"), "Work": str(tmp_path)})
+    assert out["Desktop"] == str(real)                 # the saved path is gone: use where Windows says it is
+    assert out["Work"] == str(tmp_path)                # your own aliases stay
+    assert merge_folders({"Desktop": str(real)}, {"Desktop": str(tmp_path)})["Desktop"] == str(tmp_path)  # yours win

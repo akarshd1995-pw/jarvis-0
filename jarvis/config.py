@@ -10,10 +10,58 @@ HOME = Path.home()
 DEFAULT_DATA_DIR = Path(os.environ.get("JARVIS_HOME", HOME / ".jarvis0"))
 
 
+# Windows "known folders": where Desktop, Documents, ... really are (OneDrive, another drive, moved by the user)
+KNOWN_FOLDER_IDS = {
+    "Desktop": "B4BFCC3A-DB2C-424C-B029-7FE99A87C641", "Documents": "FDD39AD0-238F-46AF-ADB4-6C85480369C7",
+    "Downloads": "374DE290-123F-4565-9164-39C4925E467B", "Pictures": "33E28130-4E1E-4676-835A-98395C3BC3BB",
+    "Music": "4BD8D571-6D19-48D3-BE97-422220080E43", "Videos": "18989B1D-99B5-455B-841C-AB7C74E4DDFC",
+    "Screenshots": "B7BEDE81-DF94-4682-A7D8-57A52620B86F",
+}
+
+
+def known_folder(name: str) -> Path | None:
+    """The real location Windows uses for a standard folder (None off Windows or if unknown)."""
+    if os.name != "nt" or name not in KNOWN_FOLDER_IDS:
+        return None
+    try:
+        import ctypes
+        import uuid
+        from ctypes import wintypes
+
+        class GUID(ctypes.Structure):
+            _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD), ("Data3", wintypes.WORD),
+                        ("Data4", ctypes.c_ubyte * 8)]
+
+        u = uuid.UUID(KNOWN_FOLDER_IDS[name])
+        g = GUID(u.fields[0], u.fields[1], u.fields[2], (ctypes.c_ubyte * 8)(*u.bytes[8:]))
+        out = ctypes.c_wchar_p()
+        if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(g), 0, None, ctypes.byref(out)) != 0:
+            return None
+        path = Path(out.value)
+        ctypes.windll.ole32.CoTaskMemFree(out)
+        return path
+    except Exception:
+        return None
+
+
+def merge_folders(defaults: dict[str, str], saved: dict[str, str]) -> dict[str, str]:
+    """Saved aliases win, except a standard folder saved at a path that doesn't exist while Windows knows
+    where it really is (e.g. Desktop moved into OneDrive after the config was written)."""
+    out = dict(defaults)
+    out.update(saved)
+    for name, real in defaults.items():
+        if name in KNOWN_FOLDER_IDS and not Path(out[name]).exists() and Path(real).exists():
+            out[name] = real
+    return out
+
+
 def _default_folders() -> dict[str, str]:
-    names = ["Downloads", "Documents", "Desktop", "Pictures", "Music", "Videos"]
-    folders = {n: str(HOME / n) for n in names}
-    folders["Archive"] = str(HOME / "Documents" / "Archive")
+    names = ["Downloads", "Documents", "Desktop", "Pictures", "Music", "Videos", "Screenshots"]
+    folders = {}
+    for n in names:
+        real = known_folder(n)
+        folders[n] = str(real or (HOME / "Pictures" / "Screenshots" if n == "Screenshots" else HOME / n))
+    folders["Archive"] = str(Path(folders["Documents"]) / "Archive")
     return folders
 
 
@@ -60,7 +108,7 @@ class Config:
     memory_meaning: bool = True           # search by meaning too, with our meaning model (once trained)
     memory_ocr: bool = True               # read the text in screenshots/images with our OCR models (once trained)
     memory_folders: list[str] = field(default_factory=lambda: ["Downloads", "Documents", "Desktop", "Pictures",
-                                                               "Videos"])
+                                                               "Screenshots", "Videos"])
     improve_auto: bool = True             # self-improving loop: fine-tune at night when there's something new
     improve_at: str = "02:00"             # earliest start (runs within 3 h of this, only when idle and plugged in)
     persona_name: str = "Jarvis"
@@ -109,7 +157,11 @@ class Config:
             for k, v in raw.items():
                 if k == "data_dir":
                     v = Path(v)
-                if k in ("folders", "apps"):
+                if k == "folders":
+                    cfg.folders = merge_folders(cfg.folders, v)
+                elif k == "memory_folders" and v == ["Downloads", "Documents", "Desktop", "Pictures", "Videos"]:
+                    pass                                   # the old default: keep the new one (adds Screenshots)
+                elif k == "apps":
                     getattr(cfg, k).update(v)
                 elif hasattr(cfg, k):
                     setattr(cfg, k, v)

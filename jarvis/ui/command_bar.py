@@ -430,9 +430,17 @@ class CommandBar:
                  font=T.F(8)).pack(anchor="w", pady=(4, 0))
 
     def _open_row(self, i: int, reveal: bool = False):
+        """Open a search result (or show it in its folder). Says what it's doing, then gets out of the way."""
         if i >= len(self._rows):
             return
         row = self._rows[i]
+        verb = "Showing" if reveal and row["source"] != "web" else "Opening"
+        self._clear_body()
+        tk.Label(self.body, text=f"{verb} {row['title'][:70]}…", bg=T.SURFACE, fg=T.ACCENT,
+                 font=T.F(11)).pack(anchor="w")
+        self._resize()
+        self.orb.set("success")
+        self.root.update_idletasks()
         try:
             if row["source"] == "web":
                 import webbrowser
@@ -442,10 +450,15 @@ class CommandBar:
                 subprocess.Popen(["explorer", "/select,", row["path"]])
             else:
                 import os
+                if not os.path.exists(row["path"]):
+                    raise FileNotFoundError("it was moved or deleted since it was indexed")
                 os.startfile(row["path"])                 # noqa: Windows
-            self.hide()
         except (OSError, AttributeError) as e:
-            self._show_reply(f"Couldn't open it: {e}")
+            self.orb.set("error")
+            rows = self._rows
+            self._show_reply(f"I couldn't open {row['title']}: {e}", rows)
+            return
+        self.root.after(900, self.hide)                  # the file's own window comes to the front
 
     def _show_confirm(self, tier: Tier, summary: str, items: list[str]):
         self._clear_body()

@@ -19,17 +19,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 PRESETS = {
-    "coding": {"apps": ["vscode", "chrome", "terminal"], "music": "lofi hip hop radio beats to code to"},
+    "coding": {"apps": ["cursor", "claude", "chrome", "terminal"], "music": "lofi hip hop radio beats to code to"},
     "study": {"apps": ["chrome", "notepad"], "music": "lofi study music"},
 }
 ALIASES = {"code": "coding", "dev": "coding", "programming": "coding", "development": "coding",
            "studying": "study", "padhai": "study"}
 # what each built-in app name runs as, to find its windows
-APP_EXES = {"vscode": {"code.exe"}, "chrome": {"chrome.exe"}, "edge": {"msedge.exe"}, "firefox": {"firefox.exe"},
+APP_EXES = {"vscode": {"code.exe"}, "cursor": {"cursor.exe"}, "claude": {"claude.exe"}, "chrome": {"chrome.exe"}, "edge": {"msedge.exe"}, "firefox": {"firefox.exe"},
             "terminal": {"windowsterminal.exe", "wt.exe", "powershell.exe", "pwsh.exe", "cmd.exe"},
             "notepad": {"notepad.exe"}, "spotify": {"spotify.exe"}, "explorer": {"explorer.exe"},
             "calculator": {"calculatorapp.exe", "calc.exe"}, "brave": {"brave.exe"}}
-NICE = {"code.exe": "VS Code", "chrome.exe": "Chrome", "msedge.exe": "Edge", "firefox.exe": "Firefox",
+NICE = {"code.exe": "VS Code", "cursor.exe": "Cursor", "claude.exe": "Claude", "chrome.exe": "Chrome", "msedge.exe": "Edge", "firefox.exe": "Firefox",
         "windowsterminal.exe": "Terminal", "notepad.exe": "Notepad", "spotify.exe": "Spotify",
         "explorer.exe": "File Explorer", "brave.exe": "Brave", "winword.exe": "Word", "excel.exe": "Excel",
         "powerpnt.exe": "PowerPoint", "obsidian.exe": "Obsidian", "slack.exe": "Slack", "discord.exe": "Discord"}
@@ -49,7 +49,8 @@ def nice_app(exe_or_alias: str) -> str:
         return NICE[base]
     if base.endswith(".exe"):
         return base[:-4].replace("_", " ").title()
-    return {"vscode": "VS Code", "chrome": "Chrome", "terminal": "Terminal"}.get(base, base.title())
+    return {"vscode": "VS Code", "chrome": "Chrome", "terminal": "Terminal", "cursor": "Cursor",
+            "claude": "Claude"}.get(base, base.title())
 
 
 class WorkspaceNotFound(Exception):
@@ -119,9 +120,10 @@ class RealBackend:
 
 
 class Workspaces:
-    def __init__(self, path: Path, backend=None):
+    def __init__(self, path: Path, backend=None, starter_apps: dict | None = None):
         self.path = Path(path)
         self.backend = backend or RealBackend()
+        self.starter_apps = starter_apps or {}          # Settings: which apps each built-in mode opens
 
     # -------------------------------------------------------------- storage
     def saved(self) -> dict:
@@ -145,7 +147,10 @@ class Workspaces:
         if key in s:
             return key, s[key]
         if key in PRESETS:
-            return key, dict(PRESETS[key], preset=True)
+            d = dict(PRESETS[key], preset=True)
+            if self.starter_apps.get(key):
+                d["apps"] = list(self.starter_apps[key])
+            return key, d
         raise WorkspaceNotFound(key, self.names())
 
     def set_definition(self, key: str, definition: dict | None) -> None:

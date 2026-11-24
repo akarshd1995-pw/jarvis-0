@@ -8,7 +8,8 @@ BACKEND = None          # tests put a fake here
 
 
 def _ws(ctx: Ctx) -> Workspaces:
-    return Workspaces(ctx.config.data_dir / "workspaces.json", BACKEND or RealBackend(ctx))
+    return Workspaces(ctx.config.data_dir / "workspaces.json", BACKEND or RealBackend(ctx),
+                      starter_apps=getattr(ctx.config, "workspace_apps", None))
 
 
 def workspace(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:

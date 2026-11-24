@@ -24,7 +24,7 @@ REFRESH_S = 3 * 86400
 MISS_RESCAN_S = 600
 
 # Built-in aliases -> what the app is called in the Start menu
-DISPLAY = {"vscode": ["Visual Studio Code", "VS Code"], "chrome": ["Google Chrome"], "edge": ["Microsoft Edge"],
+DISPLAY = {"vscode": ["Visual Studio Code", "VS Code"], "cursor": ["Cursor"], "claude": ["Claude"], "chrome": ["Google Chrome"], "edge": ["Microsoft Edge"],
            "notepad": ["Notepad"], "explorer": ["File Explorer"], "terminal": ["Terminal", "Windows Terminal",
                                                                                 "Command Prompt", "Windows PowerShell"],
            "spotify": ["Spotify"], "calculator": ["Calculator"], "settings": ["Settings"],

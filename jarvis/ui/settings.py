@@ -171,6 +171,9 @@ class SettingsWindow:
         self.maps_key = tk.StringVar(value=unprotect(c.maps_api_key) if c.maps_api_key else "")
         self.maps_osm = tk.BooleanVar(value=c.maps_osm)
         self.learn = tk.BooleanVar(value=c.learn_from_usage)
+        wa = c.workspace_apps or {}
+        self.coding_apps = tk.StringVar(value=", ".join(wa.get("coding", [])))
+        self.study_apps = tk.StringVar(value=", ".join(wa.get("study", [])))
         self.clarify = tk.BooleanVar(value=c.clarify)
         self.battery = tk.BooleanVar(value=c.pause_heavy_on_battery)
         self.int8 = tk.BooleanVar(value=c.use_int8)
@@ -250,6 +253,9 @@ class SettingsWindow:
             tk.Label(pg, text="Folder aliases (JSON)", bg=T.SURFACE, fg=T.TEXT, font=T.F(10)).pack(anchor="w")
             self.folders = self._text(pg, json.dumps(self.config.folders, indent=2), 6)
             self.folders.pack(fill="x", pady=(4, 10))
+            self._row(pg, "Coding mode opens", lambda p: self._entry(p, self.coding_apps, 34),
+                      "App names, comma separated, e.g. cursor, claude, chrome, terminal")
+            self._row(pg, "Study mode opens", lambda p: self._entry(p, self.study_apps, 34), "e.g. chrome, notepad")
             tk.Label(pg, text="App aliases (JSON)", bg=T.SURFACE, fg=T.TEXT, font=T.F(10)).pack(anchor="w")
             self.apps = self._text(pg, json.dumps(self.config.apps, indent=2), 5)
             self.apps.pack(fill="x", pady=(4, 10))
@@ -315,6 +321,9 @@ class SettingsWindow:
         c.maps_api_key = protect(key) if key else ""        # encrypted to your Windows account
         c.maps_osm = self.maps_osm.get()
         c.learn_from_usage = self.learn.get()
+        apps_of = lambda v: [a.strip().lower() for a in v.get().split(",") if a.strip()]   # noqa: E731
+        c.workspace_apps = {**(c.workspace_apps or {}), "coding": apps_of(self.coding_apps) or ["cursor", "claude"],
+                            "study": apps_of(self.study_apps) or ["chrome"]}
         c.clarify = self.clarify.get()
         c.pause_heavy_on_battery = self.battery.get()
         c.use_int8, c.yield_when_gaming = self.int8.get(), self.games.get()

@@ -2664,11 +2664,14 @@ def test_preset_opens_missing_apps_tiles_and_plays_music(tmp_path):
     d = FakeDesktop(monitors=[[0, 0, 1920, 1040]])
     d.add("C:/Chrome/chrome.exe", "Gmail - Chrome")            # already open: reused, not opened again
     rep = Workspaces(tmp_path / "ws.json", d).start("coding")
-    assert d.launched == ["vscode", "terminal"] and rep.opened == ["VS Code", "Terminal"]
+    assert d.launched == ["cursor", "claude", "terminal"] and rep.opened == ["Cursor", "Claude", "Terminal"]
     assert rep.music and d.played == [rep.music]
     places = sorted(d.placed.values())
     assert ([0, 0, 1152, 1040], "normal") in places          # the main app gets 60% on the left
-    assert len(rep.arranged) == 3
+    assert len(rep.arranged) == 4
+    d2 = FakeDesktop(monitors=[[0, 0, 1920, 1040]])            # your own list from Settings
+    rep = Workspaces(tmp_path / "ws2.json", d2, starter_apps={"coding": ["claude", "chrome"]}).start("coding")
+    assert d2.launched == ["claude", "chrome"] and "VS Code" not in rep.opened
 
 
 def test_tiling_rules():

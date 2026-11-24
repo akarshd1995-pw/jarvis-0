@@ -384,6 +384,8 @@ class CommandBar:
              "installer": "⬢", "code": "‹›", "screenshot": "▣"}
 
     def _icon(self, row: dict) -> str:
+        if row["source"] == "note":
+            return "✎"
         if row["source"] == "web":
             return self.ICONS["web"]
         if row.get("screenshot"):
@@ -416,7 +418,9 @@ class CommandBar:
             mid.pack(side="left", fill="x", expand=True, padx=(6, 0))
             title = tk.Label(mid, text=row["title"][:80], bg=T.RAISED, fg=T.TEXT, font=T.F(10, "bold"), anchor="w")
             title.pack(fill="x")
-            if row["source"] == "web":
+            if row["source"] == "note":
+                where = "your journal" if row.get("kind") == "journal" else "your notes"
+            elif row["source"] == "web":
                 where = row["path"].split("//")[-1].split("/")[0]
             else:
                 where = os.path.dirname(row["path"])
@@ -441,6 +445,10 @@ class CommandBar:
         if i >= len(self._rows):
             return
         row = self._rows[i]
+        if row["source"] == "note":                   # a note opens right here, in full
+            rows = self._rows
+            self._show_reply(row.get("text") or row["title"], rows)
+            return
         verb = "Showing" if reveal and row["source"] != "web" else "Opening"
         self._clear_body()
         tk.Label(self.body, text=f"{verb} {row['title'][:70]}…", bg=T.SURFACE, fg=T.ACCENT,

@@ -111,7 +111,12 @@ SCHEMA: dict[str, dict] = {
     "power":         {"args": {"action": "ident", "after": "dur"}, "required": ["action"],
                       "enum": {"action": ["shutdown", "restart", "sleep", "sign_out", "cancel"]}},  # part of a command Jarvis can't do
     "undo":          {"args": {}, "required": []},
-    "open_result":   {"args": {"n": "int"}, "required": ["n"]},                     # phase 38: "open the second one"
+    "open_result":   {"args": {"n": "int"}, "required": ["n"]},
+    "note":          {"args": {"text": "str|ref", "kind": "ident"}, "required": ["text"],        # phase 30
+                      "enum": {"kind": ["note", "journal"]}},
+    "find_notes":    {"args": {"query": "str|ref", "kind": "ident", "when": "ident"}, "required": [],
+                      "enum": {"kind": ["note", "journal"], "when": ["today", "yesterday", "week", "month"]}},
+    "delete_note":   {"args": {"query": "str"}, "required": ["query"]},                     # phase 38: "open the second one"
     "unknown":       {"args": {}, "required": []},   # out-of-scope request: decline, never guess
 }
 

@@ -60,6 +60,7 @@ class Facts:
     apps: list[tuple[str, int]] = field(default_factory=list)   # [(label, minutes)]
     improve: str = ""                          # what the self-improving loop did overnight
     learning: list[str] = field(default_factory=list)   # phase 39: weekly review nudge, drift alert
+    notes: list[tuple[str, str]] = field(default_factory=list)   # phase 30: today's (kind, text), oldest first
     active_min: int = 0
     commands: int = 0
     alerts: int = 0
@@ -179,6 +180,8 @@ def gather(kind: str, store, snapshot, logs: dict[str, Path], eval_report: Path 
         pass
     if downloads is not None:
         f.clutter = folder_clutter(downloads, now, today_start=day_start)
+    if kind == "evening" and hasattr(store, "notes"):
+        f.notes = [(k, t) for _, _, k, t in reversed(store.notes(since=day_start))]
     events = store.events_since(day_start)
     secs = focus_minutes(events, now)
     f.active_min = int(sum(secs.values()) // 60)
@@ -186,6 +189,20 @@ def gather(kind: str, store, snapshot, logs: dict[str, Path], eval_report: Path 
     f.commands = sum(1 for _, k, _ in events if k == "command_run")
     f.alerts = sum(1 for _, k, _ in events if k == "alert")
     return f
+
+
+def notes_lines(notes: list[tuple[str, str]]) -> list[str]:
+    """Evening: what you noted today (a few of them) and whether you wrote in your journal."""
+    out = []
+    plain = [t for k, t in notes if k == "note"]
+    journal = [t for k, t in notes if k == "journal"]
+    if plain:
+        short = ["\u201c" + (t if len(t) <= 60 else t[:59].rstrip() + "\u2026") + "\u201d" for t in plain[:3]]
+        more = f", and {len(plain) - 3} more" if len(plain) > 3 else ""
+        out.append(f"You noted {len(plain)} thing{'s' * (len(plain) != 1)} today: {'; '.join(short)}{more}.")
+    if journal:
+        out.append(f"You wrote {len(journal)} journal entr{'ies' if len(journal) != 1 else 'y'} today.")
+    return out
 
 
 def improve_line(r: dict) -> str:
@@ -304,6 +321,7 @@ def render(f: Facts, name: str = "Jarvis", address: str = "sir", tone: str = "bu
     if f.improve:
         lines.append(f.improve)
     lines.extend(f.learning)
+    lines.extend(notes_lines(f.notes))
 
     # Downloads clutter
     c = f.clutter

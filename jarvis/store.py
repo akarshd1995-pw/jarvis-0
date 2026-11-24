@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS journal (
 );
 CREATE INDEX IF NOT EXISTS idx_journal_batch ON journal(batch_id);
 
+CREATE TABLE IF NOT EXISTS notes (          -- phase 30: notes and journal entries (text encrypted)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    kind TEXT NOT NULL,          -- note | journal
+    text TEXT NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_notes_ts ON notes(ts);
+
 CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     due REAL NOT NULL,
@@ -119,6 +128,36 @@ class Store:
             self._db.commit()
 
     # ------------------------------------------------------------ reminders
+    # ------------------------------------------------------------ notes (phase 30)
+    def add_note(self, kind: str, text: str, ts: float | None = None) -> int:
+        with self._lock:
+            cur = self._db.execute("INSERT INTO notes(ts, kind, text) VALUES (?,?,?)",
+                                   (ts or time.time(), kind, protect(text, self.encrypt)))
+            self._db.commit()
+            return cur.lastrowid
+
+    def notes(self, kind: str | None = None, since: float | None = None, until: float | None = None,
+              deleted: bool = False) -> list[tuple[int, float, str, str]]:
+        """[(id, ts, kind, text)] newest first."""
+        q, args = "SELECT id, ts, kind, text FROM notes WHERE deleted = ?", [1 if deleted else 0]
+        if kind:
+            q += " AND kind = ?"
+            args.append(kind)
+        if since is not None:
+            q += " AND ts >= ?"
+            args.append(since)
+        if until is not None:
+            q += " AND ts < ?"
+            args.append(until)
+        with self._lock:
+            rows = self._db.execute(q + " ORDER BY ts DESC", args).fetchall()
+        return [(i, t, k, unprotect(x)) for i, t, k, x in rows]
+
+    def set_note_deleted(self, note_id: int, deleted: bool) -> None:
+        with self._lock:
+            self._db.execute("UPDATE notes SET deleted = ? WHERE id = ?", (1 if deleted else 0, note_id))
+            self._db.commit()
+
     def add_reminder(self, due: float, text: str) -> int:
         with self._lock:
             cur = self._db.execute("INSERT INTO reminders(due, text) VALUES (?,?)", (due, text))

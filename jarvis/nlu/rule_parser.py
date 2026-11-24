@@ -183,7 +183,58 @@ CONTEXT_RULES: list[tuple[re.Pattern, callable]] = [
      lambda m, t: f"open_result(n={_ORDINAL.get((m.group(1) or m.group(3) or '').lower()) or int(m.group(2))})"),
 ]
 
-RULES: list[tuple[re.Pattern, callable]] = CONTEXT_RULES + [
+# ---- phase 30: notes and journal
+_REFTEXT = re.compile(r"^(?:this|that|it|what i copied|the copied text|ise|isko|ye)$", re.I)
+_WHEN = {"today": "today", "todays": "today", "aaj": "today", "yesterday": "yesterday", "yesterdays": "yesterday",
+         "kal": "yesterday", "this week": "week", "this weeks": "week", "this month": "month", "this months": "month"}
+
+
+def _note(text: str, kind: str = "note") -> str:
+    text = text.strip().strip("\"'").strip()
+    if _REFTEXT.match(text):
+        return f"note(text=this{', kind=journal' if kind == 'journal' else ''})"
+    esc = text.replace("\\", "\\\\").replace('"', '\\"')
+    return f'note(text="{esc}"{", kind=journal" if kind == "journal" else ""})'
+
+
+def _find(query: str | None = None, kind: str | None = None, when: str | None = None) -> str:
+    args = []
+    if query:
+        q = re.sub(r"^(?:the|my|a)\s+", "", query.strip().rstrip("?").strip(), flags=re.I)
+        args.append(f'query="{q}"')
+    if kind == "journal":
+        args.append("kind=journal")
+    if when:
+        args.append(f"when={_WHEN[when.lower().replace(chr(39), '')]}")
+    return f"find_notes({', '.join(args)})"
+
+
+NOTE_RULES: list[tuple[re.Pattern, callable]] = [
+    (re.compile(r"^(?:add (?:this )?to my journal|journal(?: entry)?|dear diary|write in my journal|log in my journal"
+                r"|diary me likho|journal me likho)(?:\s+that)?[:,]?\s+(.+)$", re.I), lambda m, t: _note(m.group(1), "journal")),
+    (re.compile(r"^(?:note(?: down)?|jot(?: down)?|make a note(?: of)?|take a note(?: of)?|add a note|quick note"
+                r"|note to self|write down|save a note(?: saying)?|note karo|likh lo)(?:\s+that)?[:,]?\s+(.+)$", re.I),
+     lambda m, t: _note(m.group(1))),
+    (re.compile(r"^(?:save|keep) (this|that|what i copied) as a note$|^(.+?)\s+note kar(?:o| lo| do| lena)$", re.I),
+     lambda m, t: _note(m.group(1) or m.group(2))),
+    (re.compile(r"^what did i (?:note|jot|write)(?: down)? (?:about|on|regarding) (.+?)\??$"
+                r"|^(?:show|find|read|get|search)(?: me)? (?:my )?notes? (?:about|on|for|regarding) (.+)$"
+                r"|^(.+?) ke baare me kya (?:note kiya|likha) tha\??$", re.I),
+     lambda m, t: _find(m.group(1) or m.group(2) or m.group(3))),
+    (re.compile(r"^(?:show|read|list|what are|give me)(?: me)? (?:my |all )?(today'?s|yesterday'?s|this week'?s|this month'?s)"
+                r" (notes|journal(?: entries)?)$|^(aaj|kal) ke (notes|journal) dikhao$", re.I),
+     lambda m, t: _find(kind="journal" if "journal" in (m.group(2) or m.group(4)).lower() else None,
+                        when=(m.group(1) or m.group(3)).lower().replace("'", ""))),
+    (re.compile(r"^(?:show|read|open)(?: me)? my journal(?: from| for)?(?: (today|yesterday|this week|this month))?$"
+                r"|^what did i write in my journal(?: (today|yesterday|this week|this month))?\??$", re.I),
+     lambda m, t: _find(kind="journal", when=m.group(1) or m.group(2))),
+    (re.compile(r"^(?:show|list|read)(?: me)? (?:all )?my notes$|^(?:my )?notes dikhao$", re.I), lambda m, t: _find()),
+    (re.compile(r"^(?:delete|remove|forget|erase) (?:the|my|that) note (?:about|on|for|regarding) (.+)$"
+                r"|^(.+?) wala note hata do$", re.I),
+     lambda m, t: f'delete_note(query="{re.sub(r"^(?:the|my) ", "", (m.group(1) or m.group(2)).strip(), flags=re.I)}")'),
+]
+
+RULES: list[tuple[re.Pattern, callable]] = NOTE_RULES + CONTEXT_RULES + [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
     (re.compile(r"^(?!.*\btraining\b)(?:(?:hey )?jarvis,? )?(?:what(?:'s| is) the |show (?:me )?the |give me (?:the )?|get (?:me )?(?:the )?)?"
                 r"(?:(?:fastest|quickest|best|shortest) )?(?:route|way|directions?|road)(?: please)? (?:from .+ )?to .+$"

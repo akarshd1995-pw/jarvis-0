@@ -1023,7 +1023,7 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs"]
+           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes"]
 
 
 # ---------------------------------------------------------------- directions (routes, travel time)
@@ -1306,6 +1306,118 @@ def gen_context(c: Ctx):
     return f"open_result(n={n})", c.T(CTX_RESULT).format(o=rng.choice(ORD_EN[n]), n=n), {}
 
 
+# ---------------------------------------------------------------- notes & journal (phase 30)
+NOTE_EN = frames("NOTE_EN", [
+    "note: {t}", "note that {t}", "make a note: {t}", "jot down {t}", "take a note: {t}", "add a note: {t}",
+    "note to self: {t}",                                            # 6 val_ood
+    "can you write down that {t}",                                  # 7 test_ood
+    "write down {t}", "note down {t}", "quick note: {t}", "save a note saying {t}", "make a note that {t}",
+    "please note {t}",
+    "put down a note: {t}",                                         # val_ood
+    "jot this down: {t}",                                           # test_ood
+    "can you note that {t}", "note {t}", "add note {t}", "make a note of {t}", "jarvis note that {t}",
+    "write this down: {t}", "please write down {t}", "jot down that {t}",
+    "note to self {t}", "put a note: {t}", "note this for me: {t}", "put in a note that {t}",
+])
+NOTE_HI = ["note karo: {t}", "{t} note kar lo", "{t} note kar do", "likh lo: {t}", "{t} likh lo", "ek note banao: {t}",
+           "{t} note karna", "yeh note karo: {t}"]
+JOURNAL_EN = frames("JOURNAL_EN", [
+    "add to my journal: {t}", "journal: {t}", "dear diary {t}", "journal entry: {t}", "write in my journal that {t}",
+    "log in my journal: {t}",
+    "put this in my journal: {t}",                                  # val_ood
+    "for my journal: {t}",                                          # test_ood
+    "add a journal entry: {t}", "today's journal: {t}", "journal that {t}", "in my journal write {t}",
+    "add this to my journal: {t}", "new journal entry: {t}",
+    "put in my journal: {t}", "for today's journal: {t}", "journal for today: {t}",
+    "put this down in my journal: {t}", "please put in my journal: {t}",
+])
+JOURNAL_HI = ["diary me likho: {t}", "journal me likho: {t}", "{t} journal me daal do", "aaj ki diary: {t}"]
+NOTE_REF = ["note this", "note that down", "save this as a note", "note down what i copied", "make a note of this",
+            "add this to my notes", "ise note kar lo", "isko note karo", "jot this down"]
+JOURNAL_REF = ["add this to my journal", "put this in my journal", "ise journal me daal do"]
+FIND_EN = frames("FIND_NOTES_EN", [
+    "what did i note about {q}", "show my notes about {q}", "find my note on {q}", "what did i write down about {q}",
+    "read my notes about {q}", "do i have a note about {q}",
+    "what was that note about {q}",                                 # val_ood
+    "pull up my note on {q}",                                       # test_ood
+    "show me my notes on {q}", "get my note about {q}", "search my notes for {q}", "any notes about {q}",
+    "what did i jot down about {q}", "open my note about {q}",
+    "i made a note about {q}, show it",                             # val_ood
+    "look up my notes on {q}",                                      # test_ood
+    "find the note about {q}", "what's in my notes about {q}",
+    "what was my note about {q}", "pull up my notes about {q}", "look up my note about {q}", "i made a note on {q}, find it", "what was in that note about {q}", "look up {q} in my notes",
+    "that note about {q}, show it", "show that note on {q}",
+])
+FIND_HI = ["{q} ke baare me kya note kiya tha", "{q} wala note dikhao", "{q} ka note dikhao", "{q} ke notes dikhao"]
+WHEN_EN = {"today": ["today's", "today"], "yesterday": ["yesterday's", "yesterday"], "week": ["this week's", "this week"],
+           "month": ["this month's", "this month"]}
+FIND_WHEN = ["show {w1} notes", "read {w1} notes", "what did i note {w2}", "my notes from {w2}", "list {w1} notes",
+             "show {w1} journal", "read {w1} journal entries", "what did i write in my journal {w2}",
+             "my journal from {w2}"]
+FIND_ALL = ["show all my notes", "read my notes", "list my notes", "show my notes", "read my journal",
+            "show my journal", "open my journal", "notes dikhao", "mera journal dikhao"]
+DEL_NOTE = ["delete the note about {q}", "remove my note on {q}", "forget the note about {q}", "erase my note about {q}",
+            "delete my {q} note", "{q} wala note hata do", "{q} ka note delete karo"]
+NOTE_TOPICS = ["the bank", "wifi password", "rahul", "parking", "the meeting", "rent", "the card", "passport",
+               "gym timings", "the landlord", "insurance", "flight", "ideas", "the project", "doctor", "dentist",
+               "car service", "electricity bill", "priya's birthday", "laptop warranty", "the exam", "jarvis"]
+
+
+def note_text(rng) -> str:
+    """Open-ended things people note: numbers, passwords, places, ideas, to-dos, made-up words."""
+    name = rng.choice(LX.NAMES)
+    word = LX.pseudo_word(rng).lower()
+    digits = "".join(rng.choice("0123456789") for _ in range(rng.choice([4, 5, 10])))
+    forms = [
+        LX.remind_text(rng), f"{name}'s number is {digits}", f"wifi password is {word}{digits[:2]}",
+        f"parked at level {rng.randint(1, 5)} spot {rng.choice('ABCD')}{rng.randint(1, 90)}",
+        f"{name} owes me {rng.choice([200, 500, 1500, 2000, 4300])} rupees", f"idea: an app that {rng.choice(['tracks', 'sorts', 'finds', 'plays'])} {word}s",
+        f"meeting with {name} moved to {rng.choice(['monday', 'friday', 'tomorrow', '5 pm', 'next week'])}",
+        f"buy {rng.choice(['milk', 'batteries', 'a phone charger', 'coffee', 'printer ink', word])}",
+        f"the {word} project deadline is {rng.choice(['the 15th', 'friday', 'march 3', 'end of month'])}",
+        f"{rng.choice(['good', 'rough', 'long', 'productive', 'quiet'])} day, {rng.choice(['finished', 'started', 'fixed', 'shipped'])} the {word} {rng.choice(['bug', 'feature', 'report', 'installer'])}",
+        f"call {name} about the {rng.choice(['rent', 'car', 'trip', 'invoice', word])}",
+        f"{word} {LX.pseudo_word(rng).lower()}",
+    ]
+    return rng.choice(forms)
+
+
+def gen_notes(c: Ctx):
+    rng = c.rng
+    r = rng.random()
+    if r < 0.45:                                          # a note
+        if rng.random() < 0.1:
+            return "note(text=this)", rng.choice(NOTE_REF), {}
+        t = note_text(rng)
+        tpl = rng.choice(NOTE_HI) if c.hing else c.T(NOTE_EN)
+        return dsl_call("note", {"text": q(t)}), tpl.format(t=slot(t)), {}
+    if r < 0.6:                                           # a journal entry
+        if rng.random() < 0.1:
+            return "note(kind=journal, text=this)", rng.choice(JOURNAL_REF), {}
+        t = note_text(rng)
+        tpl = rng.choice(JOURNAL_HI) if c.hing else c.T(JOURNAL_EN)
+        return dsl_call("note", {"text": q(t), "kind": "journal"}), tpl.format(t=slot(t)), {}
+    if r < 0.85:                                          # finding them
+        k = rng.random()
+        if k < 0.6:
+            topic = rng.choice(NOTE_TOPICS) if rng.random() < 0.7 else LX.pseudo_word(rng).lower()
+            query = topic[4:] if topic.startswith("the ") else topic
+            tpl = rng.choice(FIND_HI) if c.hing else c.T(FIND_EN)
+            return dsl_call("find_notes", {"query": q(query)}), tpl.format(q=slot(topic)), {}
+        if k < 0.85:
+            when = rng.choice(list(WHEN_EN))
+            tpl = rng.choice(FIND_WHEN)
+            args = {"kind": "journal"} if "journal" in tpl else {}
+            args["when"] = when
+            w1, w2 = WHEN_EN[when]
+            return dsl_call("find_notes", args), tpl.format(w1=w1, w2=w2), {}
+        tpl = rng.choice(FIND_ALL)
+        return ("find_notes(kind=journal)" if "journal" in tpl else "find_notes()"), tpl, {}
+    topic = rng.choice(NOTE_TOPICS) if rng.random() < 0.7 else LX.pseudo_word(rng).lower()
+    query = topic[4:] if topic.startswith("the ") else topic
+    return dsl_call("delete_note", {"query": q(query)}), rng.choice(DEL_NOTE).format(q=slot(topic)), {}
+
+
 # ---------------------------------------------------------------- maintenance (phase 29)
 HEALTH = frames("HEALTH", [
     "run a health check", "health check", "check yourself", "are you working properly", "run diagnostics",
@@ -1391,7 +1503,7 @@ GENERATORS = [
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",

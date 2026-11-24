@@ -1858,7 +1858,7 @@ def _jarvis(tmp_path):
     from jarvis.config import Config
     from jarvis.daemon import Jarvis
     cfg = Config(data_dir=tmp_path, encrypt_logs=False)
-    return Jarvis(cfg, confirm=lambda q: True, data_root=tmp_path / "data")
+    return Jarvis(cfg, confirm=lambda *a: True, data_root=tmp_path / "data")
 
 
 def test_jarvis_followup_again(tmp_path):
@@ -2486,3 +2486,102 @@ def test_new_version_is_tested_in_its_own_worktree(tmp_path):
     assert not ok and "test_broken" in msg
     assert "worktree" not in git("status", "--porcelain")                       # nothing left behind
     assert git("worktree", "list").count("\n") == 0
+
+
+# ---------------------------------------------------------------- phase 30: notes & journal
+def test_note_search_matches_words_not_exact_text(tmp_path):
+    from jarvis import notes as N
+    from jarvis.store import Store
+    s = Store(tmp_path / "j.db", encrypt=False)
+    s.add_note("note", "call the bank about the card")
+    s.add_note("note", "Rahul's number is 98450 12345")
+    s.add_note("journal", "good day, finished the installer")
+    assert [t for _, _, _, t in N.find(s, "bank")] == ["call the bank about the card"]
+    assert [t for _, _, _, t in N.find(s, "cards")] == ["call the bank about the card"]    # cards -> card
+    assert [t for _, _, _, t in N.find(s, "rahul number")] == ["Rahul's number is 98450 12345"]
+    assert N.find(s, "passport") == []
+    assert [t for _, _, _, t in N.find(s, kind="journal")] == ["good day, finished the installer"]
+    import time as _t
+    s.add_note("note", "old one", ts=_t.time() - 3 * 86400)
+    assert "old one" not in [t for _, _, _, t in N.find(s, when="today")]
+    assert "old one" in [t for _, _, _, t in N.find(s, when="week")]
+
+
+def test_notes_end_to_end_with_undo_and_delete(tmp_path):
+    import time as _t
+    j = _jarvis(tmp_path)
+    j.config.show_details = False
+    assert "call the bank" in j.handle("note: call the bank about the card")
+    assert "journal" in j.handle("add to my journal: good day, finished the installer").lower()
+    out = j.handle("what did i note about the bank?")
+    assert "call the bank about the card" in out
+    rows = j.take_results()
+    assert rows and rows[0]["source"] == "note"                      # clickable in the command bar
+    j.handle("note: wrong thing")
+    j.handle("undo")
+    assert "No notes" in j.handle("what did i note about wrong thing")   # undo removes a note you just made
+    assert "Deleted" in j.handle("delete the note about the bank")
+    assert "No notes" in j.handle("what did i note about the bank")
+    j.handle("undo")
+    assert "call the bank" in j.handle("what did i note about the bank")  # and brings a deleted one back
+    assert "journal" in j.handle("read my journal").lower()
+
+
+def test_note_this_uses_copied_text(tmp_path):
+    j = _jarvis(tmp_path)
+    j.config.show_details = False
+    j.screen._clip = lambda: ([], "Flight 6E 204, PNR XK7Q2M")
+    j.screen._explorer = lambda h: None
+    j.handle("note this")
+    assert "PNR XK7Q2M" in j.handle("what did i note about the flight")
+
+
+def test_memory_search_includes_notes(tmp_path):
+    j = _jarvis(tmp_path)
+    j.config.show_details = False
+    j.handle("note: wifi password is tiger42")
+    j.handle('search_memory(query="wifi password")')
+    rows = j.take_results()
+    assert rows and rows[0]["source"] == "note" and "tiger42" in rows[0]["text"]
+
+
+def test_notes_are_encrypted_at_rest(tmp_path):
+    from jarvis.store import Store
+    s = Store(tmp_path / "j.db", encrypt=True)
+    s.add_note("note", "secret pin 4321")
+    raw = (tmp_path / "j.db").read_bytes()
+    import sys as _sys
+    if _sys.platform == "win32":
+        assert b"secret pin 4321" not in raw                          # DPAPI: only your Windows account
+    assert s.notes()[0][3] == "secret pin 4321"
+
+
+def test_evening_briefing_mentions_todays_notes():
+    from jarvis.briefing import notes_lines
+    lines = notes_lines([("note", "call the bank"), ("note", "buy milk"), ("journal", "good day")])
+    assert "You noted 2 things today" in lines[0] and "call the bank" in lines[0]
+    assert "journal entry" in lines[1]
+    assert notes_lines([]) == []
+
+
+def test_note_rules_and_training_data():
+    import random
+    from datagen.generate_intents import TEACHES, gen_notes, Ctx
+    from jarvis.dsl.grammar import canonical
+    from jarvis.nlu.rule_parser import rule_parse
+    cases = {"note: call the bank about the card": 'note(text="call the bank about the card")',
+             "add to my journal: good day": 'note(kind=journal, text="good day")',
+             "note this": "note(text=this)", "what did i note about the bank?": 'find_notes(query="bank")',
+             "show today's notes": "find_notes(when=today)",
+             "read my journal from yesterday": "find_notes(kind=journal, when=yesterday)",
+             "delete the note about the bank": 'delete_note(query="bank")',
+             "kal 5 baje meeting hai note kar lo": 'note(text="kal 5 baje meeting hai")',
+             "find the meeting notes pdf": 'search_memory(ext=pdf, query="meeting notes")'}
+    for text, want in cases.items():
+        assert str(rule_parse(text)) == want, (text, rule_parse(text))
+    assert "notes" in TEACHES
+    r = random.Random(4)
+    progs = [canonical(gen_notes(Ctx(r, "train"))[0]) for _ in range(1500)]
+    for start in ("note(", "find_notes(", "delete_note("):
+        assert any(p.startswith(start) for p in progs)
+    assert any("kind=journal" in p for p in progs) and any("when=" in p for p in progs)

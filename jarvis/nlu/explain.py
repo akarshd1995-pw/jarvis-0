@@ -61,6 +61,17 @@ def _call(c) -> str:
         return f'open {a["name"]}'
     if n == "open_url":
         return "open the link you copied" if getattr(a["url"], "name", "") == "this" else f'open {a["url"]}'
+    if n == "note":
+        where = "your journal" if _v(a.get("kind", "")) == "journal" else "your notes"
+        return f"add to {where}: {_text(a['text'])}"
+    if n == "find_notes":
+        what = "journal entries" if _v(a.get("kind", "")) == "journal" else "notes"
+        about = f" about {_text(a['query'])}" if a.get("query") else ""
+        when = {"today": " from today", "yesterday": " from yesterday", "week": " from this week",
+                "month": " from this month"}.get(_v(a.get("when", "")), "")
+        return f"show your {what}{about}{when}"
+    if n == "delete_note":
+        return f'delete the note about "{a["query"]}"'
     if n == "open_result":
         return f"open result {a['n']}"
     if n == "open_folder":

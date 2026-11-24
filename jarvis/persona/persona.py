@@ -177,12 +177,21 @@ class Persona:
             return self._plan_training(d)
         if k == "directions":
             return self._plan_directions(d)
+        if k == "note":                                   # phase 30
+            return ("journal_saved" if d["kind"] == "journal" else "note_saved"), {"text": _short(d["text"], 90)}
+        if k == "notes":
+            return self._plan_notes(d)
+        if k == "note_deleted":
+            return "note_deleted", {"text": _short(d["text"], 80)}
+        if k == "note_read":
+            return "", {"summary": d.get("text", "")}
         if k == "undo":
             if d.get("cancelled"):
                 return "undo_cancelled", {}
             if not d.get("count"):
                 return "undo_none", {}
-            return "undo", {"count": self._num(d["count"], False), "Count": self._num(d["count"], True)}
+            return "undo", {"count": self._num(d["count"], False), "Count": self._num(d["count"], True),
+                            "changes": "change" if d["count"] == 1 else "changes"}
         return "", {"summary": r.summary}
 
     def plan_confirm(self, preview: ActionResult) -> tuple[str, dict]:
@@ -318,6 +327,22 @@ class Persona:
             return "directions_noorigin", {"dest": dest}
         return "directions_open", {"dest": dest, "mode": mode}
 
+    def _plan_notes(self, d: dict) -> tuple[str, dict]:
+        what = "journal entries" if d.get("kind") == "journal" else "notes"
+        when = {"today": " today", "yesterday": " yesterday", "week": " this week", "month": " this month"}.get(
+            d.get("when") or "", "")
+        about = f' about "{d["query"]}"' if d.get("query") else ""
+        rows = d.get("results") or []
+        if not rows:
+            return "notes_none", {"what": what, "about": about, "when": when}
+        items = "; ".join(_short(r["text"], 70) + f" ({self.ago(r['mtime'])})" for r in rows[:3])
+        more = len(rows) - 3
+        return ("notes_found_one" if len(rows) == 1 else "notes_found"), {
+            "what": what, "thing": "journal entry" if d.get("kind") == "journal" else "note",
+            "about": about, "when": when, "count": self._num(len(rows), False),
+            "Count": self._num(len(rows), True),
+            "items": items + (f"; and {more} more" if more > 0 else "")}
+
     def _plan_memory(self, d: dict) -> tuple[str, dict]:
         what = d.get("query") or ("your latest screenshot" if d.get("where") == "screenshots" else
                                   f"your latest {files_word(2, d['ext'])}" if d.get("ext") else "that")
@@ -328,6 +353,8 @@ class Persona:
         top = d["results"][0]
         if top["source"] == "web":
             place = "your browser history"
+        elif top["source"] == "note":
+            place = "your journal" if top.get("kind") == "journal" else "your notes"
         else:
             import os
             place = os.path.basename(os.path.dirname(top["path"])) or "your files"
@@ -426,6 +453,11 @@ class Persona:
 
     def unparsed(self) -> str:
         return self.speak("unparsed", {})
+
+
+def _short(text: str, n: int) -> str:
+    text = " ".join(str(text).split())
+    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
 
 
 def render_template(tpl: str, fields: dict, address: str = "") -> str:

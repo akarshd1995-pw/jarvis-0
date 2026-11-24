@@ -37,7 +37,7 @@ DRY = {
     "mood": "mood(kind=happy)", "open_result": "open_result(n=1)",
 }
 LIVE_ACTIONS = {"list_files", "move_files", "copy_files", "delete_files", "remind", "search_memory", "undo",
-                "open_result"}
+                "open_result", "note", "find_notes", "delete_note"}
 
 
 @dataclass
@@ -169,6 +169,18 @@ def run(log=print) -> list[Check]:
                 MI.close(cfg.data_dir)
                 return any("invoice" in x["title"] for x in rows), r[:120]
             check("memory search finds a file by name", memory)
+
+            # notes and journal (phase 30)
+            def notes():
+                ok1 = reply_ok('note(text="call the bank about the card")')[0]
+                ok2 = reply_ok('note(text="finished the installer", kind=journal)')[0]
+                r = j.handle('find_notes(query="bank")')
+                found = "call the bank" in r
+                gone = reply_ok('delete_note(query="bank")')[0] and \
+                    "No notes" in j.handle('find_notes(query="bank")')
+                back = reply_ok("undo()")[0] and "call the bank" in j.handle('find_notes(query="bank")')
+                return all((ok1, ok2, found, gone, back)), r[:100]
+            check("notes: save, find, delete, undo", notes)
             # 5. everything else as a preview
             from .actions.base import Ctx
             ctx = Ctx(cfg, j.store, "selftest")

@@ -132,8 +132,14 @@ def search_memory(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     hits = idx.search(query, ext=ext, newer_than_s=newer, older_than_s=older, where=where, embedder=emb)
     results = [{"title": h.title, "path": h.path, "source": h.source, "ext": h.ext, "mtime": h.mtime,
                 "snippet": h.snippet, "screenshot": h.screenshot} for h in hits]
-    return ActionResult(f"{len(hits)} match(es) for {query!r}", [h.title for h in hits], kind="memory",
-                        data={"query": query, "ext": ext, "where": where, "count": len(hits), "results": results,
+    if query and where in (None, "files") and not ext and hasattr(ctx.store, "notes"):   # phase 30: your notes too
+        from .. import notes as N
+        found = N.find(ctx.store, query, limit=3)
+        notes_rows = [{"title": t[:120], "text": t, "path": f"note:{i}", "source": "note", "kind": k, "mtime": ts,
+                       "snippet": "your " + k} for i, ts, k, t in found if N.score(query, t) >= 1.0]
+        results = notes_rows + results
+    return ActionResult(f"{len(results)} match(es) for {query!r}", [r["title"] for r in results], kind="memory",
+                        data={"query": query, "ext": ext, "where": where, "count": len(results), "results": results,
                               "indexed": idx.count()})
 
 

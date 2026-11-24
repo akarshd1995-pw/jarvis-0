@@ -6,7 +6,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .actions import control, files, system, training, maps
+from .actions import control, files, system, training, maps, notes
 from .actions.base import ActionResult, Ctx
 from .config import Config
 from .dsl.grammar import Program
@@ -19,6 +19,9 @@ REGISTRY: dict[str, Handler] = {
     "open_app": system.open_app,
     "open_url": system.open_url,
     "directions": maps.directions,
+    "note": notes.note,
+    "find_notes": notes.find_notes,
+    "delete_note": notes.delete_note,
     "open_folder": system.open_folder,
     "remind": system.remind,
     "system": system.system,
@@ -116,7 +119,10 @@ class Executor:
         done, failed = [], []
         for entry_id, _op, inverse in entries:   # newest first; one stuck file doesn't stop the rest
             try:
-                files.apply_inverse(inverse)
+                if inverse.get("op") in ("note_forget", "note_restore"):          # phase 30: notes
+                    self.store.set_note_deleted(inverse["id"], inverse["op"] == "note_forget")
+                else:
+                    files.apply_inverse(inverse)
                 done.append(entry_id)
             except Exception as e:
                 name = Path(inverse.get("src") or inverse.get("path") or "?").name

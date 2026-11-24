@@ -24,6 +24,9 @@ ACTION_TIERS: dict[str, Tier] = {
     "maintenance": Tier.SAFE,
     "directions": Tier.SAFE,
     "open_result": Tier.SAFE,
+    "note": Tier.SAFE,
+    "find_notes": Tier.SAFE,
+    "delete_note": Tier.DESTRUCTIVE,      # always asks, showing which note; undo brings it back
     "unsupported": Tier.SAFE,
     "search_web": Tier.SAFE,
     "play_media": Tier.SAFE,

@@ -692,6 +692,8 @@ class Jarvis:
         if not 1 <= n <= len(rows):
             raise ContextError(f"I only showed {len(rows)} result{'s' * (len(rows) != 1)}")
         row = rows[n - 1]
+        if row.get("source") == "note":                # "open the second one" after a notes list: read it out
+            return ActionResult(row.get("text", row["title"]), kind="note_read", data={"text": row.get("text", "")})
         if not dry_run:
             if row.get("source") == "web":
                 import webbrowser
@@ -709,7 +711,7 @@ class Jarvis:
             report = self.executor.run(prog)
         for r in report.results:                    # search / file list: rows the command bar can show and open
             rows = None
-            if r.kind == "memory" and r.data.get("results"):
+            if r.kind in ("memory", "notes") and r.data.get("results"):
                 rows = r.data["results"]
             elif r.kind == "list" and r.data.get("paths"):
                 rows = [self._file_row(p) for p in r.data["paths"]]

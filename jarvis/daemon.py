@@ -87,6 +87,7 @@ class Jarvis:
                         st = idx.crawl(self.memory_roots())
                         if self.config.memory_browser:
                             idx.add_history(browser.history())
+                        self._ocr_pass(idx)
                         log.info("memory index: %s (%s)", idx.count(), st)
                     except Exception as e:
                         log.warning("memory indexing failed: %s", e)
@@ -96,12 +97,35 @@ class Jarvis:
         t.start()
         return t
 
+    def _ocr_pass(self, idx, limit: int = 150) -> int:
+        """Read the text in up to `limit` new screenshots/images with our OCR models (if trained)."""
+        if not self.config.memory_ocr:
+            return 0
+        if getattr(self, "_ocr", None) is None:
+            from .memory.ocr import OCR
+            try:
+                self._ocr = OCR.load(PROJECT_ROOT / "checkpoints")
+            except Exception as e:
+                log.warning("OCR unavailable: %s", e)
+                self._ocr = None
+            if self._ocr is None:
+                return 0
+        done = 0
+        for path in idx.needs_ocr(limit):
+            try:
+                text = self._ocr.read(path)
+            except Exception:
+                text = ""                        # unreadable image: don't try again until it changes
+            idx.set_text(path, text)
+            done += 1
+        return done
+
     # ------------------------------------------------------------ briefings (phase 24)
     @property
     def job_logs(self) -> dict:
         ck = PROJECT_ROOT / "checkpoints"
         return {"Training command model": ck / "train_log.txt", "Training reply model": ck / "reply_log.txt",
-                "Self-improvement": ck / "improve_log.txt"}
+                "Self-improvement": ck / "improve_log.txt", "Training OCR": ck / "ocr_log.txt"}
 
     # ------------------------------------------------------------ self-improving loop (phase 14)
     def start_improver(self, deliver) -> threading.Thread:

@@ -71,8 +71,9 @@ class MemoryIndex:
         cur = self.db.execute("SELECT id FROM docs WHERE path = ?", (path,))
         row = cur.fetchone()
         if row:
-            self.db.execute("UPDATE docs SET title=?, ext=?, folder=?, mtime=?, size=?, screenshot=?, has_text=? "
-                            "WHERE id=?", (title, ext, folder, mtime, size, int(screenshot), int(bool(body)), row[0]))
+            self.db.execute("UPDATE docs SET title=?, ext=?, folder=?, mtime=?, size=?, screenshot=?, has_text=?, "
+                            "ocr=0 WHERE id=?", (title, ext, folder, mtime, size, int(screenshot), int(bool(body)),
+                                                 row[0]))
             self.db.execute("DELETE FROM fts WHERE rowid = ?", (row[0],))
             rid = row[0]
         else:
@@ -157,12 +158,23 @@ class MemoryIndex:
             self.db.execute("UPDATE docs SET has_text=?, ocr=? WHERE id=?", (int(bool(text)), int(ocr), row[0]))
             self.db.commit()
 
+    def needs_ocr(self, limit: int = 100) -> list[str]:
+        """Screenshots first, then other images (under 20 MB) that haven't been read yet, newest first."""
+        from .ocr import IMAGE_EXT
+        exts = sorted(IMAGE_EXT)
+        with self.lock:
+            rows = self.db.execute(
+                f"SELECT path FROM docs WHERE source='file' AND ocr=0 AND size < 20000000 AND ext IN "
+                f"({','.join('?' * len(exts))}) ORDER BY screenshot DESC, mtime DESC LIMIT ?", exts + [limit]).fetchall()
+        return [r[0] for r in rows]
+
     # ------------------------------------------------------------ reading
     def count(self) -> dict:
         with self.lock:
             rows = dict(self.db.execute("SELECT source, COUNT(*) FROM docs GROUP BY source").fetchall())
             shots = self.db.execute("SELECT COUNT(*) FROM docs WHERE screenshot = 1").fetchone()[0]
-        return {"files": rows.get("file", 0), "web": rows.get("web", 0), "screenshots": shots}
+            read = self.db.execute("SELECT COUNT(*) FROM docs WHERE ocr = 1").fetchone()[0]
+        return {"files": rows.get("file", 0), "web": rows.get("web", 0), "screenshots": shots, "images_read": read}
 
     @staticmethod
     def _fts_query(query: str, any_word: bool = False) -> str:

@@ -1264,3 +1264,60 @@ def test_old_reply_model_never_speaks_for_newer_reply_types():
     reply = p.result(r)
     assert "can't search" not in reply and "Screenshot 1.png" in reply, reply
     assert p.last_source == "template"
+
+
+# ---------------------------------------------------------------- OCR (phase 7 step 2)
+def test_ocr_training_data_renders():
+    import random
+    from training.ocr.charset import decode_greedy, encode
+    from training.ocr.fonts import find_fonts
+    from training.ocr.render import FontBank, render_line, render_page
+    from training.ocr.render import _need_steps, prepare
+    bank = FontBank(find_fonts())
+    r = random.Random(0)
+    for _ in range(50):
+        a, s = render_line(r, bank)
+        ids = encode(s)
+        a = prepare(a, ids)
+        assert a.shape[0] == 32 and a.shape[1] % 4 == 0 and a.shape[1] // 4 >= _need_steps(ids)
+    assert decode_greedy([encode("h")[0], encode("h")[0], 0, encode("h")[0], encode("i")[0]]) == "hhi"
+    img, mask, boxes = render_page(r, bank)
+    assert img.shape == (384, 640) and mask.shape == (96, 160) and boxes and mask.max() == 1.0
+
+
+def test_ocr_line_boxes_recover_lines():
+    import random
+    from jarvis.memory.ocr import line_boxes
+    from training.ocr.fonts import find_fonts
+    from training.ocr.render import FontBank, render_page
+
+    def iou(a, b):
+        ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
+        iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
+        i = ix * iy
+        return i / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - i)
+
+    bank = FontBank(find_fonts())
+    hit = tot = 0
+    for seed in range(15):
+        img, mask, gt = render_page(random.Random(seed), bank)
+        boxes = line_boxes(mask, 384, 640)                 # a perfect finder's output
+        for g in gt:
+            tot += 1
+            hit += max([iou(g[:4], b) for b in boxes] or [0]) > 0.5
+    assert hit / tot > 0.85, hit / tot
+
+
+def test_ocr_text_is_indexed(tmp_path):
+    from jarvis.memory.index import MemoryIndex
+    shots = tmp_path / "Pictures" / "Screenshots"
+    shots.mkdir(parents=True)
+    (shots / "Screenshot 2026-11-20 101500.png").write_bytes(b"png")
+    idx = MemoryIndex(tmp_path / "m.sqlite")
+    idx.crawl([tmp_path / "Pictures"])
+    todo = idx.needs_ocr()
+    assert len(todo) == 1
+    idx.set_text(todo[0], "Login failed: invalid password\nForgot password?")
+    assert idx.needs_ocr() == []
+    hits = idx.search("login error", where="screenshots")          # "error" isn't there, "login" is: any-word
+    assert hits and hits[0].title.startswith("Screenshot") and "Login" in hits[0].snippet

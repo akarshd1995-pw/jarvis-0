@@ -131,13 +131,26 @@ class Config:
     model_checkpoint: str = "checkpoints/intent.pt"
     tokenizer_path: str = "checkpoints/tokenizer.json"
 
+    # Not settings: where Jarvis keeps its data, and the model files it was built with
+    NOT_SAVED = ("data_dir", "model_checkpoint", "tokenizer_path")
+
     def save(self, path: Path | None = None) -> Path:
-        """Write user-editable settings to config.json (used by the settings window)."""
+        """Write every setting to config.json (the settings window calls this). All fields are saved, so a new
+        setting can never be forgotten; keys this version doesn't know (from a newer one) are kept."""
+        from dataclasses import fields
         path = path or (self.data_dir / "config.json")
-        keys = ["monitor_enabled", "alert_gpu_temp", "alert_disk_free_gb", "alert_battery", "alert_cooldown_min",
-                "hud_enabled", "hud_hotkey", "hud_corner", "hud_opacity", "hud_click_through", "persona_name", "persona_address", "persona_tone", "show_details", "persona_model", "hotkey", "folders", "apps", "allowed_roots", "watch_folders", "min_confidence", "confirm_actions",
-                "encrypt_logs", "keep_window_titles", "model_backend", "focus_poll_seconds"]
-        path.write_text(json.dumps({k: getattr(self, k) for k in keys}, indent=2), encoding="utf-8")
+        try:
+            out = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except (OSError, ValueError):
+            out = {}
+        for f in fields(self):
+            if f.name in self.NOT_SAVED:
+                continue
+            v = getattr(self, f.name)
+            out[f.name] = str(v) if isinstance(v, Path) else v
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)                       # never a half-written settings file
         return path
 
     @property

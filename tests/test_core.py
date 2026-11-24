@@ -2059,3 +2059,27 @@ def test_directions_place_cleanup(tmp_path):
                http=http, open_url=opened.append)
     assert sent[0]["destination"]["address"] == "ayodhya" and sent[0]["origin"]["address"] == "HSR Layout, Bengaluru"
     assert "destination=ayodhya" in opened[0] and "it+to" not in opened[0]
+
+
+def test_every_setting_survives_save_and_restart(tmp_path):
+    from dataclasses import fields
+    from jarvis.config import Config
+    cfg = Config(data_dir=tmp_path)
+    cfg.places = {"home": "HSR Layout, Bengaluru", "work": "Manyata Tech Park"}
+    cfg.maps_api_key, cfg.maps_osm = "dpapi:abc==", False
+    cfg.briefing_auto, cfg.clarify, cfg.learn_from_usage = False, False, False
+    cfg.memory_folders = ["Downloads", "D:/work"]
+    p = cfg.save()
+    raw = p.read_text(encoding="utf-8")
+    back = Config.load(p)
+    for f in fields(cfg):
+        if f.name in Config.NOT_SAVED or f.name == "folders":
+            continue
+        assert getattr(back, f.name) == getattr(cfg, f.name), f.name        # nothing is dropped on restart
+    assert "HSR Layout" in raw and "dpapi:abc==" in raw
+    import json
+    data = json.loads(raw)
+    data["from_a_newer_version"] = 1
+    p.write_text(json.dumps(data), encoding="utf-8")
+    Config.load(p).save(p)
+    assert "from_a_newer_version" in p.read_text(encoding="utf-8")         # unknown keys are kept

@@ -62,8 +62,27 @@ class Jarvis:
         REGISTRY["briefing"] = self._briefing_action
         REGISTRY["maintenance"] = self._maintenance_action
         self.watchdog = None
+        try:                                           # phase 40: finish or roll back interrupted file steps
+            self.recovered = self.executor.recover()
+        except Exception as e:
+            log.warning("recovery check failed: %s", e)
+            self.recovered = {}
         self.briefings = briefing.Scheduler(config.data_dir / "briefing_state.json", config.briefing_morning,
                                             config.briefing_evening, enabled=config.briefing_auto)
+
+    def recovery_message(self) -> str:
+        r = self.recovered or {}
+        fin, back, miss = r.get("finished", []), r.get("rolled_back", []), r.get("missing", [])
+        if not (fin or back or miss):
+            return ""
+        parts = []
+        if fin:
+            parts.append(f"finished {len(fin)} file move{'s' * (len(fin) != 1)}")
+        if back:
+            parts.append(f"rolled back {len(back)} that hadn't completed (the originals are where they were)")
+        if miss:
+            parts.append(f"couldn't find {len(miss)}: " + ", ".join(miss[:3]))
+        return "I was interrupted in the middle of a file operation last time, so I " + "; ".join(parts) + "."
 
     def take_results(self) -> list[dict]:
         out, self.last_results = self.last_results, []
@@ -612,6 +631,8 @@ def main() -> None:
         jarvis.start_indexer()
         jarvis.start_maintenance()
         print("Jarvis-0 (cli). Ctrl+C to quit.")
+        if jarvis.recovery_message():
+            print(jarvis.recovery_message())
         try:
             while True:
                 print(jarvis.handle(input("> ")))
@@ -735,6 +756,8 @@ def main() -> None:
     if hk.error:
         log.warning(hk.error)
     bar.show()
+    if jarvis.recovery_message():
+        bar.post("message", jarvis.recovery_message())
     if args.safe_mode:
         bar.post("message", "I restarted in safe mode after crashing several times: rules only, no HUD or "
                             "background services. Type /doctor to check what's wrong; the next start is normal "

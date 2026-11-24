@@ -228,7 +228,25 @@ class Persona:
         if r.kind in ("briefing", "report"):         # already written in full (briefings, health check)
             self.last_source = "briefing"
             return r.data["text"]
-        return self.speak(*self.plan(r))
+        failed = r.data.get("failed") if r.kind in ("files", "undo") else None
+        if failed and not r.data.get("count"):        # nothing worked: say so, never "no files matched"
+            what = {"move": "move", "copy": "copy", "delete": "delete"}.get(r.data.get("op"), "undo")
+            return f"I couldn't {what} any of them{self._addr()}. " + self.failures_line(failed)
+        text = self.speak(*self.plan(r))
+        if failed:
+            text += " " + self.failures_line(failed, r.data.get("requested"))
+        return text
+
+    def _addr(self) -> str:
+        return f", {self.address}" if self.address and self.tone == "butler" else ""
+
+    def failures_line(self, failed: list, requested: int | None = None) -> str:
+        """'2 couldn't be moved: report.xlsx (it's open in another app), clip.mp4 (there isn't enough disk space).'"""
+        shown = "; ".join(f"{n} ({why})" for n, why in failed[:3])
+        more = f"; and {len(failed) - 3} more" if len(failed) > 3 else ""
+        n = len(failed)
+        head = f"{n} file{'s' * (n != 1)} didn't go through" if requested else "Details"
+        return f"{head}: {shown}{more}. Everything else is done and the originals of the failed ones are untouched."
 
     def confirm_question(self, preview: ActionResult) -> str:
         return self.speak(*self.plan_confirm(preview))

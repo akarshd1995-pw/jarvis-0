@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -100,9 +101,18 @@ class Executor:
         if needs_confirmation("undo", getattr(self.config, "confirm_actions", None)) and \
                 not self.confirm(Tier.CONFIRM, f"Undo {len(entries)} operation(s) from last command?", []):
             return ActionResult("Undo cancelled.", kind="undo", data={"count": 0, "cancelled": True})
-        done = []
-        for entry_id, _op, inverse in entries:   # newest first
-            files.apply_inverse(inverse)
-            done.append(entry_id)
+        done, failed = [], []
+        for entry_id, _op, inverse in entries:   # newest first; one stuck file doesn't stop the rest
+            try:
+                files.apply_inverse(inverse)
+                done.append(entry_id)
+            except Exception as e:
+                name = Path(inverse.get("src") or inverse.get("path") or "?").name
+                failed.append((name, files.safeops.reason(e)))
         self.store.mark_undone(done)
-        return ActionResult(f"Undid {len(done)} operation(s).", kind="undo", data={"count": len(done)})
+        return ActionResult(f"Undid {len(done)} of {len(entries)} operation(s).", kind="undo",
+                            data={"count": len(done), "failed": failed, "requested": len(entries)})
+
+    def recover(self) -> dict:
+        """Finish or roll back file steps interrupted by a crash or power cut (run at start-up)."""
+        return files.safeops.recover(self.store)

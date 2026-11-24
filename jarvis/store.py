@@ -47,6 +47,11 @@ class Store:
         self._lock = threading.Lock()
         self._db = sqlite3.connect(str(path), check_same_thread=False)
         self._db.executescript(SCHEMA)
+        cols = {r[1] for r in self._db.execute("PRAGMA table_info(journal)")}
+        if "status" not in cols:                 # phase 40: write-ahead journal (existing rows are done)
+            self._db.execute("ALTER TABLE journal ADD COLUMN status TEXT NOT NULL DEFAULT 'done'")
+        if "detail" not in cols:
+            self._db.execute("ALTER TABLE journal ADD COLUMN detail TEXT")
         self._db.commit()
 
     # ------------------------------------------------------------ events
@@ -73,15 +78,39 @@ class Store:
                              (batch_id, time.time(), op, json.dumps(inverse)))
             self._db.commit()
 
+    def begin(self, batch_id: str, op: str, inverse: dict, detail: dict) -> int:
+        """Write-ahead: record a step as pending before touching the file."""
+        with self._lock:
+            cur = self._db.execute("INSERT INTO journal(batch_id, ts, op, inverse, status, detail) "
+                                   "VALUES (?,?,?,?,'pending',?)",
+                                   (batch_id, time.time(), op, json.dumps(inverse), json.dumps(detail)))
+            self._db.commit()
+            return cur.lastrowid
+
+    def finish(self, jid: int) -> None:
+        with self._lock:
+            self._db.execute("UPDATE journal SET status = 'done' WHERE id = ?", (jid,))
+            self._db.commit()
+
+    def abort(self, jid: int) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM journal WHERE id = ?", (jid,))
+            self._db.commit()
+
+    def pending(self) -> list[tuple[int, str, dict]]:
+        with self._lock:
+            rows = self._db.execute("SELECT id, op, detail FROM journal WHERE status = 'pending' ORDER BY id").fetchall()
+        return [(i, op, json.loads(d or "{}")) for i, op, d in rows]
+
     def last_batch(self) -> tuple[str, list[tuple[int, str, dict]]] | None:
         with self._lock:
             row = self._db.execute(
-                "SELECT batch_id FROM journal WHERE undone = 0 ORDER BY id DESC LIMIT 1").fetchone()
+                "SELECT batch_id FROM journal WHERE undone = 0 AND status = 'done' ORDER BY id DESC LIMIT 1").fetchone()
             if not row:
                 return None
             rows = self._db.execute(
-                "SELECT id, op, inverse FROM journal WHERE batch_id = ? AND undone = 0 ORDER BY id DESC",
-                (row[0],)).fetchall()
+                "SELECT id, op, inverse FROM journal WHERE batch_id = ? AND undone = 0 AND status = 'done' "
+                "ORDER BY id DESC", (row[0],)).fetchall()
         return row[0], [(i, op, json.loads(inv)) for i, op, inv in rows]
 
     def mark_undone(self, ids: list[int]) -> None:

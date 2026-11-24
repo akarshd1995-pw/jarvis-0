@@ -1398,10 +1398,12 @@ def test_saved_folders_that_dont_exist_use_the_real_ones(tmp_path):
 def test_single_instance():
     from jarvis.reliability import SingleInstance
     shown = []
-    a = SingleInstance(port=47999)
+    import random
+    port = random.randint(40000, 60000)
+    a = SingleInstance(port=port)
     assert a.acquire()
     a.on_show = lambda: shown.append(1)
-    b = SingleInstance(port=47999)
+    b = SingleInstance(port=port)
     assert not b.acquire() and b.ping_existing()
     import time
     time.sleep(0.2)
@@ -1500,3 +1502,108 @@ def test_health_and_backup_commands():
     from jarvis.nlu.rule_parser import rule_parse
     assert str(rule_parse("run a health check")) == "maintenance(action=health_check)"
     assert str(rule_parse("back up yourself")) == "maintenance(action=backup)"
+
+
+# ---------------------------------------------------------------- crash-safe actions (phase 40)
+def _files(d, names):
+    d.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        (d / n).write_bytes(n.encode() * 50)
+    return [d / n for n in names]
+
+
+def test_locked_file_doesnt_stop_the_batch(tmp_path, monkeypatch):
+    import shutil
+    from jarvis.actions import safeops
+    from jarvis.actions.files import _unique_target
+    from jarvis.store import Store
+    store = Store(tmp_path / "j.db", encrypt=False)
+    src = _files(tmp_path / "dl", ["a.pdf", "report.xlsx", "c.pdf"])
+    real_move = shutil.move
+
+    def move(a, b):
+        if a.endswith("report.xlsx"):
+            e = PermissionError("The process cannot access the file because it is being used by another process")
+            e.winerror = 32
+            raise e
+        return real_move(a, b)
+    monkeypatch.setattr(safeops.shutil, "move", move)
+    monkeypatch.setattr(safeops.time, "sleep", lambda s: None)
+    done, failed = safeops.transfer(store, "b1", src, tmp_path / "arc", "move", _unique_target)
+    assert [t.name for _, t in done] == ["a.pdf", "c.pdf"]
+    assert failed == [("report.xlsx", "it's open in another app")]
+    assert (tmp_path / "dl" / "report.xlsx").exists()                     # original untouched
+    assert store.pending() == [] and len(store.last_batch()[1]) == 2      # only real moves are undoable
+
+
+def test_not_enough_space_moves_nothing(tmp_path, monkeypatch):
+    from collections import namedtuple
+    from jarvis.actions import safeops
+    from jarvis.actions.files import _unique_target
+    from jarvis.store import Store
+    store = Store(tmp_path / "j.db", encrypt=False)
+    src = _files(tmp_path / "dl", ["big.iso"])
+    monkeypatch.setattr(safeops.shutil, "disk_usage", lambda p: namedtuple("U", "total used free")(1, 1, 10))
+    done, failed = safeops.transfer(store, "b1", src, tmp_path / "arc", "copy", _unique_target)
+    assert done == [] and "disk space" in failed[0][1] and src[0].exists()
+
+
+def test_copy_that_arrives_damaged_is_cleaned_up(tmp_path, monkeypatch):
+    from jarvis.actions import safeops
+    from jarvis.actions.files import _unique_target
+    from jarvis.store import Store
+    store = Store(tmp_path / "j.db", encrypt=False)
+    src = _files(tmp_path / "dl", ["a.pdf"])
+    monkeypatch.setattr(safeops.shutil, "copy2", lambda a, b: open(b, "wb").write(b"half"))
+    done, failed = safeops.transfer(store, "b1", src, tmp_path / "arc", "copy", _unique_target)
+    assert done == [] and "intact" in failed[0][1]
+    assert not (tmp_path / "arc" / "a.pdf").exists() and src[0].exists()
+
+
+def test_recovery_after_a_crash(tmp_path):
+    from jarvis.actions import safeops
+    from jarvis.store import Store
+    store = Store(tmp_path / "j.db", encrypt=False)
+    dl, arc = tmp_path / "dl", tmp_path / "arc"
+    _files(dl, ["notstarted.pdf", "halfcopy.mp4", "copiedboth.zip"])
+    _files(arc, ["finished.pdf", "copiedboth.zip"])
+    (arc / "halfcopy.mp4").write_bytes(b"partial")
+    size = lambda n: len(n.encode() * 50)                                  # noqa: E731
+    for name in ["notstarted.pdf", "finished.pdf", "halfcopy.mp4", "copiedboth.zip"]:
+        store.begin("b1", "move", {"op": "move", "src": str(arc / name), "dest": str(dl / name)},
+                    {"kind": "move", "src": str(dl / name), "target": str(arc / name), "size": size(name)})
+    r = safeops.recover(store)
+    assert sorted(r["finished"]) == ["copiedboth.zip", "finished.pdf"]
+    assert sorted(r["rolled_back"]) == ["halfcopy.mp4", "notstarted.pdf"]
+    assert (dl / "halfcopy.mp4").exists() and not (arc / "halfcopy.mp4").exists()   # original kept
+    assert not (dl / "copiedboth.zip").exists() and (arc / "copiedboth.zip").exists()
+    assert store.pending() == [] and len(store.last_batch()[1]) == 2                  # finished ones undoable
+
+
+def test_undo_carries_on_past_a_stuck_file(tmp_path, env):
+    from jarvis.daemon import Jarvis
+    cfg, store, dl, arc = env
+    for n in ("x1.pdf", "x2.pdf"):
+        (dl / n).write_bytes(b"x")
+    j = Jarvis(cfg, lambda *a: True, data_root=tmp_path / "d")
+    j.config.show_details = False
+    j.config.confirm_actions = []
+    j.handle("move pdfs from downloads to archive")
+    moved = sorted(p.name for p in arc.iterdir() if p.name.startswith("x"))
+    assert moved == ["x1.pdf", "x2.pdf"]
+    (arc / "x1.pdf").unlink()                                                     # deleted by you since
+    reply = j.handle("undo")
+    assert (dl / "x2.pdf").exists() and "x1.pdf" in reply and "moved or deleted" in reply, reply
+
+
+def test_failure_reply_is_honest():
+    from jarvis.actions.base import ActionResult
+    from jarvis.persona.persona import Persona
+    p = Persona("Jarvis", "sir", "butler")
+    d = {"op": "move", "count": 10, "dry": False, "src": "Downloads", "dest": "Archive", "new_folder": False,
+         "ext": "pdf", "older_than": None, "newer_than": None, "name_contains": None, "requested": 12,
+         "failed": [("report.xlsx", "it's open in another app"), ("big.mp4", "there isn't enough disk space")]}
+    text = p.result(ActionResult("", kind="files", data=d))
+    assert "2 files didn't go through" in text and "report.xlsx (it's open in another app)" in text
+    none = p.result(ActionResult("", kind="files", data={**d, "count": 0}))
+    assert none.startswith("I couldn't move any of them")

@@ -98,8 +98,10 @@ class SingleInstance:
 
     def acquire(self) -> bool:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):              # Windows: nobody else may share the port
             s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:                                                   # elsewhere: reuse right after a restart
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", self.port))
         except OSError:

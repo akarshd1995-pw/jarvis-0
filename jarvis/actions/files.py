@@ -9,6 +9,7 @@ from pathlib import Path
 from ..dsl.grammar import Duration
 from .. import filetypes
 from ..safety import MAX_FILES_PER_ACTION, SafetyError, check_path
+from . import safeops
 from .base import ActionResult, Ctx
 
 
@@ -78,17 +79,12 @@ def _transfer(args: dict, ctx: Ctx, dry_run: bool, copy: bool) -> ActionResult:
     if dry_run:
         return ActionResult(f"Will {verb} {len(files)} file(s) from {src} to {dest}", preview, kind="files",
                             data=_facts(args, len(files), op=verb, dry=True))
-    dest.mkdir(parents=True, exist_ok=True)
-    for f in files:
-        target = _unique_target(dest, f.name)
-        if copy:
-            shutil.copy2(f, target)
-            ctx.store.record(ctx.batch_id, "copy", {"op": "remove", "path": str(target)})
-        else:
-            shutil.move(str(f), str(target))
-            ctx.store.record(ctx.batch_id, "move", {"op": "move", "src": str(target), "dest": str(f)})
-    return ActionResult(f"{verb.capitalize()}d {len(files)} file(s) to {dest}", preview, kind="files",
-                        data=_facts(args, len(files), op=verb))
+    done, failed = safeops.transfer(ctx.store, ctx.batch_id, files, dest, "copy" if copy else "move",
+                                    _unique_target)
+    data = _facts(args, len(done), op=verb)
+    data.update(failed=failed, requested=len(files))
+    return ActionResult(f"{verb.capitalize()}d {len(done)} of {len(files)} file(s) to {dest}"
+                        + (f"; {len(failed)} failed" if failed else ""), preview, kind="files", data=data)
 
 
 def move_files(args, ctx, dry_run):
@@ -107,21 +103,21 @@ def delete_files(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
         return ActionResult(f"Will delete {len(files)} file(s) from {src} (recoverable via undo)", preview,
                             kind="files", data=_facts(args, len(files), op="delete", dry=True))
     trash = ctx.config.trash_dir / ctx.batch_id
-    trash.mkdir(parents=True, exist_ok=True)
-    for f in files:
-        target = _unique_target(trash, f.name)
-        shutil.move(str(f), str(target))
-        ctx.store.record(ctx.batch_id, "delete", {"op": "move", "src": str(target), "dest": str(f)})
-    return ActionResult(f"Deleted {len(files)} file(s) (kept in Jarvis trash)", preview, kind="files",
-                        data=_facts(args, len(files), op="delete"))
+    done, failed = safeops.transfer(ctx.store, ctx.batch_id, files, trash, "trash", _unique_target)
+    data = _facts(args, len(done), op="delete")
+    data.update(failed=failed, requested=len(files))
+    return ActionResult(f"Deleted {len(done)} of {len(files)} file(s) (kept in Jarvis trash)", preview,
+                        kind="files", data=data)
 
 
 def apply_inverse(inv: dict) -> None:
     if inv["op"] == "move":
-        dest = Path(inv["dest"])
+        src, dest = Path(inv["src"]), Path(inv["dest"])
+        if not src.exists() and dest.exists():
+            return                                       # already back where it was (an interrupted undo)
         dest.parent.mkdir(parents=True, exist_ok=True)
         target = dest if not dest.exists() else _unique_target(dest.parent, dest.name)
-        shutil.move(inv["src"], str(target))
+        safeops._retry(lambda: shutil.move(str(src), str(target)))
     elif inv["op"] == "remove":
         Path(inv["path"]).unlink(missing_ok=True)
     elif inv["op"] == "cancel_reminder":

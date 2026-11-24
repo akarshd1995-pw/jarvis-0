@@ -9,11 +9,16 @@ voice and name; no film assets or actor voice.
 open datasets. No pretrained models, including for conversation: open questions are handled by
 offline knowledge Q&A (phase 26) plus a small conversation model of our own (phase 27).
 
-**Build order:** 4 → 22 → 25 → 5 → 23 → 24 → 14 → 7 → 6 → 27 → 12 → 15, then the rest (26 Offline Q&A is parked for later).
+**Build order:** 4 → 22 → 25 → 5 → 23 → 24 → 14 → 7 → **29 → 40 → 39 → 6 → 38 → 44 → 41 → 42** → 30 → 31 → 32 → 33 → 43 → 27 → 12 → 34 → 35 → 36 → 37 → 15, then the rest (26 Offline Q&A is parked for later).
 - **4, 22, 25:** it feels like JARVIS. It runs properly, replies in character, and has the HUD.
 - **5, 23, 24:** it runs and watches your machines, and briefs you.
 - **14:** every day of use improves it automatically.
 - **7, 6, 27:** it remembers and holds a conversation.
+- **29, 40, 39, 6, 38, 44, 41, 42:** it's robust. It never falls over, never half-finishes an action, learns from
+  how you really talk, asks when unsure, understands "this" and "here", works on any Windows setup, stays light,
+  and never ships a broken update.
+- **30–34:** it runs your day: notes, workspaces, focus and gaming mode, tasks and deadlines, wellbeing.
+- **35–37:** it understands your stuff: spending from receipts, answers from your own documents, system care.
 - **12:** it acts on its own, always with your OK.
 - **15:** voice comes last and plugs into everything above (persona, alerts, briefings, conversation).
 
@@ -76,6 +81,30 @@ Status: ✅ done · 🔨 in progress · ⬜ planned
 | 19 | **Security center** | Per-action permissions, audit log viewer, panic stop hotkey, sandboxed shell actions | ⬜ |
 | 20 | **Insights dashboard** | Weekly report: time per app, focus streaks, clutter, command usage | ⬜ |
 | 21 | **Personal autocomplete** | Tiny GPT trained on your own writing; Hinglish-aware suggestions across Windows | ⬜ |
+
+## Stage I: Robust and everyday (new)
+| # | Phase | What it adds | Status |
+|---|---|---|---|
+| 29 | 🆕 **Reliability & self-healing** | Crash log and crash reports, automatic restart (safe mode after repeated crashes), one Jarvis at a time, `/doctor` health check ("run a health check") that tests every model, index, folder and setting and repairs what it can, self-repair of a broken config or memory index, background services restarted if they die, backup and restore of your Jarvis data | ⬜ |
+| 30 | 🆕 **Notes & journal** | "note: call the bank about the card", "what did I note about the bank", "add to my journal…"; notes are searchable with memory search and today's notes appear in the evening briefing | ⬜ |
+| 31 | 🆕 **Workspaces** | "start coding mode" opens VS Code, Chrome and a lofi playlist and arranges the windows; "save this layout as work"; per-monitor window layouts restored with one command | ⬜ |
+| 32 | 🆕 **Focus & gaming mode** | Pomodoro timer on the HUD, do-not-disturb, optional blocking of distracting sites and apps (always confirmed, always undoable); a full-screen game switches on gaming mode by itself: training paused, HUD hidden, alerts held | ⬜ |
+| 33 | 🆕 **Tasks & deadlines** | "add task finish the report by Friday", recurring tasks, overdue nudges; tasks on the HUD and in briefings; the command model learns task phrasing | ⬜ |
+| 34 | 🆕 **Wellbeing** | Break reminders (20-20-20 for the eyes, stretch after long sessions), optional screen-time limits per app, a late-night wind-down nudge; learns your normal hours from the activity log | ⬜ |
+| 35 | 🆕 **Spending from receipts** | Invoices and receipts in Downloads (PDF text or OCR) parsed by our own small field extractor into merchant, amount and date; "how much did I spend on Swiggy this month" | ⬜ |
+| 36 | 🆕 **Answers from your documents** | "what's the due date in my rent agreement?" A reader model trained from scratch answers from your own indexed files (memory search finds the passage, the reader picks the answer) and shows the source. Unlike phase 26, it only uses your files | ⬜ |
+| 37 | 🆕 **System care** | Disk space advisor (biggest folders, old installers, duplicate downloads), temp-file cleanup, startup apps you can switch off, GPU temperature history; everything previewed and undoable | ⬜ |
+
+## Stage J: Robustness (new)
+| # | Phase | What it adds | Status |
+|---|---|---|---|
+| 38 | 🆕 **Context awareness** | Understands "this", "here", "that file", "these": the file selected in Explorer, the active window, the open folder, what you just copied, the last search result. "move this to archive", "open the second one", "send these to a new folder". The command model learns a `this`/`these` reference and Jarvis fills it from what's on screen | ⬜ |
+| 39 | 🆕 **Real-usage learning** | Learns from how you actually talk, not just generated data: every command you run (text only, on this PC) becomes a private test set; the model flags the ones it was least sure about and a 2-minute weekly review lets you confirm or fix them with one click; drift alerts when real-use confidence drops; each model version gets a report card on your real commands, not only generated tests | ⬜ |
+| 40 | 🆕 **Crash-safe actions** | Every file action is journaled before it starts, so a crash or power cut mid-move resumes or rolls back cleanly on restart; locked or in-use files, permission errors and full disks handled with a clear message and retry; each action is checked afterwards ("did all 12 files actually arrive?") and reported honestly | ⬜ |
+| 41 | 🆕 **Speed & footprint** | int8-quantized ONNX models (smaller, about 2× faster on the CPU), models loaded on first use, Jarvis idle under ~300 MB RAM, start-up under 2 s, a per-command time budget, `/perf` shows where the time goes; training and OCR yield the CPU/GPU when you're gaming or on battery | ⬜ |
+| 42 | 🆕 **Release safety** | Every update is tested before it switches on: the full test suite plus an end-to-end run of every action in a sandbox folder; automatic rollback if Jarvis fails to start after an update; Windows UI tests for the command bar, HUD and settings; a proper installer (one `.exe`) for a clean PC | ⬜ |
+| 43 | 🆕 **Your words** | Learns your vocabulary: your app nicknames, folder names, contacts, project names and your own typos and shortcuts become training data automatically; Hindi in Devanagari script and other Indian scripts (typed and in OCR) | ⬜ |
+| 44 | 🆕 **Any Windows setup** | Works the same on every machine: OneDrive-redirected Documents/Desktop/Pictures, multiple monitors and mixed DPI scaling, non-English Windows folder names, multiple user accounts, different browsers and default apps, laptops on battery; a first-run check that finds your real folders and apps | ⬜ |
 
 ## Backlog (small items to fold into phases)
 - Copy mechanism or bigger model if very long multi-path commands still mangle names in real use

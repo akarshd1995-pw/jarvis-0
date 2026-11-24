@@ -61,6 +61,12 @@ def _call(c) -> str:
         return f'open {a["name"]}'
     if n == "open_url":
         return "open the link you copied" if getattr(a["url"], "name", "") == "this" else f'open {a["url"]}'
+    if n == "workspace":
+        act = _v(a["action"])
+        nm = a.get("name", "")
+        return {"start": f"start your {nm} workspace", "save": f"save the open windows as {nm}",
+                "close": f"close the {nm} workspace's apps", "list": "list your workspaces",
+                "delete": f"delete your saved {nm} layout"}.get(act, f"workspace {act}")
     if n == "note":
         where = "your journal" if _v(a.get("kind", "")) == "journal" else "your notes"
         return f"add to {where}: {_text(a['text'])}"

@@ -35,6 +35,7 @@ DRY = {
     "briefing": "briefing(kind=morning)", "training": "training(action=status)",
     "unsupported": 'unsupported(request="order a pizza")', "unknown": "unknown()",
     "mood": "mood(kind=happy)", "open_result": "open_result(n=1)",
+    "workspace": 'workspace(action=start, name="coding")',
 }
 LIVE_ACTIONS = {"list_files", "move_files", "copy_files", "delete_files", "remind", "search_memory", "undo",
                 "open_result", "note", "find_notes", "delete_note"}

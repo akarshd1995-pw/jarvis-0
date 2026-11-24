@@ -181,6 +181,8 @@ class Persona:
             return ("journal_saved" if d["kind"] == "journal" else "note_saved"), {"text": _short(d["text"], 90)}
         if k == "notes":
             return self._plan_notes(d)
+        if k == "workspace":
+            return self._plan_workspace(d)
         if k == "note_deleted":
             return "note_deleted", {"text": _short(d["text"], 80)}
         if k == "note_read":
@@ -326,6 +328,42 @@ class Persona:
         if d.get("no_origin"):
             return "directions_noorigin", {"dest": dest}
         return "directions_open", {"dest": dest, "mode": mode}
+
+    @staticmethod
+    def _and(items: list[str]) -> str:
+        items = list(dict.fromkeys(items))
+        return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1] if items else ""
+
+    def _plan_workspace(self, d: dict) -> tuple[str, dict]:
+        act, name = d["action"], d.get("name", "")
+        if d.get("missing_workspace"):
+            return "workspace_missing", {"name": name, "known": self._and(d.get("known") or []) or "none yet"}
+        if act == "list":
+            rows = d["rows"]
+            items = "; ".join(f"{r['name']} ({self._and(r['apps']) or 'no apps'})" + ("" if r["saved"] else ", built in")
+                              for r in rows)
+            return "workspace_list", {"items": items, "count": self._num(len(rows), False)}
+        if act == "save":
+            return ("workspace_resaved" if d.get("replaced") else "workspace_saved"), {
+                "name": name, "count": self._num(d["count"], False), "apps": self._and(d["apps"])}
+        if act == "start":
+            parts = []
+            if d.get("opened"):
+                parts.append("opened " + self._and(d["opened"]))
+            if d.get("arranged"):
+                parts.append(("arranged " if not d.get("opened") else "and arranged ")
+                             + (self._and(d["arranged"]) if len(set(d["arranged"])) <= 4 else
+                                f"{len(d['arranged'])} windows"))
+            if d.get("music"):
+                parts.append("put the music on")
+            done = ", ".join(parts) or "nothing needed changing"
+            miss = (f" I couldn't open {self._and(d['missing'])}." if d.get("missing") else "")
+            tip = (" Arrange things how you like and say \"save this layout as " + name + "\" to keep it."
+                   if d.get("preset") else "")
+            return "workspace_started", {"name": name, "done": done, "miss": miss, "tip": tip}
+        if act == "close":
+            return "workspace_closed", {"name": name, "apps": self._and(d.get("apps") or []) or "nothing was open"}
+        return "workspace_deleted", {"name": name}
 
     def _plan_notes(self, d: dict) -> tuple[str, dict]:
         what = "journal entries" if d.get("kind") == "journal" else "notes"

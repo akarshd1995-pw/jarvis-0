@@ -6,7 +6,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .actions import control, files, system, training, maps, notes
+from .actions import control, files, system, training, maps, notes, workspace
 from .actions.base import ActionResult, Ctx
 from .config import Config
 from .dsl.grammar import Program
@@ -22,6 +22,7 @@ REGISTRY: dict[str, Handler] = {
     "note": notes.note,
     "find_notes": notes.find_notes,
     "delete_note": notes.delete_note,
+    "workspace": workspace.workspace,
     "open_folder": system.open_folder,
     "remind": system.remind,
     "system": system.system,
@@ -121,6 +122,9 @@ class Executor:
             try:
                 if inverse.get("op") in ("note_forget", "note_restore"):          # phase 30: notes
                     self.store.set_note_deleted(inverse["id"], inverse["op"] == "note_forget")
+                elif str(inverse.get("op", "")).startswith("workspace_"):        # phase 31: windows / layouts
+                    from .actions.workspace import undo_op
+                    undo_op(self.config, inverse)
                 else:
                     files.apply_inverse(inverse)
                 done.append(entry_id)

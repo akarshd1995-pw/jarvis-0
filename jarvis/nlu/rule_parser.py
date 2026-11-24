@@ -234,7 +234,36 @@ NOTE_RULES: list[tuple[re.Pattern, callable]] = [
      lambda m, t: f'delete_note(query="{re.sub(r"^(?:the|my) ", "", (m.group(1) or m.group(2)).strip(), flags=re.I)}")'),
 ]
 
-RULES: list[tuple[re.Pattern, callable]] = NOTE_RULES + CONTEXT_RULES + [
+# ---- phase 31: workspaces ("dark/light/focus/gaming/airplane/silent mode" are other things, never workspaces)
+_NOT_WS = (r"(?!(?:turn|switch|enable|disable|put|set)\b)"
+           r"(?!.*\b(?:dark|light|night|focus|gaming|game|airplane|aeroplane|flight|silent|battery|power|safe|sleep"
+           r"|dnd|do not disturb|saver|tablet|eco|performance|incognito|private|reading)\b)")
+_WSN = rf"{_NOT_WS}([a-z0-9][a-z0-9 _-]{{0,30}}?)"
+
+
+def _ws(action: str, name: str | None = None) -> str:
+    return f'workspace(action={action}' + (f', name="{name.strip()}"' if name else "") + ")"
+
+
+WORKSPACE_RULES: list[tuple[re.Pattern, callable]] = [
+    (re.compile(rf"^(?:save|remember|store|keep) (?:this|the current|my current|these|my)(?: window)? (?:layout|windows|setup|workspace|arrangement)"
+                rf" (?:as|for|called|named) (?:my |the )?{_WSN}(?: mode| workspace| layout)?$"
+                rf"|^ye layout {_WSN} naam se save karo$", re.I),
+     lambda m, t: _ws("save", m.group(1) or m.group(2))),
+    (re.compile(rf"^(?:close|end|stop|exit|quit|shut down) (?:my |the )?{_WSN} (?:mode|workspace|setup)$"
+                rf"|^{_WSN} mode band karo$|^i'?m done with (?:my )?{_WSN}(?: mode| workspace)?$", re.I),
+     lambda m, t: _ws("close", m.group(1) or m.group(2) or m.group(3))),
+    (re.compile(rf"^(?:delete|remove|forget) (?:my |the )?{_WSN} (?:workspace|layout|mode)$", re.I),
+     lambda m, t: _ws("delete", m.group(1))),
+    (re.compile(r"^(?:list|show)(?: me)? (?:my |all )?(?:workspaces|layouts|modes)$|^what (?:workspaces|layouts) do i have\??$"
+                r"|^(?:my )?workspaces dikhao$", re.I), lambda m, t: _ws("list")),
+    (re.compile(rf"^(?:start|open|launch|load|switch to|enter|set up(?: for)?|go to|begin|activate) (?:my |the )?{_WSN}"
+                rf" (?:mode|workspace|setup|layout)$|^{_WSN} mode(?: on| please)?$|^let'?s (?:start|do) {_WSN}(?: mode)?$"
+                rf"|^{_WSN} mode (?:chalu|shuru|on) karo$|^{_WSN} (?:wala )?setup lagao$", re.I),
+     lambda m, t: _ws("start", next(g for g in m.groups() if g))),
+]
+
+RULES: list[tuple[re.Pattern, callable]] = NOTE_RULES + WORKSPACE_RULES + CONTEXT_RULES + [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
     (re.compile(r"^(?!.*\btraining\b)(?:(?:hey )?jarvis,? )?(?:what(?:'s| is) the |show (?:me )?the |give me (?:the )?|get (?:me )?(?:the )?)?"
                 r"(?:(?:fastest|quickest|best|shortest) )?(?:route|way|directions?|road)(?: please)? (?:from .+ )?to .+$"

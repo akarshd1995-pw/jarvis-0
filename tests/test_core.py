@@ -2585,3 +2585,154 @@ def test_note_rules_and_training_data():
     for start in ("note(", "find_notes(", "delete_note("):
         assert any(p.startswith(start) for p in progs)
     assert any("kind=journal" in p for p in progs) and any("when=" in p for p in progs)
+
+
+# ---------------------------------------------------------------- phase 31: workspaces
+class FakeDesktop:
+    """Two monitors and some app windows; launching an app makes its window appear."""
+
+    def __init__(self, wins=None, monitors=None):
+        from jarvis.winlayout import Win
+        self.Win = Win
+        self.wins = wins if wins is not None else []
+        self.mons = monitors or [[0, 0, 1920, 1040], [1920, 0, 3840, 1040]]
+        self.placed, self.closed, self.launched, self.played = {}, [], [], []
+        self._next = 100
+
+    def add(self, exe, title, rect=(100, 100, 900, 700), state="normal"):
+        self._next += 1
+        w = self.Win(self._next, exe, title, list(rect), state)
+        self.wins.append(w)
+        return w
+
+    def windows(self):
+        return [w for w in self.wins if w.hwnd not in self.closed]
+
+    def place(self, hwnd, rect, state):
+        self.placed[hwnd] = (list(rect), state)
+        for w in self.wins:
+            if w.hwnd == hwnd:
+                w.rect, w.state = list(rect), state
+
+    def close(self, hwnd):
+        self.closed.append(hwnd)
+
+    def launch(self, exe):
+        self.launched.append(exe)
+        self.add(exe, "new " + exe)
+
+    def open_app(self, alias):
+        from jarvis.workspaces import APP_EXES
+        self.launched.append(alias)
+        self.add("C:/apps/" + sorted(APP_EXES.get(alias, {alias + ".exe"}))[0], alias)
+
+    def play(self, q):
+        self.played.append(q)
+
+    def monitors(self):
+        return self.mons
+
+    def wait_new(self, known, app=None, timeout=0):
+        return next((w for w in self.windows() if w.hwnd not in known and (app is None or w.app == app)), None)
+
+
+def test_save_and_restore_a_layout_across_two_monitors(tmp_path):
+    from jarvis.workspaces import Workspaces
+    d = FakeDesktop()
+    code = d.add("C:/VS Code/Code.exe", "jarvis - Visual Studio Code", (0, 0, 1920, 1040), "max")
+    chrome = d.add("C:/Chrome/chrome.exe", "GitHub - Chrome", (1920, 0, 3000, 1040))
+    wt = tmp_path / "WT" / "WindowsTerminal.exe"
+    wt.parent.mkdir()
+    wt.write_text("x")                                         # a program that exists on disk can be reopened
+    term = d.add(str(wt), "PowerShell", (3000, 0, 3840, 1040))
+    ws = Workspaces(tmp_path / "ws.json", d)
+    key, definition, prev = ws.save("my work layout")
+    assert key == "work" and prev is None and len(definition["windows"]) == 3
+    assert [e["monitor"] for e in definition["windows"]] == [0, 1, 1]
+    for w in d.wins:                                           # you move things around...
+        w.rect, w.state = [10, 10, 500, 500], "normal"
+    d.closed.append(term.hwnd)                                 # ...and close the terminal
+    rep = ws.start("work mode")
+    assert d.placed[code.hwnd] == ([0, 0, 1920, 1040], "max")
+    assert d.placed[chrome.hwnd] == ([1920, 0, 3000, 1040], "normal")
+    assert rep.opened == ["Terminal"] and str(wt) in d.launched                       # reopened
+    assert not rep.missing
+
+
+def test_preset_opens_missing_apps_tiles_and_plays_music(tmp_path):
+    from jarvis.workspaces import Workspaces
+    d = FakeDesktop(monitors=[[0, 0, 1920, 1040]])
+    d.add("C:/Chrome/chrome.exe", "Gmail - Chrome")            # already open: reused, not opened again
+    rep = Workspaces(tmp_path / "ws.json", d).start("coding")
+    assert d.launched == ["vscode", "terminal"] and rep.opened == ["VS Code", "Terminal"]
+    assert rep.music and d.played == [rep.music]
+    places = sorted(d.placed.values())
+    assert ([0, 0, 1152, 1040], "normal") in places          # the main app gets 60% on the left
+    assert len(rep.arranged) == 3
+
+
+def test_tiling_rules():
+    from jarvis.workspaces import tile
+    one = [[0, 0, 1000, 1000]]
+    assert tile(1, one) == [([0, 0, 1000, 1000], "max")]
+    assert tile(3, one) == [([0, 0, 600, 1000], "normal"), ([600, 0, 1000, 500], "normal"),
+                            ([600, 500, 1000, 1000], "normal")]
+    two = [[0, 0, 1000, 1000], [1000, 0, 2000, 1000]]
+    assert tile(2, two) == [([0, 0, 1000, 1000], "max"), ([1000, 0, 2000, 1000], "max")]
+
+
+def test_workspace_actions_through_jarvis_with_undo(tmp_path, monkeypatch):
+    import jarvis.actions.workspace as WA
+    d = FakeDesktop(monitors=[[0, 0, 1920, 1040]])
+    a = d.add("C:/x/Code.exe", "proj - VS Code", (0, 0, 1200, 1040))
+    b = d.add("C:/x/chrome.exe", "docs - Chrome", (1200, 0, 1920, 1040))
+    monkeypatch.setattr(WA, "BACKEND", d)
+    j = _jarvis(tmp_path)
+    j.config.show_details = False
+    out = j.handle('workspace(action=save, name="writing")')
+    assert "Saved" in out and "two windows" in out and "Chrome and VS Code" in out
+    a.rect, b.rect = [5, 5, 50, 50], [60, 60, 90, 90]
+    out = j.handle('workspace(action=start, name="writing")')
+    assert "Writing mode is ready" in out and d.placed[a.hwnd][0] == [0, 0, 1200, 1040]
+    j.handle("undo")                                            # windows go back to where they were
+    assert d.placed[a.hwnd][0] == [5, 5, 50, 50]
+    assert "writing" in j.handle("workspace(action=list)") and "coding" in j.handle("workspace(action=list)")
+    out = j.handle('workspace(action=start, name="gardening")')
+    assert "don't have a gardening workspace" in out
+    asked = []
+    j.executor.confirm = lambda *x: asked.append(x) or True
+    out = j.handle('workspace(action=close, name="writing")')
+    assert asked and sorted(d.closed) == sorted([a.hwnd, b.hwnd])   # asked first, then closed both
+    j.handle('workspace(action=delete, name="writing")')
+    from jarvis.workspaces import Workspaces
+    assert "writing" not in Workspaces(tmp_path / "workspaces.json", d).saved()
+    j.handle("undo")                                            # the deleted layout comes back
+    assert "writing" in Workspaces(tmp_path / "workspaces.json", d).saved()
+
+
+def test_workspace_rules_and_training_data():
+    import random
+    from datagen.generate_intents import TEACHES, gen_workspace, Ctx
+    from jarvis.dsl.grammar import canonical
+    from jarvis.nlu.rule_parser import rule_parse
+    cases = {"start coding mode": 'workspace(action=start, name="coding")',
+             "coding mode chalu karo": 'workspace(action=start, name="coding")',
+             "save this layout as work": 'workspace(action=save, name="work")',
+             "close coding mode": 'workspace(action=close, name="coding")',
+             "list my workspaces": "workspace(action=list)",
+             "delete the work workspace": 'workspace(action=delete, name="work")'}
+    for text, want in cases.items():
+        assert str(rule_parse(text)) == want, (text, rule_parse(text))
+    for other in ("turn on airplane mode", "dark mode", "focus mode", "gaming mode on", "switch on night mode"):
+        assert "workspace" not in str(rule_parse(other))              # never mistaken for a workspace
+    assert "workspaces" in TEACHES
+    r = random.Random(2)
+    progs = [canonical(gen_workspace(Ctx(r, "train"))[0]) for _ in range(800)]
+    for act in ("start", "save", "close", "delete", "list"):
+        assert any(f"action={act}" in p for p in progs)
+
+
+def test_workspace_names_normalise():
+    from jarvis.workspaces import norm
+    assert norm("Coding Mode") == "coding" == norm("my coding workspace") == norm("code")
+    assert norm("video editing") == "video editing"

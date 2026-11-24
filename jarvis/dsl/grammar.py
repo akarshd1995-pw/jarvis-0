@@ -116,7 +116,9 @@ SCHEMA: dict[str, dict] = {
                       "enum": {"kind": ["note", "journal"]}},
     "find_notes":    {"args": {"query": "str|ref", "kind": "ident", "when": "ident"}, "required": [],
                       "enum": {"kind": ["note", "journal"], "when": ["today", "yesterday", "week", "month"]}},
-    "delete_note":   {"args": {"query": "str"}, "required": ["query"]},                     # phase 38: "open the second one"
+    "delete_note":   {"args": {"query": "str"}, "required": ["query"]},
+    "workspace":     {"args": {"action": "ident", "name": "str"}, "required": ["action"],          # phase 31
+                      "enum": {"action": ["start", "save", "close", "list", "delete"]}},                     # phase 38: "open the second one"
     "unknown":       {"args": {}, "required": []},   # out-of-scope request: decline, never guess
 }
 

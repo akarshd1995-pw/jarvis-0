@@ -1023,7 +1023,7 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes"]
+           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes", "workspaces"]
 
 
 # ---------------------------------------------------------------- directions (routes, travel time)
@@ -1418,6 +1418,61 @@ def gen_notes(c: Ctx):
     return dsl_call("delete_note", {"query": q(query)}), rng.choice(DEL_NOTE).format(q=slot(topic)), {}
 
 
+# ---------------------------------------------------------------- workspaces (phase 31)
+WS_NAMES = ["coding", "study", "work", "writing", "design", "editing", "research", "meeting", "streaming", "office",
+            "college", "video editing", "trading", "client work", "music production", "accounts", "exam prep",
+            "side project", "freelance", "content"]
+WS_START = frames("WS_START", [
+    "start {n} mode", "{n} mode", "open my {n} workspace", "switch to {n} mode", "load my {n} layout",
+    "set up for {n}",
+    "bring up my {n} setup",                                       # 6 val_ood
+    "get my {n} workspace ready",                                  # 7 test_ood
+    "launch {n} mode", "let's start {n}", "{n} mode please", "enter {n} mode", "start my {n} setup",
+    "open the {n} layout",
+    "fire up {n} mode",                                            # val_ood
+    "time for {n} mode",                                           # test_ood
+    "go to {n} mode", "activate {n} mode", "begin {n} mode", "start the {n} workspace", "get my {n} setup ready",
+    "bring up {n} mode", "fire up my {n} workspace", "it's time for {n}",
+    "it is time for {n} mode", "fire up {n}", "time to start {n}", "ok time for {n}",
+    "ok it's {n} time", "it's {n} time, set it up",
+])
+WS_START_HI = ["{n} mode chalu karo", "{n} mode shuru karo", "{n} wala setup lagao", "{n} mode on karo", "{n} setup kholo"]
+WS_SAVE = frames("WS_SAVE", [
+    "save this layout as {n}", "save this as my {n} workspace", "remember this layout as {n}",
+    "save these windows as {n}", "save my windows as {n} mode", "store this setup as {n}",
+    "keep this arrangement as {n}",                                # val_ood
+    "save the current layout for {n}",                             # test_ood
+    "remember this setup as {n}", "save this workspace as {n}", "save the layout as {n}", "save this as {n} mode",
+    "keep this layout as {n}", "remember these windows as my {n} setup", "save current windows as {n}",
+    "save the current setup as {n}",
+    "save this arrangement as {n}", "save my current layout as {n}", "save this setup for {n}", "keep the current arrangement for {n}",
+])
+WS_SAVE_HI = ["ye layout {n} naam se save karo", "is setup ko {n} ke naam se save karo", "ye windows {n} mode me save karo"]
+WS_CLOSE = ["close {n} mode", "end {n} mode", "close my {n} workspace", "stop {n} mode", "i'm done with {n}",
+            "exit {n} mode", "shut down my {n} setup", "{n} mode band karo", "{n} wala setup band karo"]
+WS_DELETE = ["delete the {n} workspace", "forget my {n} layout", "remove {n} mode", "delete my {n} layout",
+             "{n} wala layout delete karo"]
+WS_LIST = ["list my workspaces", "what workspaces do i have", "show my layouts", "show my workspaces",
+           "which modes have i saved", "my saved layouts", "workspaces dikhao"]
+
+
+def gen_workspace(c: Ctx):
+    rng = c.rng
+    name = rng.choice(WS_NAMES) if rng.random() < 0.75 else LX.pseudo_word(rng).lower().strip("_-")
+    r = rng.random()
+    if r < 0.45:
+        tpl = rng.choice(WS_START_HI) if c.hing else c.T(WS_START)
+        return dsl_call("workspace", {"action": "start", "name": q(name)}), tpl.format(n=slot(name)), {}
+    if r < 0.7:
+        tpl = rng.choice(WS_SAVE_HI) if c.hing else c.T(WS_SAVE)
+        return dsl_call("workspace", {"action": "save", "name": q(name)}), tpl.format(n=slot(name)), {}
+    if r < 0.82:
+        return dsl_call("workspace", {"action": "close", "name": q(name)}), rng.choice(WS_CLOSE).format(n=slot(name)), {}
+    if r < 0.9:
+        return dsl_call("workspace", {"action": "delete", "name": q(name)}), rng.choice(WS_DELETE).format(n=slot(name)), {}
+    return "workspace(action=list)", rng.choice(WS_LIST), {}
+
+
 # ---------------------------------------------------------------- maintenance (phase 29)
 HEALTH = frames("HEALTH", [
     "run a health check", "health check", "check yourself", "are you working properly", "run diagnostics",
@@ -1503,7 +1558,7 @@ GENERATORS = [
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6), (gen_workspace, 5),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",

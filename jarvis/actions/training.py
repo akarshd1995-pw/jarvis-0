@@ -13,7 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CHECKPOINTS = PROJECT_ROOT / "checkpoints"
 PAUSE_FLAG = CHECKPOINTS / "PAUSE"
 JOB_LOGS = {"command model": CHECKPOINTS / "train_log.txt", "reply model": CHECKPOINTS / "reply_log.txt",
-            "self-improvement": CHECKPOINTS / "improve_log.txt"}
+            "self-improvement": CHECKPOINTS / "improve_log.txt", "dialog model": CHECKPOINTS / "dialog_log.txt"}
 
 
 def start_improving(force: bool = True):

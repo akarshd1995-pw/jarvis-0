@@ -77,6 +77,9 @@ class Jarvis:
         except Exception as e:
             log.warning("usage prune failed: %s", e)
         REGISTRY["training"] = self._training_action
+        from .dialog import Conversation, DialogModel  # phase 6: follow-ups and asking back
+        self.conv = Conversation(DialogModel.load(PROJECT_ROOT / "checkpoints") if config.dialog_model else None,
+                                 clarify=config.clarify)
         self.briefings = briefing.Scheduler(config.data_dir / "briefing_state.json", config.briefing_morning,
                                             config.briefing_evening, enabled=config.briefing_auto)
 
@@ -505,7 +508,62 @@ class Jarvis:
             self._hud("success", reply, hold=2)
         return self._with_details(reply, "mood", prog, report)
 
+    def _converse(self, text: str) -> str | None:
+        """A reply to what just happened ("no, to Desktop", "the second one", "yes"), or None for a fresh command."""
+        c = self.conv.active()
+        if c is None:
+            return None
+        program, source = self.conv.read(text)
+        if program is None:
+            return None
+        if program == "unknown()":
+            if c.kind == "prev":
+                return None                              # not a follow-up: a new command
+            prog, how = self.brain.resolve(text)         # ignored the question and asked something else?
+            self.conv.clear()
+            conf = (getattr(self.brain, "last_detail", None) or {}).get("conf")
+            sure = how in ("dsl", "rules") or how.startswith("rules (model not") or \
+                (how.startswith("model") and conf is not None and conf >= 0.8)
+            if sure and prog is not None and any(x.action not in ("unknown", "unsupported", "mood") for x in prog.calls):
+                return None
+            if c.usage_id is not None:
+                self._safe(self.usage.skip, c.usage_id)
+            reply = self.persona.say("clarify_cancel")
+            self._hud("idle", reply, hold=2)
+            return self._with_details(reply, source, None)
+        try:
+            prog = parse(program)
+        except DSLError:
+            return None
+        if c.kind in ("ask", "confirm") and c.usage_id is not None:
+            # your answer is the right reading of what you first said: a training example (phase 39)
+            self._safe(self.usage.fix, c.usage_id, program)
+        self.conv.clear()
+        # an answer labels what you first said; a bare follow-up ("same for Desktop") means nothing on its own
+        self.last_text, self.last_program = (c.text.strip() if c.kind != "prev" else None), program
+        self.store.log_event("command", {"text_len": len(text), "source": source, "program": program})
+        if any(x.action == "undo" for x in prog.calls):
+            self._safe(self.usage.mark_undone)
+        return self._execute(prog, source)
+
+    def _execute(self, prog, source: str) -> str:
+        report = self.executor.run(prog)
+        for r in report.results:                    # memory search: rows the command bar can show and open
+            if r.kind == "memory" and r.data.get("results"):
+                self.last_results = r.data["results"]
+        if not report.failures and not any(c.action == "undo" for c in prog.calls):
+            self.conv.ran(str(prog))
+        else:
+            self.conv.clear()
+        reply = self.persona.report(report)
+        state = "error" if report.failures else ("idle" if report.declined and not report.results else "success")
+        self._hud(state, reply, hold=2)
+        return self._with_details(reply, source, prog, report)
+
     def _handle(self, text: str) -> str:
+        followed = self._converse(text)
+        if followed is not None:
+            return followed
         prog, source = self.brain.resolve(text)
         # Feelings win only when the sentence isn't a real command ("i'm tired of these pdfs, delete them" stays a delete);
         # crisis words always win.
@@ -534,14 +592,20 @@ class Jarvis:
         if any(c.action == "undo" for c in prog.calls):
             self._safe(self.usage.mark_undone)          # undoing right away = it probably misunderstood
         self._learn(text, prog, source)
-        report = self.executor.run(prog)
-        for r in report.results:                    # memory search: rows the command bar can show and open
-            if r.kind == "memory" and r.data.get("results"):
-                self.last_results = r.data["results"]
-        reply = self.persona.report(report)
-        state = "error" if report.failures else ("idle" if report.declined and not report.results else "success")
-        self._hud(state, reply, hold=2)
-        return self._with_details(reply, source, prog, report)
+        ask = self.conv.should_ask(str(prog), source, getattr(self.brain, "last_detail", None))
+        if ask is not None:                         # torn between readings, or an unsure move: ask, don't guess
+            from .nlu.explain import explain
+            kind, options = ask
+            self.conv.asking(kind, options, text, self.usage.last_id if self.config.learn_from_usage else None)
+            if kind == "ask":
+                opts = "  ".join(f"{i}. {explain(p)}" for i, p in enumerate(options, 1))
+                reply = self.persona.say("clarify_ask", opts=opts)
+            else:
+                w = explain(options[0])
+                reply = self.persona.say("clarify_confirm", what=w[:1].upper() + w[1:])
+            self._hud("idle", reply, hold=3)
+            return self._with_details(reply, source, prog)
+        return self._execute(prog, source)
 
     @staticmethod
     def _safe(fn, *a, **kw):

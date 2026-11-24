@@ -1800,3 +1800,114 @@ def test_new_enum_value_uses_rules_until_learned():
     assert str(prog) == "training(action=review)" and src.startswith("rules")
     Old.knows = {"actions": ["training"], "features": ["usage_review"]}
     assert str(b.resolve("review my commands")[0]) == "training(action=status)"   # trained model decides
+
+
+# ---------------------------------------------------------------- phase 6: conversation & clarification
+def test_dialog_data_valid_and_split(tmp_path):
+    import json
+    import subprocess
+    import sys
+    subprocess.run([sys.executable, "-m", "datagen.generate_dialog", "--n", "3000", "--n-eval", "300",
+                    "--out", str(tmp_path)], check=True, capture_output=True)
+    from jarvis.dsl.grammar import canonical
+    train = [json.loads(l) for l in (tmp_path / "train.jsonl").read_text(encoding="utf-8").splitlines()]
+    for ex in train[:3000]:
+        canonical(ex["program"])
+        assert " || " in ex["text"]
+    kinds = {ex["text"].split(":")[0] for ex in train}
+    assert kinds == {"PREV", "ASK", "CONFIRM"}
+    unknown = sum(ex["program"] == "unknown()" for ex in train) / len(train)
+    assert 0.3 < unknown < 0.55                       # plenty of "this isn't a follow-up"
+    ood = {json.loads(l)["text"] for l in (tmp_path / "test_ood.jsonl").read_text(encoding="utf-8").splitlines()}
+    assert not ood & {ex["text"] for ex in train}
+    assert json.loads((tmp_path / "meta.json").read_text())["features"] == ["followups", "clarify"]
+
+
+def test_followup_rules():
+    from jarvis.dialog import Conversation
+    c = Conversation()
+    c.ran('move_files(src=Downloads, ext=pdf, dest=Documents)')
+    assert c.read("no, to desktop")[0] == "move_files(dest=Desktop, ext=pdf, src=Downloads)"
+    assert c.read("do the same for pictures")[0] == "move_files(dest=Documents, ext=pdf, src=Pictures)"
+    assert c.read("again")[0] == 'move_files(dest=Documents, ext=pdf, src=Downloads)'
+    assert c.read("play despacito")[0] is None
+    opts = ['play_media(query="super machi", site=youtube)', 'play_media(query="sup", site=youtube)']
+    c.asking("ask", opts, "play super machi", None)
+    assert c.read("the second one")[0] == opts[1] and c.read("1")[0] == opts[0]
+    assert c.read("super machi")[0] == opts[0] and c.read("neither")[0] == "unknown()"
+    c.ran("not a program")
+    assert c.active() is None
+    c.ran('open_app(name=chrome)', now=0)
+    assert c.active() is None                         # follow-ups expire
+
+
+def test_should_ask():
+    from jarvis.dialog import Conversation
+    c = Conversation()
+    torn = {"conf": 0.7, "alts": [[0.7, 'play_media(query="sup", site=youtube)'],
+                                  [0.65, 'play_media(query="super machi", site=youtube)']]}
+    assert c.should_ask('play_media(query="sup", site=youtube)', "model 70%", torn)[0] == "ask"
+    mv = 'move_files(src=Downloads, ext=pdf, dest=Documents)'
+    assert c.should_ask(mv, "model 65%", {"conf": 0.65, "alts": [[0.65, mv]]}) == ("confirm", [mv])
+    assert c.should_ask("open_app(name=chrome)", "model 95%", {"conf": 0.95, "alts": [[0.95, "open_app(name=chrome)"]]}) is None
+    assert c.should_ask(mv, "rules (model unsure)", {"conf": 0.4, "alts": []}) is None
+    assert Conversation(clarify=False).should_ask('play_media(query="sup", site=youtube)', "model 70%", torn) is None
+
+
+def _jarvis(tmp_path):
+    from jarvis.config import Config
+    from jarvis.daemon import Jarvis
+    cfg = Config(data_dir=tmp_path, encrypt_logs=False)
+    return Jarvis(cfg, confirm=lambda q: True, data_root=tmp_path / "data")
+
+
+def test_jarvis_followup_again(tmp_path):
+    import time
+    j = _jarvis(tmp_path)
+    j.handle('remind(text="stretch", after=10m)')
+    j.handle("again")
+    assert len(j.store.upcoming_reminders(time.time(), limit=10)) == 2
+    assert "No previous command" in j.handle("/fix open_app(name=chrome)")    # a follow-up isn't a /fix target
+
+
+def test_jarvis_asks_when_torn_and_learns_answer(tmp_path):
+    import json
+    import time
+    from jarvis.dsl.grammar import parse
+    j = _jarvis(tmp_path)
+    a, b = 'remind(text="call amma", after=10m)', 'remind(text="call anna", after=10m)'
+
+    def torn(text):
+        j.brain.last_detail = {"conf": 0.62, "alts": [[0.62, a], [0.6, b]]}
+        return parse(a), "model 62%"
+    j.brain.resolve = torn
+    out = j.handle("remind me to call anna in 10 minutes")
+    assert "which one" in out.lower() or "did you mean" in out.lower()
+    assert j.store.upcoming_reminders(time.time(), limit=10) == []           # asked, didn't guess
+    j.handle("2")
+    assert [t for _, t in j.store.upcoming_reminders(time.time(), limit=10)] == ["call anna"]
+    rows = [json.loads(l) for l in (tmp_path / "data" / "user_corrections.jsonl").read_text().splitlines()]
+    assert rows[-1]["text"] == "remind me to call anna in 10 minutes" and "anna" in rows[-1]["program"]
+    j.handle("remind me to call anna in 10 minutes")
+    out = j.handle("neither").lower()
+    assert "nothing done" in out or "won't do anything" in out
+    assert len(j.store.upcoming_reminders(time.time(), limit=10)) == 1
+
+
+def test_dialog_model_wrapper_reads_context():
+    from jarvis.dialog import Context, Conversation, DialogModel
+    from jarvis.dsl.grammar import parse
+    seen = []
+
+    class FakeParser:
+        def parse(self, text):
+            seen.append(text)
+            return parse("move_files(src=Downloads, ext=pdf, dest=Desktop)"), 0.93
+    m = DialogModel.__new__(DialogModel)
+    m.parser = FakeParser()
+    c = Conversation(m)
+    c.ran("move_files(src=Downloads, ext=pdf, dest=Documents)")
+    prog, src = c.read("nah put em on the desktop")
+    assert seen == ["PREV: move_files(dest=Documents, ext=pdf, src=Downloads) || nah put em on the desktop"] or \
+        seen[0].startswith("PREV: move_files(") and seen[0].endswith(" || nah put em on the desktop")
+    assert "dest=Desktop" in prog and src == "follow-up 93%"

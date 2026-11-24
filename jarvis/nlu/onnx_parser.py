@@ -21,7 +21,7 @@ from .copy_guard import copy_ok
 class ONNXParser:
     def __init__(self, encoder: Path, decoder: Path, tokenizer: Path, beam: int = 4,
                  min_confidence: float = 0.55, max_src: int = 160, max_tgt: int = 160,
-                 sessions: tuple | None = None):
+                 sessions: tuple | None = None, meta: Path | None = None):
         self.tok = BPETokenizer.load(tokenizer)
         if sessions is None:
             import onnxruntime as ort
@@ -33,8 +33,8 @@ class ONNXParser:
         self.enc, self.dec = sessions
         self.knows = None
         try:
-            meta = json.loads((Path(encoder).parent / "intent_onnx.json").read_text(encoding="utf-8"))
-            self.knows = meta.get("knows")
+            info = json.loads((Path(meta) if meta else Path(encoder).parent / "intent_onnx.json").read_text(encoding="utf-8"))
+            self.knows = info.get("knows")
         except (OSError, ValueError, TypeError):
             pass
         self.beam, self.min_confidence = beam, min_confidence

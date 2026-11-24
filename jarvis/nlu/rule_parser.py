@@ -146,6 +146,12 @@ RULES: list[tuple[re.Pattern, callable]] = [
     (re.compile(r"^(?:roll ?back|revert|undo) (?:the |your )?(?:model|model update|last model|update)"
                 r"|^(?:go back|switch back) to the (?:previous|old|last) model|^purana model wapas (?:lao|lagao)", re.I),
      lambda m, t: "training(action=rollback)"),
+    (re.compile(r"^(?:(?:hey )?jarvis,? )?(?:let'?s |i want to |can we |open (?:the )?)?(?:review|check|go through|label)"
+                r" (?:my |the |this week'?s |your )?(?:commands|mistakes|doubts|unsure commands|weekly review|review)"
+                r"(?: (?:you|that you) (?:weren'?t|were not) sure about)?(?: please| now)?$"
+                r"|^(?:weekly review|show (?:me )?what you (?:got wrong|weren'?t sure about))$"
+                r"|^(?:mere )?commands? review karo$|^review karte hain$", re.I),
+     lambda m, t: "training(action=review)"),
     (re.compile(r"^(?:pause|hold) (?:the )?training$", re.I), lambda m, t: "training(action=pause)"),
     (re.compile(r"^(?:resume|continue|unpause) (?:the )?training$", re.I), lambda m, t: "training(action=resume)"),
     (re.compile(r"^(?:training status|how(?:'s| is) (?:the )?training(?: going)?|is (?:the )?training (?:done|finished)"

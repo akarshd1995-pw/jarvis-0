@@ -29,6 +29,7 @@ def start_tray(actions: dict[str, Callable[[], None]]):
         pystray.MenuItem("Open command bar", lambda: actions["open"](), default=True),
         pystray.MenuItem("Show / hide HUD", lambda: actions["hud"](), visible=bool(actions.get("hud"))),
         pystray.MenuItem("Settings", lambda: actions["settings"]()),
+        pystray.MenuItem("Weekly review", lambda: actions["review"](), visible=bool(actions.get("review"))),
         pystray.MenuItem("Check for updates", lambda: actions["update"]()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit Jarvis", lambda: actions["quit"]()),

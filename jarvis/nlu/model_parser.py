@@ -32,6 +32,8 @@ class ModelParser:
         self.min_confidence = min_confidence
         torch.set_num_threads(max(1, min(4, torch.get_num_threads())))
 
+    last_alts: list = []
+
     def parse(self, text: str) -> tuple[Program | None, float]:
         """Returns (program or None, confidence in 0..1)."""
         ids = self.tok.encode(text)[: self.model.cfg.max_src]
@@ -48,11 +50,15 @@ class ModelParser:
                                       complete_ok=lambda ids: is_complete(decode(ids)))
             if results:
                 break
+        self.last_alts = []                       # phase 39: every valid reading, best first
+        best = None
         for score, out in results:
             conf = math.exp(score / max(1, len(out) + 1))
             try:
                 prog = parse(self.tok.decode(out))
             except DSLError:
                 continue
-            return (prog if conf >= self.min_confidence else None), conf
-        return None, 0.0
+            self.last_alts.append((conf, str(prog)))
+            if best is None:
+                best = ((prog if conf >= self.min_confidence else None), conf)
+        return best or (None, 0.0)

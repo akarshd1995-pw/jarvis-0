@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 
 RULES_FIRST = {"window", "desktop", "media", "brightness", "set_volume", "radio", "screenshot", "screen_record",
                "power", "training", "briefing", "maintenance", "directions"}
+# New values of an action the model already knows: rules handle them until the model learned that feature
+NEW_VALUES = {("training", "review"): "usage_review"}
 PLAY_WORDS = re.compile(r"\b(play|put on|stream|start playing|chalao|chala do|bajao|lagao|sunao|play karo)\b", re.I)
 
 
@@ -145,6 +147,7 @@ class Brain:
     def __init__(self, checkpoint: Path | None = None, tokenizer: Path | None = None,
                  min_confidence: float = 0.55, prefer: str = "auto"):
         self._args = (checkpoint, tokenizer, min_confidence, prefer)
+        self.last_detail: dict = {"conf": None, "alts": []}
         self._stamp = self._files_stamp()
         self._load(*self._args)
 
@@ -221,6 +224,9 @@ class Brain:
         return prog
 
     def resolve(self, text: str) -> tuple[Program | None, str]:
+        """(program, how it was understood). self.last_detail keeps the model's confidence and runner-up
+        readings for real-usage learning (phase 39)."""
+        self.last_detail = {"conf": None, "alts": []}
         self.maybe_reload()
         text = text.strip()
         if not text:
@@ -233,11 +239,14 @@ class Brain:
         # model trained before they existed. After retraining, the model and the rules agree.
         ruled_first = rule_parse(text)
         if ruled_first is not None and any(c.action in RULES_FIRST and not self.knows(c.action)
+                                           or (c.action, str(c.args.get("action", ""))) in NEW_VALUES
+                                           and not self.knows(NEW_VALUES[(c.action, str(c.args.get("action", "")))])
                                            for c in ruled_first.calls):
             return ruled_first, "rules (model not trained on this yet)"
         model_unknown = None
         if self.model is not None:
             prog, conf = self.model.parse(text)
+            self.last_detail = {"conf": conf, "alts": list(getattr(self.model, "last_alts", []) or [])[:4]}
             if prog is not None:
                 gave_up = any(c.action in ("unknown", "unsupported") for c in prog.calls)
                 if not gave_up:

@@ -170,6 +170,7 @@ class SettingsWindow:
         from ..crypto import unprotect
         self.maps_key = tk.StringVar(value=unprotect(c.maps_api_key) if c.maps_api_key else "")
         self.maps_osm = tk.BooleanVar(value=c.maps_osm)
+        self.learn = tk.BooleanVar(value=c.learn_from_usage)
         self.mem_on = tk.BooleanVar(value=c.memory_enabled)
         self.mem_web = tk.BooleanVar(value=c.memory_browser)
         self.mem_folders = tk.StringVar(value=", ".join(c.memory_folders))
@@ -248,6 +249,8 @@ class SettingsWindow:
             self._title(pg, "Privacy", "Everything stays on this PC.")
             self._row(pg, "Encrypt the activity log", tog(self.encrypt), "Windows DPAPI: only your account can read it.")
             self._row(pg, "Store full window titles", tog(self.titles), "Off: only app names (used for briefings).")
+            self._row(pg, "Learn from my commands", tog(self.learn),
+                      "Keeps what you ask (encrypted, this PC only) so a weekly review can fix what I got wrong. /usage forget wipes it.")
             self._row(pg, "Index my files for search", tog(self.mem_on),
                       "\"find the invoice pdf\". Names and text of your files, kept in a local index.")
             self._row(pg, "Folders to index", lambda p: self._entry(p, self.mem_folders, 30),
@@ -299,6 +302,7 @@ class SettingsWindow:
         key = self.maps_key.get().strip()
         c.maps_api_key = protect(key) if key else ""        # encrypted to your Windows account
         c.maps_osm = self.maps_osm.get()
+        c.learn_from_usage = self.learn.get()
         c.memory_enabled, c.memory_browser = self.mem_on.get(), self.mem_web.get()
         c.memory_folders = [x.strip() for x in self.mem_folders.get().split(",") if x.strip()] or c.memory_folders
         c.briefing_auto = self.b_auto.get()

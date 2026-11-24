@@ -31,6 +31,8 @@ HELP = """Commands:
   /fix <program>  save the correct program for your last command (trains the next model)
   /improve        fine-tune on your corrections now (switches only if better)
   /doctor         health check: tests every part of Jarvis and repairs what it can
+  /review         go through the commands I wasn't sure about (also: "review my commands")
+  /usage          how sure I've been this week; /usage forget wipes the saved commands
   /backup         back up your settings, history, corrections and models now
   /models         model versions · /rollback [vNNN] go back to an earlier one
   /good           confirm the last result was right (also saved as training data)
@@ -67,6 +69,14 @@ class Jarvis:
         except Exception as e:
             log.warning("recovery check failed: %s", e)
             self.recovered = {}
+        from .usage import UsageLog                    # phase 39: learn from how you actually talk
+        self.usage = UsageLog(config.db_path, encrypt=config.encrypt_logs, enabled=config.learn_from_usage,
+                              corrections=self.data_root / "user_corrections.jsonl")
+        try:
+            self.usage.prune()
+        except Exception as e:
+            log.warning("usage prune failed: %s", e)
+        REGISTRY["training"] = self._training_action
         self.briefings = briefing.Scheduler(config.data_dir / "briefing_state.json", config.briefing_morning,
                                             config.briefing_evening, enabled=config.briefing_auto)
 
@@ -252,6 +262,7 @@ class Jarvis:
             downloads = None
         facts = briefing.gather(kind, self.store, self.sampler.snapshot if self.sampler else None, self.job_logs,
                                 PROJECT_ROOT / "checkpoints" / "eval_report.txt", downloads, now)
+        facts.learning = self.learning_lines(now)
         return briefing.render(facts, self.config.persona_name, self.config.persona_address, self.config.persona_tone)
 
     def _briefing_action(self, args, ctx, dry_run: bool):
@@ -350,6 +361,10 @@ class Jarvis:
                 self.hooks["restart"]()
                 return msg + "\nRestarting..."
             return msg + ("\nRestart Jarvis to use the new version." if changed else "")
+        if cmd == "/review":
+            return self._review_cmd(arg)
+        if cmd == "/usage":
+            return self._usage_cmd(arg)
         if self.last_text is None:
             return "No previous command to label yet."
         if cmd == "/fix":
@@ -358,14 +373,17 @@ class Jarvis:
             except DSLError as e:
                 return f"That program isn't valid: {e}"
             self._append("user_corrections.jsonl", {"text": self.last_text, "program": program})
+            self._safe(self.usage.mark_last, "fixed", program)
             return f'Saved. Next training run will learn: "{self.last_text}" -> {program}'
         if cmd == "/good":
             if not self.last_program:
                 return "The last command wasn't understood, so there's nothing to confirm. Use /fix instead."
             self._append("user_corrections.jsonl", {"text": self.last_text, "program": self.last_program})
+            self._safe(self.usage.mark_last, "right", self.last_program)
             return "Thanks, saved as a confirmed example."
         if cmd == "/wrong":
             self._append("needs_label.jsonl", {"text": self.last_text, "predicted": self.last_program})
+            self._safe(self.usage.mark_last, "new")
             return "Flagged. Use /fix <program> to give the right answer, or label it later in data/needs_label.jsonl."
         return f"Unknown command {cmd}. Type /help."
 
@@ -510,8 +528,12 @@ class Jarvis:
                 source = "smalltalk"
             else:
                 reply = self.persona.result(ActionResult("", kind="unknown")) if prog else self.persona.unparsed()
+            self._learn(text, prog, source)
             self._hud("success" if source == "smalltalk" else "error", reply, hold=2)
             return self._with_details(reply, source, prog)
+        if any(c.action == "undo" for c in prog.calls):
+            self._safe(self.usage.mark_undone)          # undoing right away = it probably misunderstood
+        self._learn(text, prog, source)
         report = self.executor.run(prog)
         for r in report.results:                    # memory search: rows the command bar can show and open
             if r.kind == "memory" and r.data.get("results"):
@@ -520,6 +542,124 @@ class Jarvis:
         state = "error" if report.failures else ("idle" if report.declined and not report.results else "success")
         self._hud(state, reply, hold=2)
         return self._with_details(reply, source, prog, report)
+
+    @staticmethod
+    def _safe(fn, *a, **kw):
+        try:
+            return fn(*a, **kw)
+        except Exception as e:                       # learning must never break a command
+            log.warning("usage log: %s", e)
+            return None
+
+    def _learn(self, text: str, prog, source: str) -> None:
+        self._safe(self.usage.record, text, str(prog) if prog is not None else None, source,
+                   getattr(self.brain, "last_detail", None))
+
+    # ------------------------------------------------------------ phase 39: weekly review
+    def review_items(self, limit: int = 10):
+        return self._safe(self.usage.to_review, limit) or []
+
+    def review_parse(self, text: str) -> str | None:
+        prog, _ = self.brain.resolve(text)
+        return str(prog) if prog is not None and str(prog) != "unknown()" else None
+
+    def _review_state(self) -> dict:
+        try:
+            return json.loads((self.config.data_dir / "review_state.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def review_done(self, summary: str = "") -> None:
+        st = self._review_state()
+        st["last"] = time.time()
+        try:
+            (self.config.data_dir / "review_state.json").write_text(json.dumps(st), encoding="utf-8")
+        except OSError:
+            pass
+
+    def learning_lines(self, now: float | None = None) -> list[str]:
+        """For the briefing: a weekly nudge to review, and a drift alert when I'm suddenly less sure."""
+        from . import usage as U
+        if not self.config.learn_from_usage:
+            return []
+        now = now or time.time()
+        out = []
+        d = self._safe(self.usage.drift, now)
+        if d:
+            out.append(U.drift_line(d))
+        last = self._review_state().get("last", 0)
+        if self.config.review_weekly and (d or now - last >= 6 * 86400):
+            n = len(self.review_items())
+            if n >= 3:
+                out.append(U.review_line(n))
+        return out
+
+    def _training_action(self, args, ctx, dry_run: bool):
+        from .actions import training as tr
+        if str(args.get("action")) != "review":
+            return tr.training(args, ctx, dry_run)
+        items = self.review_items()
+        if dry_run or not items:
+            return ActionResult(f"{len(items)} to review", kind="training",
+                                data={"action": "review", "n": len(items), "off": not self.config.learn_from_usage})
+        opened = "review" in self.hooks
+        if opened:
+            self.hooks["review"]()
+        return ActionResult(f"{len(items)} to review", kind="training",
+                            data={"action": "review", "n": len(items), "opened": opened,
+                                  "text": self._review_text(items) if not opened else ""})
+
+    def _review_text(self, items) -> str:
+        from .nlu.explain import explain
+        rows = [f"{n}. \"{it.text}\" -> I did: {explain(it.program)}" for n, it in enumerate(items, 1)]
+        return "\n".join(rows) + ("\n\n/review ok N  ·  /review fix N <clearer wording or program>  ·  /review skip N")
+
+    def _review_cmd(self, arg: str) -> str:
+        """Text-mode review (CLI): /review, /review ok 2, /review fix 2 play super machi song, /review skip 2."""
+        items = self.review_items()
+        parts = arg.split(maxsplit=2)
+        if not parts:
+            if not items:
+                return "Nothing to review: I was sure about everything lately."
+            return self._review_text(items)
+        verb = parts[0].lower()
+        try:
+            it = items[int(parts[1]) - 1]
+        except (IndexError, ValueError):
+            return "Which one? e.g. /review ok 2"
+        if verb in ("ok", "right", "good"):
+            self.usage.confirm(it.id) if it.program else self.usage.fix(it.id, "unknown()")
+            done = f'Confirmed: "{it.text}".'
+        elif verb == "skip":
+            self.usage.skip(it.id)
+            done = f'Skipped "{it.text}".'
+        elif verb == "fix" and len(parts) == 3:
+            try:
+                program = canonical(parts[2])
+            except DSLError:
+                program = self.review_parse(parts[2])
+            if not program:
+                return "I couldn't understand that either. Try other words, or give the program."
+            self.usage.fix(it.id, program)
+            from .nlu.explain import explain
+            done = f'Saved: "{it.text}" means {explain(program)}.'
+        else:
+            return "Use /review ok N, /review fix N <what you meant>, or /review skip N."
+        self.review_done()
+        return done + " I'll learn it in the next improvement run."
+
+    def _usage_cmd(self, arg: str) -> str:
+        if arg.strip() == "forget":
+            n = self.usage.forget()
+            return f"Forgot {n} saved command{'s' * (n != 1)}. (Turn learning off in Settings > Privacy to stop saving.)"
+        now = time.time()
+        w, u = self.usage.stats(now - 7 * 86400, now), self.usage.stats(now - 35 * 86400, now - 7 * 86400)
+        if not w["n"] and not u["n"]:
+            return "No commands saved yet." if self.config.learn_from_usage else "Learning from your commands is off."
+        def f(s):
+            c = f", model {s['conf']:.0%} sure on average" if s["conf"] is not None else ""
+            return f"{s['n']} commands, {s['unsure']:.0%} unsure{c}, {s['undone']} undone"
+        return f"This week: {f(w)}.\nThe 4 weeks before: {f(u)}.\nTo review: {len(self.review_items())}."
 
     def _with_details(self, reply: str, source: str, prog, report=None) -> str:
         if not self.config.show_details:
@@ -660,6 +800,13 @@ def main() -> None:
     single.on_show = lambda: bar.post("open")
     jarvis.hooks["settings"] = lambda: bar.post("call", lambda: SettingsWindow(bar.root, config))
     jarvis.hooks["restart"] = lambda: bar.post("call", lambda: (bar.root.destroy(), restart()))
+
+    def open_review():
+        from .ui.review import ReviewSession, ReviewWindow
+        items = jarvis.review_items()
+        if items:
+            ReviewWindow(bar.root, ReviewSession(jarvis.usage, items, jarvis.review_parse), on_done=jarvis.review_done)
+    jarvis.hooks["review"] = lambda: bar.post("call", open_review)
     from .actions.control import remember_foreground
 
     def on_hotkey():
@@ -749,6 +896,7 @@ def main() -> None:
         "open": lambda: bar.post("open"),
         "hud": (lambda: bar.post("call", hud.toggle)) if hud else None,
         "settings": jarvis.hooks["settings"],
+        "review": jarvis.hooks["review"],
         "update": lambda: threading.Thread(target=tray_update, daemon=True).start(),
         "quit": lambda: bar.post("quit"),
     })

@@ -38,6 +38,7 @@ class ONNXParser:
         except (OSError, ValueError, TypeError):
             pass
         self.beam, self.min_confidence = beam, min_confidence
+        self.last_alts: list[tuple[float, str]] = []
         self.max_src, self.max_tgt = max_src, max_tgt
 
     def _encode(self, ids: list[int]):
@@ -73,11 +74,15 @@ class ONNXParser:
                                        complete_ok=lambda t: is_complete(decode(t)))
             if results:
                 break
+        self.last_alts = []                       # phase 39: every valid reading, best first
+        best = None
         for score, out in results:
             conf = math.exp(score / max(1, len(out) + 1))
             try:
                 prog = parse(decode(out))
             except DSLError:
                 continue
-            return (prog if conf >= self.min_confidence else None), conf
-        return None, 0.0
+            self.last_alts.append((conf, str(prog)))
+            if best is None:
+                best = ((prog if conf >= self.min_confidence else None), conf)
+        return best or (None, 0.0)

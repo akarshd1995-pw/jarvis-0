@@ -122,6 +122,8 @@ class Config:
     min_confidence: float = 0.55        # below this the model's answer is not executed
     confirm_actions: list[str] = field(default_factory=lambda: ["move_files", "undo", "window_close", "radio_off"])
     encrypt_logs: bool = True           # DPAPI-encrypt the activity log (Windows)
+    learn_from_usage: bool = True       # phase 39: keep your commands (on this PC) to find what to learn
+    review_weekly: bool = True          # mention the 2-minute review in the briefing
     keep_window_titles: bool = False    # store full window titles (off: only app name + hash)
     model_backend: str = "auto"         # auto | onnx | torch
     model_checkpoint: str = "checkpoints/intent.pt"

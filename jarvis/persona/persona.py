@@ -350,6 +350,14 @@ class Persona:
         if d["action"] == "improve":
             key = "running" if d.get("running") else "nomodel" if d.get("nomodel") else "started"
             return f"training_improve_{key}", {}
+        if d["action"] == "review":
+            if d.get("off"):
+                return "training_review_off", {}
+            if not d.get("n"):
+                return "training_review_none", {}
+            if d.get("opened"):
+                return "training_review_open", {"n": d["n"]}
+            return "training_review_text", {"n": d["n"], "list": d.get("text", "")}
         if d["action"] == "rollback":
             return ("training_rollback", {"version": d["version"]}) if d.get("ok") else \
                 ("training_rollback_none", {"msg": d.get("msg", "")})

@@ -258,6 +258,11 @@ _MON = {
         "training_improve_running": ["I'm already improving{A}. You'll hear the result when it's done."],
         "training_improve_nomodel": ["There's no trained model to improve yet{A}. Run train_night.bat once first."],
         "training_rollback": ["Done{A}. I'm back on {version}."],
+        "training_review_open": ["Here are the {n} commands I was least sure about{A}. Press 1 if I got it right, "
+                                 "2 if not; it takes about two minutes."],
+        "training_review_text": ["{n} commands I wasn't sure about{A}:\n{list}"],
+        "training_review_none": ["Nothing to review{A}: I was sure about everything you asked lately."],
+        "training_review_off": ["Learning from your commands is off{A}. Turn it on in Settings > Privacy."],
         "training_rollback_none": ["{msg}"],
         "training_resumed": ["Training resumed{A}.", "Back to work. Training has resumed."],
         "training_resume_none": ["Nothing was paused{A}."], "training_pause_none": ["No training is running right now{A}."],
@@ -285,6 +290,8 @@ _MON = {
     "minimal": {
         "training_paused": ["Training paused."], "training_resumed": ["Training resumed."],
         "training_improve_started": ["Improving in the background. ~30 min."], "training_rollback": ["Back on {version}."],
+        "training_review_open": ["{n} to review. 1 = right, 2 = wrong."], "training_review_text": ["{n} to review:\n{list}"],
+        "training_review_none": ["Nothing to review."], "training_review_off": ["Learning is off (Settings > Privacy)."],
         "training_resume_none": ["Nothing paused."], "training_pause_none": ["No training running."],
         "training_status": ["{Name}: {pct}, {eta} left."], "training_status_paused": ["{Name}: paused at {pct}."],
         "training_status_done": ["{Name}: done, best {best}."], "training_status_none": ["No training running."],

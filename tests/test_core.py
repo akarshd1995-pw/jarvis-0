@@ -1671,3 +1671,132 @@ def test_directions_rules():
     assert str(rule_parse("airport tak kitna time lagega")) == 'directions(destination="airport")'
     assert str(rule_parse("how long to get home by metro")) == 'directions(destination="home", mode=transit)'
     assert rule_parse("how long is the training left") is None or "directions" not in str(rule_parse("how long is the training left"))
+
+
+# ---------------------------------------------------------------- phase 39: real-usage learning
+def test_doubt_score():
+    from jarvis.usage import doubt_score
+    assert doubt_score("dsl", "undo()", None, []) == 0
+    assert doubt_score("unparsed", None, None, []) == 1
+    sure = doubt_score("model 97%", 'open_app(name="chrome")', 0.97, [[0.97, 'open_app(name="chrome")']])
+    assert sure < 0.1
+    torn = doubt_score("model 81%", 'play_media(query="sup", site=youtube)', 0.81,
+                       [[0.81, 'play_media(query="sup", site=youtube)'], [0.78, 'play_media(query="super machi", site=youtube)']])
+    assert torn >= 0.8
+    assert doubt_score("rules (model unsure)", 'directions(destination="x")', None, []) >= 0.8
+    assert doubt_score("rules (model not trained on this yet)", 'directions(destination="x")', None, []) < 0.35
+
+
+def _usage(tmp_path):
+    from jarvis.usage import UsageLog
+    return UsageLog(tmp_path / "u.db", encrypt=False, corrections=tmp_path / "corr.jsonl")
+
+
+def test_usage_review_queue_and_answers(tmp_path):
+    import json
+    from jarvis.usage import ReviewSession
+    u = _usage(tmp_path)
+    alts = [[0.6, 'play_media(query="sup", site=youtube)'], [0.55, 'play_media(query="super machi", site=youtube)']]
+    a = u.record("play super machi", 'play_media(query="sup", site=youtube)', "model 60%", {"conf": 0.6, "alts": alts})
+    u.record("Play super machi!", 'play_media(query="sup", site=youtube)', "model 60%", {"conf": 0.6, "alts": alts})
+    u.record("open chrome", 'open_app(name="chrome")', "model 98%", {"conf": 0.98, "alts": [[0.98, 'open_app(name="chrome")']]})
+    b = u.record("blorp the flarn", None, "unparsed")
+    items = u.to_review()
+    assert [i.text for i in items] == ["blorp the flarn", "Play super machi!"]       # sure ones and repeats left out
+    s = ReviewSession(u, items, parse_fn=lambda t: None)
+    assert s.choices(items[1])[0][0] == 'play_media(query="super machi", site=youtube)'   # runner-up offered
+    s.skip()
+    s.fix(s.choices(items[1])[0][0])
+    rows = [json.loads(l) for l in (tmp_path / "corr.jsonl").read_text().splitlines()]
+    assert rows == [{"text": "Play super machi!", "program": 'play_media(query="super machi", site=youtube)', "from": "review"}]
+    assert u.to_review() == []                     # answered phrasings don't come back
+    assert "1 corrected" in s.summary()
+
+
+def test_usage_undo_and_off(tmp_path):
+    from jarvis.usage import UsageLog
+    u = _usage(tmp_path)
+    u.record("move my videos to music", 'move_files(src="Downloads", ext=video, dest="Music")', "model 95%",
+             {"conf": 0.95, "alts": []})
+    assert u.to_review() == []
+    assert u.mark_undone()
+    assert u.to_review()[0].text == "move my videos to music"
+    off = UsageLog(tmp_path / "off.db", encrypt=False, enabled=False)
+    assert off.record("hi there", None, "unparsed") is None and off.real_texts() == []
+    assert u.forget() == 1
+
+
+def test_usage_drift(tmp_path):
+    import time
+    from jarvis.usage import drift_line
+    u = _usage(tmp_path)
+    now = time.time()
+    for i in range(40):                            # usual weeks: 5% unsure
+        u.record(f"open app {i}", 'open_app(name="x")', "model 95%", {"conf": 0.95 if i % 20 else 0.5},
+                 ts=now - 14 * 86400 - i * 3600)
+    for i in range(20):                            # this week: 40% unsure
+        u.record(f"thing {i}", 'open_app(name="x")', "model 95%", {"conf": 0.95 if i % 5 > 1 else 0.5},
+                 ts=now - i * 3600)
+    d = u.drift(now)
+    assert d and "less sure" in drift_line(d)
+    assert u.drift(now - 7 * 86400) is None
+
+
+def test_report_card_and_gate():
+    from training.loop import card, decide_real
+    rows = [{"text": f"open x{i}", "ran": f'open_app(name="x{i}")', "label": None, "status": "new"} for i in range(40)]
+    rows.append({"text": "play super machi", "ran": 'play_media(query="sup", site=youtube)',
+                 "label": 'play_media(query="super machi", site=youtube)', "status": "fixed"})
+    live = [f'open_app(name="x{i}")' for i in range(40)] + ['play_media(query="sup", site=youtube)']
+    good = live[:40] + ['play_media(query="super machi", site=youtube)']
+    r = card(rows, live, good)
+    assert r["changed_n"] == 1 and r["labelled_right"] == 1 and r["labelled_right_live"] == 0
+    assert decide_real(r)[0]
+    drifted = ['unknown()'] * 5 + live[5:40] + good[40:]
+    ok, why = decide_real(card(rows, live, drifted))
+    assert not ok and "everyday" in why
+    forgot = good[:40] + live[40:]
+    r2 = card(rows, good, forgot)
+    assert not decide_real(r2)[0]
+
+
+def test_review_rules_and_explain():
+    from jarvis.nlu.rule_parser import rule_parse
+    from jarvis.nlu.explain import explain
+    assert str(rule_parse("review my commands")) == "training(action=review)"
+    assert explain('move_files(src="Downloads", ext=video, new_folder="Videos")') == \
+        'move video files from Downloads to a new folder "Videos"'
+    assert explain(None).startswith("nothing")
+
+
+def test_jarvis_records_usage_and_review_cmd(tmp_path):
+    from jarvis.config import Config
+    from jarvis.daemon import Jarvis
+    cfg = Config(data_dir=tmp_path, encrypt_logs=False)
+    j = Jarvis(cfg, confirm=lambda q: True, data_root=tmp_path / "data")
+    j.handle("blorp the flarn zzz")
+    j.handle("/wrong")
+    out = j.handle("/review")
+    assert "blorp the flarn zzz" in out
+    assert "means" in j.handle('/review fix 1 open_app(name="notepad")')
+    assert "open_app" in (tmp_path / "data" / "user_corrections.jsonl").read_text()
+    assert "Nothing to review" in j.handle("/review")
+    assert "This week" in j.handle("/usage")
+
+
+def test_new_enum_value_uses_rules_until_learned():
+    from jarvis.nlu.brain import Brain
+
+    class Old:
+        knows = {"actions": ["training", "open_app"], "features": []}
+        last_alts = []
+
+        def parse(self, text):
+            from jarvis.dsl.grammar import parse
+            return parse("training(action=status)"), 0.9
+    b = Brain()
+    b.model, b.backend = Old(), "fake"
+    prog, src = b.resolve("review my commands")
+    assert str(prog) == "training(action=review)" and src.startswith("rules")
+    Old.knows = {"actions": ["training"], "features": ["usage_review"]}
+    assert str(b.resolve("review my commands")[0]) == "training(action=status)"   # trained model decides

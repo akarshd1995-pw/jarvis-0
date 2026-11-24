@@ -39,17 +39,23 @@ def load_model(checkpoint: Path, device):
 
 
 def load_rows(path: Path, tok, cfg, limit: int = 10_000) -> list:
-    rows = []
+    latest: dict = {}                     # a text listed twice (a correction corrected again): the last one wins
     with open(path, encoding="utf-8") as f:
         for line in f:
+            if not line.strip():
+                continue
             ex = json.loads(line)
-            src = tok.encode(ex["text"])[: cfg.max_src]
-            tgt = tok.encode(ex["program"], bos=True, eos=True)
-            if len(tgt) <= cfg.max_tgt:
-                rows.append((src, tgt, canonical(ex["program"]), ex["text"]))
-            if len(rows) >= limit:
-                break
-    return rows
+            key = " ".join(ex["text"].lower().split())
+            if key not in latest and len(latest) >= limit:
+                continue
+            latest[key] = ex
+    rows = []
+    for ex in latest.values():
+        src = tok.encode(ex["text"])[: cfg.max_src]
+        tgt = tok.encode(ex["program"], bos=True, eos=True)
+        if len(tgt) <= cfg.max_tgt:
+            rows.append((src, tgt, canonical(ex["program"]), ex["text"]))
+    return rows[:limit]
 
 
 def evaluate_rows(model, tok, rows, device) -> dict:

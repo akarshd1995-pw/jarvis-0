@@ -59,6 +59,7 @@ class Facts:
     clutter: dict = field(default_factory=dict)  # files, gb, old, old_gb, new_today
     apps: list[tuple[str, int]] = field(default_factory=list)   # [(label, minutes)]
     improve: str = ""                          # what the self-improving loop did overnight
+    learning: list[str] = field(default_factory=list)   # phase 39: weekly review nudge, drift alert
     active_min: int = 0
     commands: int = 0
     alerts: int = 0
@@ -201,7 +202,10 @@ def improve_line(r: dict) -> str:
     if "unseen" in live and "unseen" in cand:
         nums = f" ({cand['unseen']['exact']:.2%} on new phrasing, was {live['unseen']['exact']:.2%})"
     if r.get("promoted"):
-        return f"I fine-tuned myself on {on}{nums} and switched to the better model, {r.get('version', 'a new version')}."
+        from .usage import report_card_line
+        card = report_card_line(r.get("real"))
+        return (f"I fine-tuned myself on {on}{nums} and switched to the better model, {r.get('version', 'a new version')}."
+                + (f" {card}" if card else ""))
     return f"I tried fine-tuning on {on}, but {r.get('reason', 'it was not better')}, so I kept the current model."
 
 
@@ -299,6 +303,7 @@ def render(f: Facts, name: str = "Jarvis", address: str = "sir", tone: str = "bu
 
     if f.improve:
         lines.append(f.improve)
+    lines.extend(f.learning)
 
     # Downloads clutter
     c = f.clutter

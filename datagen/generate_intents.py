@@ -925,6 +925,11 @@ TRAINING_PHRASES = {
                 "get better from my fixes", "update the command model", "self improve tonight", "improve the model",
                 "train yourself on my corrections", "khud ko improve karo", "apne aap ko behtar karo",
                 "model ko fine tune karo", "learn from your mistakes"],
+    "review": ["review my commands", "let's do the weekly review", "show me what you weren't sure about",
+               "go through my commands", "check the commands you weren't sure about", "weekly review",
+               "open the review", "review this week's commands", "let's review your mistakes", "label my commands",
+               "commands review karo", "review karte hain", "what did you get wrong this week",
+               "teach you from my commands", "go through your doubts"],
     "rollback": ["roll back the model", "go back to the previous model", "undo the model update", "revert the model",
                  "switch back to the old model", "the new model is worse, roll it back", "purana model wapas lao",
                  "model rollback karo", "restore the previous model"],
@@ -1018,7 +1023,7 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions"]
+           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review"]
 
 
 # ---------------------------------------------------------------- directions (routes, travel time)
@@ -1298,7 +1303,10 @@ def build(n_train: int, n_eval: int, seed: int, extra: Path | None = None, extra
         splits[name] = [e for e in splits[name] if _norm(e["text"]) not in conflicts]
     if extra and extra.exists():
         rows = [json.loads(l) for l in extra.read_text(encoding="utf-8").splitlines() if l.strip()]
-        rows = [{"text": r["text"], "program": canonical(r["program"])} for r in rows]
+        latest = {}                                   # the same text corrected twice: the latest answer wins
+        for r in rows:
+            latest[_norm(r["text"])] = {"text": r["text"], "program": canonical(r["program"])}
+        rows = list(latest.values())
         splits["train"] += rows * extra_weight
         rng.shuffle(splits["train"])
         print(f"added {len(rows)} user corrections x{extra_weight}")

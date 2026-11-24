@@ -161,6 +161,112 @@ def score_both(live_ckpt: Path, cand_ckpt: Path, data: Path, tokenizer: Path, li
     return out
 
 
+# ------------------------------------------------------------------ report card on your real commands (phase 39)
+def real_commands(limit: int = 3000) -> list[dict]:
+    """Your recent real commands from Jarvis's private usage log (empty if learning is off or nothing yet)."""
+    try:
+        from jarvis.config import Config
+        from jarvis.usage import UsageLog
+        cfg = Config.load()
+        if not cfg.db_path.exists():
+            return []
+        return UsageLog(cfg.db_path, encrypt=cfg.encrypt_logs).real_texts(limit=limit)
+    except Exception as e:                                  # never block training on this
+        log(f"(couldn't read your real commands: {e})")
+        return []
+
+
+def predict(model, tok, cfg, texts: list[str], device) -> list[str | None]:
+    import torch
+    from jarvis.dsl.grammar import DSLError, canonical
+    from training.tokenizer import BOS, EOS
+    from training.train import collate, eval_batches
+    rows = [(tok.encode(t)[: cfg.max_src] or [EOS], [BOS, EOS], None, i) for i, t in enumerate(texts)]
+    out: list[str | None] = [None] * len(texts)
+    amp = dict(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda")
+    for batch in eval_batches(rows):
+        src, src_pad, _, _ = collate(batch, device)
+        with torch.no_grad(), torch.autocast(**amp):
+            preds = model.greedy(src, src_pad, BOS, EOS)
+        for p, row in zip(preds.tolist(), batch):
+            raw = tok.decode(p[: p.index(EOS)] if EOS in p else p)
+            try:
+                out[row[3]] = canonical(raw)
+            except DSLError:
+                out[row[3]] = None
+    return out
+
+
+def _canon(p: str | None) -> str | None:
+    from jarvis.dsl.grammar import DSLError, canonical
+    try:
+        return canonical(p) if p else None
+    except DSLError:
+        return None
+
+
+def card(rows: list[dict], live: list, cand: list) -> dict:
+    """Pure scoring (unit-tested). rows: {text, ran, label, status}; live/cand: each model's reading.
+      same/changed   how many of your commands the new model reads differently
+      reviewed       accuracy on the ones you confirmed or fixed in the weekly review
+      everyday       agreement with what Jarvis ran and you didn't undo (a silver label)"""
+    r = {"n": len(rows), "same": 0, "changed_n": 0, "changed": [], "labelled": 0, "labelled_right": 0,
+         "labelled_right_live": 0, "silver": 0, "silver_live": 0, "silver_cand": 0}
+    for row, a, b in zip(rows, live, cand):
+        if a == b:
+            r["same"] += 1
+        else:
+            r["changed_n"] += 1
+            if len(r["changed"]) < 15:
+                r["changed"].append({"text": row["text"], "live": a, "candidate": b})
+        gold = _canon(row.get("label")) if row.get("status") in ("right", "fixed") else None
+        if gold:
+            r["labelled"] += 1
+            r["labelled_right"] += b == gold
+            r["labelled_right_live"] += a == gold
+        elif row.get("status") == "new" and _canon(row.get("ran")) not in (None, "unknown()"):
+            ran = _canon(row["ran"])
+            r["silver"] += 1
+            r["silver_live"] += a == ran
+            r["silver_cand"] += b == ran
+    return r
+
+
+def real_card(live_ckpt: Path, cand_ckpt: Path, tokenizer: Path, rows: list[dict]) -> dict | None:
+    if not rows:
+        return None
+    import torch
+    from training.evaluate import load_model
+    from training.tokenizer import BPETokenizer
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tok = BPETokenizer.load(tokenizer)
+    preds = {}
+    for who, ck in (("live", live_ckpt), ("candidate", cand_ckpt)):
+        model, cfg = load_model(ck, device)
+        preds[who] = predict(model, tok, cfg, [r["text"] for r in rows], device)
+        del model
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+    return card(rows, preds["live"], preds["candidate"])
+
+
+SILVER_EPS = 0.02          # the new model may not drift away from what already works for you
+
+
+def decide_real(real: dict | None) -> tuple[bool, str]:
+    if not real:
+        return True, ""
+    if real["labelled"] and real["labelled_right"] < real["labelled_right_live"]:
+        return False, (f"it got fewer of your reviewed commands right ({real['labelled_right']} vs "
+                       f"{real['labelled_right_live']} of {real['labelled']})")
+    if real["silver"] >= 30:
+        lv, cd = real["silver_live"] / real["silver"], real["silver_cand"] / real["silver"]
+        if cd < lv - SILVER_EPS:
+            return False, (f"it would read {real['silver_live'] - real['silver_cand']} of your everyday commands "
+                           f"differently from what already works ({cd:.0%} vs {lv:.0%})")
+    return True, ""
+
+
 def decide(scores: dict) -> tuple[bool, str]:
     live, cand = scores["live"], scores["candidate"]
     worse = [f"{k} {cand[k]['exact']:.2%} vs {live[k]['exact']:.2%}" for k in cand
@@ -201,7 +307,17 @@ def run(args) -> dict:
     log("scoring the live model and the new one on the same tests...")
     scores = score_both(live_ckpt, cand, data, tokenizer, args.limit)
     keep, why = decide(scores)
-    report.update({"scores": {k: scores[k] for k in ("live", "candidate")}, "promoted": keep, "reason": why})
+    log("report card: reading your real commands with both models...")
+    real = real_card(live_ckpt, cand, tokenizer, real_commands())
+    if real:
+        log(f"  {real['n']} real commands: {real['same']} read the same, {real['changed_n']} differently; "
+            f"reviewed {real['labelled_right']}/{real['labelled']} (live {real['labelled_right_live']}); "
+            f"everyday {real['silver_cand']}/{real['silver']} (live {real['silver_live']})")
+        ok_real, why_real = decide_real(real)
+        if keep and not ok_real:
+            keep, why = False, why_real
+    report.update({"scores": {k: scores[k] for k in ("live", "candidate")}, "promoted": keep, "reason": why,
+                   "real": real})
     _save_mistakes(scores.get("live_errors", []))
     if keep:
         if not versions():                                  # keep the original as v000 to roll back to

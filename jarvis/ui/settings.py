@@ -28,7 +28,7 @@ class Toggle(tk.Canvas):
 
 
 class SettingsWindow:
-    PAGES = ["General", "Persona", "HUD & alerts", "Briefings", "Folders & apps", "Privacy"]
+    PAGES = ["General", "Persona", "HUD & alerts", "Briefings", "Places & maps", "Folders & apps", "Privacy"]
 
     def __init__(self, parent: tk.Misc, config: Config):
         self.config = config
@@ -165,6 +165,11 @@ class SettingsWindow:
         self.encrypt = tk.BooleanVar(value=c.encrypt_logs)
         self.titles = tk.BooleanVar(value=c.keep_window_titles)
         self.auto = tk.BooleanVar(value=autostart.is_enabled())
+        self.home_addr = tk.StringVar(value=(c.places or {}).get("home", ""))
+        self.work_addr = tk.StringVar(value=(c.places or {}).get("work", ""))
+        from ..crypto import unprotect
+        self.maps_key = tk.StringVar(value=unprotect(c.maps_api_key) if c.maps_api_key else "")
+        self.maps_osm = tk.BooleanVar(value=c.maps_osm)
         self.mem_on = tk.BooleanVar(value=c.memory_enabled)
         self.mem_web = tk.BooleanVar(value=c.memory_browser)
         self.mem_folders = tk.StringVar(value=", ".join(c.memory_folders))
@@ -214,6 +219,19 @@ class SettingsWindow:
             self._row(pg, "Morning briefing from", lambda p: self._entry(p, self.b_morning, 8),
                       "The first time you're at the PC after this time (until noon). HH:MM")
             self._row(pg, "Evening briefing at", lambda p: self._entry(p, self.b_evening, 8), "HH:MM")
+        elif name == "Places & maps":
+            self._title(pg, "Places & maps", "\"how long to get home\", \"fastest route to the airport\".")
+            self._row(pg, "Home", lambda p: self._entry(p, self.home_addr, 34), "An address or area, e.g. HSR Layout, Bengaluru")
+            self._row(pg, "Work", lambda p: self._entry(p, self.work_addr, 34), "Used for \"work\" / \"office\"")
+
+            def key_entry(p):
+                e = self._entry(p, self.maps_key, 34)
+                e.configure(show="•")
+                return e
+            self._row(pg, "Google Maps API key (optional)", key_entry,
+                      "For live-traffic times. Create one in Google Cloud with the Routes API turned on; it stays on this PC.")
+            self._row(pg, "Without a key, estimate with OpenStreetMap", tog(self.maps_osm),
+                      "Normal-traffic times (car, bike, walking). Google Maps always opens with live traffic.")
         elif name == "Folders & apps":
             self._title(pg, "Folders & apps", "Names you can use in commands, and where Jarvis may touch files.")
             tk.Label(pg, text="Folder aliases (JSON)", bg=T.SURFACE, fg=T.TEXT, font=T.F(10)).pack(anchor="w")
@@ -276,6 +294,11 @@ class SettingsWindow:
             if not _re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", var.get().strip()):
                 messagebox.showerror("Briefings", f"{label} time must look like 07:30.", parent=self.win)
                 return
+        c.places = {**(c.places or {}), "home": self.home_addr.get().strip(), "work": self.work_addr.get().strip()}
+        from ..crypto import protect
+        key = self.maps_key.get().strip()
+        c.maps_api_key = protect(key) if key else ""        # encrypted to your Windows account
+        c.maps_osm = self.maps_osm.get()
         c.memory_enabled, c.memory_browser = self.mem_on.get(), self.mem_web.get()
         c.memory_folders = [x.strip() for x in self.mem_folders.get().split(",") if x.strip()] or c.memory_folders
         c.briefing_auto = self.b_auto.get()

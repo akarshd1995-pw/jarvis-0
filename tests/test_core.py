@@ -1607,3 +1607,67 @@ def test_failure_reply_is_honest():
     assert "2 files didn't go through" in text and "report.xlsx (it's open in another app)" in text
     none = p.result(ActionResult("", kind="files", data={**d, "count": 0}))
     assert none.startswith("I couldn't move any of them")
+
+
+# ---------------------------------------------------------------- directions
+def _maps_ctx(tmp_path, **kw):
+    from jarvis.actions.base import Ctx
+    from jarvis.config import Config
+    cfg = Config(data_dir=tmp_path)
+    cfg.places = {"home": "HSR Layout, Bengaluru", "work": ""}
+    for k, v in kw.items():
+        setattr(cfg, k, v)
+    return Ctx(cfg, None, "b")
+
+
+def test_directions_google_live_traffic(tmp_path):
+    from jarvis.actions.maps import directions
+    from jarvis.persona.persona import Persona
+    opened, calls = [], []
+
+    def http(url, data=None, headers=None, timeout=8):
+        calls.append((url, data, headers))
+        return {"routes": [{"duration": "3600s", "staticDuration": "2700s", "distanceMeters": 38000,
+                            "description": "NH 44"},
+                           {"duration": "3120s", "staticDuration": "2600s", "distanceMeters": 41000,
+                            "description": "Hosur Rd"}]}
+    r = directions({"destination": "the airport"}, _maps_ctx(tmp_path, maps_api_key="plain:KEY"), False,
+                   http=http, open_url=opened.append)
+    assert "maps/dir" in opened[0] and "destination=the+airport" in opened[0]
+    url, body, headers = calls[0]
+    assert body["origin"]["address"] == "HSR Layout, Bengaluru" and body["routingPreference"] == "TRAFFIC_AWARE"
+    assert headers["X-Goog-Api-Key"] == "KEY"
+    text = Persona("Jarvis", "sir", "butler").result(r)
+    assert "52 minutes" in text and "Hosur Rd" in text and "current traffic" in text and "41 km" in text, text
+
+
+def test_directions_osm_and_missing_places(tmp_path):
+    from jarvis.actions.maps import directions, _geo_cache
+    from jarvis.persona.persona import Persona
+    import jarvis.actions.maps as M
+    M._last_nominatim[0] = 0.0
+    _geo_cache.clear()
+
+    def http(url, data=None, headers=None, timeout=8):
+        if "nominatim" in url:
+            return [{"lat": "12.91", "lon": "77.64", "display_name": "x"}]
+        return {"routes": [{"duration": 1800, "distance": 12000}]}
+    p = Persona("Jarvis", "sir", "butler")
+    r = directions({"destination": "indiranagar", "mode": "two_wheeler"}, _maps_ctx(tmp_path), False,
+                   http=http, open_url=lambda u: None)
+    assert "30 minutes" in p.result(r) and "OpenStreetMap" in p.result(r)
+    r = directions({"destination": "work"}, _maps_ctx(tmp_path), False, http=http, open_url=lambda u: None)
+    assert "don't know where your work is" in p.result(r)
+    ctx = _maps_ctx(tmp_path)
+    ctx.config.places = {}
+    r = directions({"destination": "goa"}, ctx, False, http=http, open_url=lambda u: None)
+    assert "Add your home address" in p.result(r)
+
+
+def test_directions_rules():
+    from jarvis.nlu.rule_parser import rule_parse
+    assert str(rule_parse("fastest route from koramangala to the airport")) == \
+        'directions(destination="airport", origin="koramangala")'
+    assert str(rule_parse("airport tak kitna time lagega")) == 'directions(destination="airport")'
+    assert str(rule_parse("how long to get home by metro")) == 'directions(destination="home", mode=transit)'
+    assert rule_parse("how long is the training left") is None or "directions" not in str(rule_parse("how long is the training left"))

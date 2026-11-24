@@ -90,6 +90,9 @@ SCHEMA: dict[str, dict] = {
                       "enum": {"kind": ["wifi", "bluetooth"], "state": ["on", "off"]}},
     "screenshot":    {"args": {"mode": "ident"}, "required": [], "enum": {"mode": ["full", "window", "region"]}},
     "screen_record": {"args": {"action": "ident"}, "required": ["action"], "enum": {"action": ["start", "stop"]}},
+    "directions":    {"args": {"destination": "str", "origin": "str", "mode": "ident"},   # routes / travel time
+                      "required": ["destination"],
+                      "enum": {"mode": ["driving", "two_wheeler", "walking", "transit", "bicycling"]}},
     "maintenance":   {"args": {"action": "ident"}, "required": ["action"],              # phase 29
                       "enum": {"action": ["health_check", "backup"]}},
     "briefing":      {"args": {"kind": "ident"}, "required": [],                         # morning / evening summary

@@ -20,7 +20,7 @@ from .rule_parser import rule_parse
 log = logging.getLogger(__name__)
 
 RULES_FIRST = {"window", "desktop", "media", "brightness", "set_volume", "radio", "screenshot", "screen_record",
-               "power", "training", "briefing", "maintenance"}
+               "power", "training", "briefing", "maintenance", "directions"}
 PLAY_WORDS = re.compile(r"\b(play|put on|stream|start playing|chalao|chala do|bajao|lagao|sunao|play karo)\b", re.I)
 
 

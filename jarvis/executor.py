@@ -6,7 +6,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .actions import control, files, system, training
+from .actions import control, files, system, training, maps
 from .actions.base import ActionResult, Ctx
 from .config import Config
 from .dsl.grammar import Program
@@ -18,6 +18,7 @@ Handler = Callable[[dict, Ctx, bool], ActionResult]
 REGISTRY: dict[str, Handler] = {
     "open_app": system.open_app,
     "open_url": system.open_url,
+    "directions": maps.directions,
     "open_folder": system.open_folder,
     "remind": system.remind,
     "system": system.system,

@@ -1018,7 +1018,66 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance"]
+           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions"]
+
+
+# ---------------------------------------------------------------- directions (routes, travel time)
+PLACES = ["koramangala", "indiranagar", "whitefield", "electronic city", "hsr layout", "jayanagar", "mg road",
+          "the airport", "kempegowda airport", "majestic", "bangalore railway station", "mysore", "goa", "pune",
+          "mumbai", "andheri", "bandra", "connaught place", "gurgaon", "noida sector 62", "hitech city",
+          "gachibowli", "anna nagar", "t nagar", "marine drive", "phoenix mall", "forum mall", "orion mall",
+          "the office", "work", "home", "my college", "the gym", "apollo hospital", "the stadium", "lalbagh",
+          "cubbon park", "nandi hills", "chennai central", "hyderabad", "delhi airport", "manipal", "ooty",
+          "my parents' place", "rahul's house", "the metro station", "infosys campus", "manyata tech park"]
+MODE_PHRASES = {"driving": ["by car", "driving", "in my car"], "two_wheeler": ["on a bike", "on my scooter", "by bike"],
+                "walking": ["on foot", "walking"], "transit": ["by metro", "by bus", "by train", "by public transport"],
+                "bicycling": ["by cycle", "cycling"]}
+MODE_HI = {"driving": ["car se"], "two_wheeler": ["bike se", "scooty se"], "walking": ["paidal"],
+           "transit": ["metro se", "bus se"], "bicycling": ["cycle se"]}
+DIR_EN = frames("DIR_EN", [
+    "fastest route from {o} to {d}{m}", "what's the fastest way to {d}{m}", "how long to get to {d}{m}",
+    "directions to {d}{m}", "how long will it take to reach {d} from {o}{m}", "how far is {d} from {o}",
+    "quickest way to {d}{m}",                                               # 6 val_ood
+    "how much time to reach {d}{m}",                                        # 7 test_ood
+    "route to {d}{m}", "best route from {o} to {d}", "navigate to {d}", "how long is the drive to {d}",
+    "get me directions to {d} from {o}", "how far is {d}",
+    "what's the eta to {d}{m}",                                             # val_ood
+    "travel time from {o} to {d}{m}",                                       # test_ood
+    "show me the way to {d}", "take me to {d}", "how long does it take to reach {d} from {o}{m}",
+    "shortest route to {d}{m}", "how long to reach {d}", "directions from {o} to {d}{m}",
+    "fastest way to get to {d}",                                            # val_ood
+    "how long will it take to get to {d}",                                  # test_ood
+    "what's the time to {d} from {o}", "the best way to reach {d}{m}", "eta from {o} to {d}",
+    "quickest route from {o} to {d}", "how much time from {o} to {d}{m}", "travel time to {d}",
+])
+DIR_HI = frames("DIR_HI", [
+    "{d} tak kitna time lagega", "{o} se {d} kaise jaun", "{d} kitna door hai", "{d} kaise pahunchu",
+    "{o} se {d} tak kitna time lagega", "{m}{d} kaise jaun", "{d} pahunchne me kitna time lagega",
+    "{o} se {d} ka rasta dikhao", "{d} ka route batao", "{m}{d} tak kitna time lagega",
+    "{d} pahunchne me kitna samay lagega", "{d} ka rasta dikhao",
+])
+
+
+def gen_directions(c: Ctx):
+    rng = c.rng
+    tpl = c.T(DIR_HI if c.hing else DIR_EN)
+    pool = PLACES + [" ".join(LX.pseudo_word(rng).lower().strip("_-") for _ in range(rng.randint(1, 2)))
+                     for _ in range(3)]
+    d = rng.choice(pool)
+    args = {"destination": q(d)}
+    fill = {"d": slot(d)}
+    if "{o}" in tpl:
+        o = rng.choice([p for p in pool if p != d])
+        args["origin"] = q(o)
+        fill["o"] = slot(o)
+    if "{m}" in tpl:
+        if rng.random() < 0.5:
+            mode = rng.choice(list(MODE_PHRASES))
+            args["mode"] = mode
+            fill["m"] = (rng.choice(MODE_HI[mode]) + " ") if c.hing else (" " + rng.choice(MODE_PHRASES[mode]))
+        else:
+            fill["m"] = ""
+    return dsl_call("directions", args), tpl.format(**fill), {}
 
 
 # ---------------------------------------------------------------- maintenance (phase 29)
@@ -1106,7 +1165,7 @@ GENERATORS = [
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",

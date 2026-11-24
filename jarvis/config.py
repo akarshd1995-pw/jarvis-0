@@ -109,6 +109,9 @@ class Config:
     memory_ocr: bool = True               # read the text in screenshots/images with our OCR models (once trained)
     memory_folders: list[str] = field(default_factory=lambda: ["Downloads", "Documents", "Desktop", "Pictures",
                                                                "Screenshots", "Videos"])
+    places: dict = field(default_factory=lambda: {"home": "", "work": ""})   # "how long to get home"
+    maps_api_key: str = ""                # your own Google Maps key (Routes API) for live-traffic times
+    maps_osm: bool = True                 # without a key: OpenStreetMap estimate (normal traffic)
     improve_auto: bool = True             # self-improving loop: fine-tune at night when there's something new
     improve_at: str = "02:00"             # earliest start (runs within 3 h of this, only when idle and plugged in)
     persona_name: str = "Jarvis"

@@ -173,6 +173,8 @@ class Persona:
             return f"power_{d['action']}", {"delay": self.delay(d.get("seconds", 30))}
         if k == "training":
             return self._plan_training(d)
+        if k == "directions":
+            return self._plan_directions(d)
         if k == "undo":
             if d.get("cancelled"):
                 return "undo_cancelled", {}
@@ -277,6 +279,36 @@ class Persona:
         day = "today" if due_dt.date() == now_dt.date() else \
             "tomorrow" if due_dt.date() == (now_dt + dt.timedelta(days=1)).date() else due_dt.strftime("on %A")
         return f"at {clock} {day}"
+
+    @staticmethod
+    def _dur(seconds: int) -> str:
+        m = max(1, round(seconds / 60))
+        if m < 60:
+            return f"{m} minute{'s' * (m != 1)}"
+        h, m = divmod(m, 60)
+        return f"{h} hour{'s' * (h != 1)}" + (f" {m} minute{'s' * (m != 1)}" if m else "")
+
+    def _plan_directions(self, d: dict) -> tuple[str, dict]:
+        dest = d["destination"]
+        mode = {"driving": "by car", "two_wheeler": "on a two-wheeler", "walking": "on foot",
+                "transit": "by public transport", "bicycling": "by cycle"}.get(d.get("mode"), "")
+        if d.get("missing_place"):
+            return "directions_missing_place", {"place": d["missing_place"], "dest": dest}
+        if d.get("seconds"):
+            via = f" via {d['via']}" if d.get("via") else ""
+            km = f"{d['meters'] / 1000:.0f} km" if d.get("meters") else ""
+            if d.get("source") == "Google Maps":
+                cond = " in current traffic" if d.get("traffic") else ""
+                usual = d.get("usual_seconds")
+                if usual and d["seconds"] - usual >= 300:
+                    cond += f", about {self._dur(d['seconds'] - usual)} more than usual"
+            else:
+                cond = " in normal traffic (OpenStreetMap estimate; Maps has live traffic)"
+            return "directions_time", {"dest": dest, "time": self._dur(d["seconds"]), "via": via, "km": km,
+                                       "cond": cond, "mode": mode}
+        if d.get("no_origin"):
+            return "directions_noorigin", {"dest": dest}
+        return "directions_open", {"dest": dest, "mode": mode}
 
     def _plan_memory(self, d: dict) -> tuple[str, dict]:
         what = d.get("query") or ("your latest screenshot" if d.get("where") == "screenshots" else

@@ -80,6 +80,12 @@ def _window(action: str, target: str) -> str:
 
 RULES: list[tuple[re.Pattern, callable]] = [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
+    (re.compile(r"^(?!.*\btraining\b)(?:(?:hey )?jarvis,? )?(?:what(?:'s| is) the |show (?:me )?the |give me (?:the )?|get (?:me )?(?:the )?)?"
+                r"(?:(?:fastest|quickest|best|shortest) )?(?:route|way|directions?|road)(?: please)? (?:from .+ )?to .+$"
+                r"|^(?!.*\btraining\b)(?:(?:hey )?jarvis,? )?how (?:long|much time|far)\b.*\b(?:to|is) .+$"
+                r"|^(?:navigate|take me|guide me) to .+$|^.+ (?:tak|jaane me|pahunchne me) kitna (?:time|samay|der) lagega\??$"
+                r"|^.+ kaise (?:jaun|jaaun|jayen|jaye|pahunchu|pahunchun)\??$|^.+ kitna door hai\??$", re.I),
+     lambda m, t: _directions(t)),
     (re.compile(r"^(?:(?:hey )?jarvis,? )?(?:run |do |start )?(?:a |the |your )?(?:health ?check|self[- ]?check|diagnostics?"
                 r"|system check)(?: please| pls| now)?$|^(?:are you|is everything) (?:ok|okay|working|healthy|fine)\??$"
                 r"|^check yourself$|^(?:apna )?health check karo$", re.I),
@@ -228,6 +234,51 @@ RULES: list[tuple[re.Pattern, callable]] = [
                 rf"|flipkart|github|wikipedia|reddit|spotify)\b)\s+(.+?)\??$", re.I),
      lambda m, t: _memory(m.groups()[-1], t)),
 ]
+
+
+_MODES = [(r"\b(?:by|on|via|in) (?:a |the )?(?:bus|metro|train|local|public transport|transit)\b|\b(?:bus|metro|train) se\b", "transit"),
+          (r"\b(?:on|by) (?:a |my )?(?:bike|scooter|scooty|two[- ]?wheeler|motorcycle)\b|\b(?:bike|scooty) se\b"
+           r"|\bride\b", "two_wheeler"),
+          (r"\b(?:on foot|by walk|walking|walk)\b|\bpaidal\b", "walking"),
+          (r"\b(?:by|on) (?:a )?(?:cycle|bicycle)\b|\bcycling\b", "bicycling"),
+          (r"\b(?:by|in) (?:a |my )?car\b|\bdriv(?:e|ing)\b|\bcar se\b", "driving")]
+
+
+def _directions(text: str) -> str:
+    t = text.strip().rstrip("?.! ")
+    mode = None
+    for pat, m in _MODES:
+        if re.search(pat, t, re.I):
+            mode = m
+            t = re.sub(pat, " ", t, flags=re.I)
+            break
+    t = re.sub(r"\s+", " ", t).strip()
+    origin = dest = None
+    hi = re.match(r"^(?:(.+?) se )?(.+?) (?:tak |jaane me |pahunchne me )?(?:kitna (?:time|samay|der) lagega|kaise "
+                  r"(?:jaun|jaaun|jayen|jaye|pahunchu|pahunchun)|kitna door hai)$", t, re.I)
+    if hi:
+        origin, dest = hi.group(1), hi.group(2)
+    else:
+        for pat, order in ((r"\bfrom (.+?) to (.+)$", "od"), (r"\b(?:to|is) (?:get |reach |go )?(?:to )?(.+?) from (.+)$", "do"),
+                           (r"\b(?:to|is) (?:get |reach |go )?(?:to )?(.+)$", "d")):
+            m = re.search(pat, t, re.I)
+            if m:
+                if order == "od":
+                    origin, dest = m.group(1), m.group(2)
+                elif order == "do":
+                    dest, origin = m.group(1), m.group(2)
+                else:
+                    dest = m.group(1)
+                break
+        else:
+            dest = t
+    dest = re.sub(r"^(?:the |reach |get to |go to )", "", dest.strip(), flags=re.I)
+    dest = re.sub(r"\s+(?:from here|right now|now|today)$", "", dest, flags=re.I).strip()
+    if re.fullmatch(r"(?:get |go )?home|ghar", dest, re.I):
+        dest = "home"
+    parts = [f'destination="{dest}"'] + ([f"mode={mode}"] if mode else []) + \
+        ([f'origin="{origin.strip()}"'] if origin and origin.strip().lower() not in ("here", "my location") else [])
+    return "directions(" + ", ".join(parts) + ")"
 
 
 def _memory(rest: str, text: str) -> str:

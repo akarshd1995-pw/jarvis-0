@@ -1321,3 +1321,11 @@ def test_ocr_text_is_indexed(tmp_path):
     assert idx.needs_ocr() == []
     hits = idx.search("login error", where="screenshots")          # "error" isn't there, "login" is: any-word
     assert hits and hits[0].title.startswith("Screenshot") and "Login" in hits[0].snippet
+
+
+def test_ocr_drops_invented_text():
+    from jarvis.memory.ocr import looks_like_text
+    assert looks_like_text("Login failed: invalid password", 0.97)
+    assert looks_like_text("Rainfall amount (mm)", 0.93) and looks_like_text("40%", 0.95)
+    for junk, conf in [("_<", 0.99), ("|{||", 0.95), ("/9QQ%#\\\\'", 0.9), ("Hello world", 0.5), ("ab", 0.8)]:
+        assert not looks_like_text(junk, conf), junk

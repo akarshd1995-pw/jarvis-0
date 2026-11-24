@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import re
+
 import numpy as np
 
 STRIDE = 4
@@ -65,6 +67,19 @@ def line_boxes(prob: np.ndarray, img_h: int, img_w: int, thr: float = 0.5) -> li
     return out
 
 
+def looks_like_text(text: str, conf: float) -> bool:
+    """Drop what the reader invents on photos, logos and charts: unsure readings, and strings that are mostly
+    symbols or contain no real word."""
+    if len(text) < 2 or conf < 0.75:
+        return False
+    chars = text.replace(" ", "")
+    alnum = sum(c.isalnum() for c in chars) / max(1, len(chars))
+    if alnum < 0.6:
+        return False
+    words = [w for w in re.findall(r"[A-Za-z]{2,}|\d+", text)]
+    return bool(words) and (conf >= 0.9 or len(text) >= 4)
+
+
 class OCR:
     def __init__(self, finder, reader, threads: int = 2):
         self.finder, self.reader = finder, reader
@@ -109,8 +124,12 @@ class OCR:
             lp = self.reader.run(["logprobs"], {"line": x.astype(np.float32)})[0]
             for j, k in enumerate(idx):
                 t = crops[k].shape[1] // 4
-                texts[k] = decode_greedy(lp[j, :t].argmax(-1).tolist()).strip()
-        return [t for t in texts if len(t) >= 2]
+                best = lp[j, :t].argmax(-1)
+                text = decode_greedy(best.tolist()).strip()
+                emitted = best != 0                              # steps that produced a character
+                conf = float(np.exp(lp[j, :t].max(-1)[emitted]).mean()) if emitted.any() else 0.0
+                texts[k] = text if looks_like_text(text, conf) else ""
+        return [t for t in texts if t]
 
     def read(self, path: str | Path) -> str:
         from PIL import Image

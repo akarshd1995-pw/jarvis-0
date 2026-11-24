@@ -2118,8 +2118,11 @@ def test_scan_skips_uninstallers(tmp_path):
     assert [e["name"] for e in scan_shortcuts([tmp_path / "Programs"])] == ["Obsidian"]
 
 
-def test_open_app_resolution_and_browser_fallback(tmp_path):
+def test_open_app_resolution_and_browser_fallback(tmp_path, monkeypatch):
+    import jarvis.apps as A
     from jarvis.apps import AppNotFound, resolve
+    monkeypatch.setattr(A, "app_paths_has", lambda exe: False)     # as if nothing is registered with Windows
+    monkeypatch.setattr(A.os.path, "exists", lambda p: False)
     from jarvis.config import Config
     cfg = Config(data_dir=tmp_path)
     idx = _index(tmp_path)

@@ -112,8 +112,11 @@ def update(root: Path = PROJECT_ROOT, progress: Callable[[str], None] = lambda s
                        "Run git pull yourself.")
     state = release.load(data_dir)
     if upstream in state.get("bad", []):
+        why = (state.get("last_failure") or {}).get("why", "") if \
+            (state.get("last_failure") or {}).get("commit") == upstream else ""
         return False, (f"The newest version ({upstream[:7]}) didn't pass its checks earlier, so I'm staying on "
-                       f"{before[:7]}. I'll try again when a newer version is published.")
+                       f"{before[:7]}. I'll try again when a newer version is published."
+                       + (f"\nWhat failed: {why}" if why else ""))
     summary = ""
     if test:
         ok, summary = tester(root, upstream, progress)

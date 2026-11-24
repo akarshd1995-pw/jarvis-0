@@ -9,13 +9,13 @@ voice and name; no film assets or actor voice.
 open datasets. No pretrained models, including for conversation: open questions are handled by
 offline knowledge Q&A (phase 26) plus a small conversation model of our own (phase 27).
 
-**Build order:** 4 → 22 → 25 → 5 → 23 → 24 → 14 → 26 → 7 → 6 → 27 → 12 → 15, then the rest.
+**Build order:** 4 → 22 → 25 → 5 → 23 → 24 → 14 → 7 → 6 → 27 → 12 → 15, then the rest (26 Offline Q&A is parked for later).
 - **4, 22, 25:** it feels like JARVIS. It runs properly, replies in character, and has the HUD.
 - **5, 23, 24:** it runs and watches your machines, and briefs you.
 - **14:** every day of use improves it automatically.
-- **26, 7, 6, 27:** it knows things, remembers, and holds a conversation.
+- **7, 6, 27:** it remembers and holds a conversation.
 - **12:** it acts on its own, always with your OK.
-- **15:** voice comes last and plugs into everything above (persona, alerts, briefings, Q&A, conversation).
+- **15:** voice comes last and plugs into everything above (persona, alerts, briefings, conversation).
 
 Status: ✅ done · 🔨 in progress · ⬜ planned
 
@@ -45,10 +45,10 @@ Status: ✅ done · 🔨 in progress · ⬜ planned
 ## Stage D: Knows things, remembers, converses
 | # | Phase | What it adds | Status |
 |---|---|---|---|
-| 26 | 🆕 **Offline knowledge Q&A** | "Jarvis, who invented the telephone?" A local Wikipedia copy, a retriever built on our own embedding model (shared with phase 7), and an extractive reader model trained from scratch on open question-answering datasets plus synthetic questions. Answers cite the article. Works without internet | ⬜ |
+| 26 | 🆕 **Offline knowledge Q&A** (parked: not needed now) | "Jarvis, who invented the telephone?" A local Wikipedia copy, a retriever built on our own embedding model (shared with phase 7), and an extractive reader model trained from scratch on open question-answering datasets plus synthetic questions. Answers cite the article. Works without internet | ⬜ |
 | 7 | **Memory search** | Find things across files, screenshots and browser history: contrastive embedding model, hand-written HNSW index, CRNN OCR | ⬜ |
 | 6 | **Conversation & clarification** | Multi-turn follow-ups for commands ("no, the other folder", "do the same for Desktop"); asks back when unsure; small dialog-state model | ⬜ |
-| 27 | 🆕 **Jarvis-LM** | Our own small conversation model: a 100–300M-parameter decoder pretrained from scratch on open text (a few billion tokens, several nights on the 5070), then tuned on persona dialogues we generate. Handles small talk and personality, and hands commands to the command model and questions to phase 26. Fluent for short exchanges, deliberately not a general-purpose chatbot | ⬜ |
+| 27 | 🆕 **Jarvis-LM** | Our own small conversation model: a 100–300M-parameter decoder pretrained from scratch on open text (a few billion tokens, several nights on the 5070), then tuned on persona dialogues we generate. Handles small talk and personality, and hands commands to the command model (and questions to phase 26, if it is built later). Fluent for short exchanges, deliberately not a general-purpose chatbot | ⬜ |
 | 10 | **Habit model** | Causal transformer over the activity log: proactive suggestions and workspace presets ("coding mode") | ⬜ |
 | 8 | **Clipboard brain** | Searchable clipboard history; a detector that never stores passwords, OTPs or card numbers | ⬜ |
 | 9 | **Smart file organizer** | Learns where you file things, auto-sorts Downloads, finds duplicate photos (perceptual hashing), suggests large files to clean up | ⬜ |

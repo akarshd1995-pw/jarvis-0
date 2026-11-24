@@ -110,6 +110,8 @@ class Config:
     # Jarvis may only touch files under these roots (resolved paths).
     allowed_roots: list[str] = field(default_factory=lambda: [str(HOME)])
     pause_heavy_on_battery: bool = True
+    bar_pos: list | None = None           # where you dragged the command bar (None: centre of your monitor)
+    bar_mini_pos: list | None = None      # where its minimized orb sits
     use_int8: bool = True                 # phase 41: the smaller, faster int8 model copies when they exist
     command_budget_ms: int = 1500         # past this, the model's answer is dropped and the rules answer
     yield_when_gaming: bool = True        # pause training / OCR while a full-screen game or video runs   # phase 44: OCR / meaning vectors / self-training wait for the charger

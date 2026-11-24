@@ -180,3 +180,47 @@ def test_review_window_one_click(bar, tmp_path):
     assert pump(bar.root, lambda: bool(done))
     assert "super machi" in (tmp_path / "c.jsonl").read_text()
     w.close()
+
+
+class _Ev:
+    def __init__(self, x, y):
+        self.x_root, self.y_root, self.x, self.y = x, y, 0, 0
+
+
+def test_command_bar_can_be_dragged_and_remembers_where(bar):
+    moved = []
+    bar.on_position = lambda which, pos: moved.append((which, pos))
+    bar.show()
+    pump(bar.root, timeout=0.3)
+    x0, y0 = bar.x, bar.y
+    bar._drag_start(_Ev(500, 300))
+    bar._drag_move(_Ev(440, 360))
+    bar._drag_end(_Ev(440, 360))
+    assert (bar.x, bar.y) == (x0 - 60, y0 + 60) and moved == [("bar", (x0 - 60, y0 + 60))]
+    bar.hide()
+    pump(bar.root, timeout=0.5)
+    bar.show()                                        # opens where you left it
+    pump(bar.root, timeout=0.3)
+    assert (bar.x, bar.y) == (x0 - 60, y0 + 60)
+    bar.reset_position()                              # double-click the orb: back to the default place
+    assert bar.saved_pos is None and moved[-1] == ("bar", None)
+
+
+def test_command_bar_minimizes_to_an_orb_and_back(bar):
+    bar.show()
+    pump(bar.root, timeout=0.3)
+    bar.minimize()
+    assert pump(bar.root, lambda: bar.minimized and bar.root.state() == "withdrawn", timeout=3)
+    bar.mini._press(_Ev(10, 10))                      # a click (no drag) brings the bar back
+    bar.mini._release(_Ev(10, 10))
+    assert pump(bar.root, lambda: not bar.minimized and bar.root.state() == "normal", timeout=3)
+    moved = []
+    bar.on_position = lambda which, pos: moved.append((which, pos))
+    bar.minimize()
+    pump(bar.root, lambda: bar.minimized, timeout=3)
+    bar.mini._press(_Ev(100, 100))                    # dragging the orb moves it instead
+    bar.mini._move(_Ev(160, 140))
+    bar.mini._release(_Ev(160, 140))
+    assert FAKE or (moved and moved[-1][0] == "mini" and bar.minimized)
+    bar.post("toggle")                                # your hotkey also brings it back
+    assert pump(bar.root, lambda: not bar.minimized and bar.root.state() == "normal", timeout=3)

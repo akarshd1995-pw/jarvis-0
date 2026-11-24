@@ -149,6 +149,65 @@ class Toast:
         T.fade(self.win, 0.0, done=gone)
 
 
+class MiniOrb:
+    """The minimized command bar: a small floating orb. Click it to bring the bar back; drag it anywhere."""
+
+    SIZE = 52
+    KEY = "#010203"                                   # see-through colour (Windows), so the orb looks round
+
+    def __init__(self, parent: tk.Misc, on_open: Callable[[], None], on_moved: Callable[[int, int], None]):
+        self.on_open, self.on_moved = on_open, on_moved
+        self.win = w = tk.Toplevel(parent)
+        w.overrideredirect(True)
+        w.attributes("-topmost", True)
+        bg = T.SURFACE
+        try:
+            w.configure(bg=self.KEY)
+            w.attributes("-transparentcolor", self.KEY)
+            bg = self.KEY
+        except tk.TclError:
+            w.configure(bg=T.SURFACE)
+        self.orb = Orb(w, self.SIZE, bg=bg)
+        self.orb.c.pack()
+        self.orb.c.configure(cursor="hand2")
+        self._drag = None
+        self.orb.c.bind("<ButtonPress-1>", self._press)
+        self.orb.c.bind("<B1-Motion>", self._move)
+        self.orb.c.bind("<ButtonRelease-1>", self._release)
+        w.withdraw()
+
+    def show_at(self, x: int, y: int):
+        self.win.geometry(f"{self.SIZE}x{self.SIZE}+{x}+{y}")
+        self.win.deiconify()
+        self.win.lift()
+
+    def hide(self):
+        self.win.withdraw()
+
+    @property
+    def visible(self) -> bool:
+        return self.win.state() == "normal"
+
+    def _press(self, e):
+        self._drag = (e.x_root, e.y_root, self.win.winfo_x(), self.win.winfo_y(), False)
+
+    def _move(self, e):
+        if not self._drag:
+            return
+        sx, sy, wx, wy, moved = self._drag
+        dx, dy = e.x_root - sx, e.y_root - sy
+        if moved or abs(dx) + abs(dy) > 4:
+            self._drag = (sx, sy, wx, wy, True)
+            self.win.geometry(f"+{wx + dx}+{wy + dy}")
+
+    def _release(self, e):
+        d, self._drag = self._drag, None
+        if d and d[4]:
+            self.on_moved(self.win.winfo_x(), self.win.winfo_y())
+        else:
+            self.on_open()                            # a click, not a drag
+
+
 class CommandBar:
     def __init__(self, on_submit: Callable[[str], str]):
         self.on_submit = on_submit
@@ -160,6 +219,10 @@ class CommandBar:
         self._rows: list[dict] = []
         self._pending_confirm = None
         self._ui_thread = threading.current_thread()
+        self.saved_pos: tuple[int, int] | None = None        # where you dragged it (Settings keeps it)
+        self.mini_pos: tuple[int, int] | None = None         # where the minimized orb sits
+        self.on_position: Callable[[str, tuple[int, int] | None], None] = lambda which, pos: None
+        self._drag = None
 
         self.root = r = tk.Tk()
         r.title("Jarvis-0")
@@ -184,8 +247,14 @@ class CommandBar:
         row.pack(fill="x", padx=16, pady=(12, 12))
         self.orb = Orb(row, 40)
         self.orb.c.pack(side="left")
+        self.min_btn = tk.Label(row, text="\u2014", bg=T.SURFACE, fg=T.MUTED, font=T.F(12, "bold"), padx=6,
+                                cursor="hand2")
+        self.min_btn.pack(side="right")
+        self.min_btn.bind("<Button-1>", lambda e: self.minimize())
+        self.min_btn.bind("<Enter>", lambda e: self.min_btn.configure(fg=T.TEXT))
+        self.min_btn.bind("<Leave>", lambda e: self.min_btn.configure(fg=T.MUTED))
         self.hint = tk.Label(row, text="Enter ⏎", bg=T.SURFACE, fg=T.FAINT, font=T.F(9))
-        self.hint.pack(side="right")
+        self.hint.pack(side="right", padx=(0, 6))
         holder = tk.Frame(row, bg=T.SURFACE)
         holder.pack(side="left", fill="x", expand=True, padx=(12, 8))
         self.entry = tk.Entry(holder, font=T.F(17), bg=T.SURFACE, fg=T.TEXT, insertbackground=T.ACCENT,
@@ -210,6 +279,15 @@ class CommandBar:
             r.bind(f"<Control-Key-{n}>", lambda e, i=n - 1: self._open_row(i))
         r.bind("<Return>", self._key_yes, add="+")
         r.bind("<Escape>", self._key_no, add="+")
+
+        # drag to move: the orb, the glow strip, the empty parts of the input row and the hint (not the text box)
+        for wdg in (self.orb.c, self.glow, row, self.hint):
+            wdg.bind("<ButtonPress-1>", self._drag_start, add="+")
+            wdg.bind("<B1-Motion>", self._drag_move, add="+")
+            wdg.bind("<ButtonRelease-1>", self._drag_end, add="+")
+            wdg.configure(cursor="fleur")
+        self.orb.c.bind("<Double-Button-1>", lambda e: self.reset_position())     # back to the default spot
+        self.mini = MiniOrb(r, self.restore, lambda x, y: self._moved("mini", (x, y)))
 
         self._show_suggestions()
         r.after(100, self._pump)
@@ -251,10 +329,15 @@ class CommandBar:
     def show(self):
         r = self.root
         visible = r.state() == "normal"
-        if not visible:                               # phase 44: open on the monitor your mouse is on
-            from .. import machine
-            pos = machine.place(W, 0, "center", fallback=(r.winfo_screenwidth(), r.winfo_screenheight()))
-            self.x, self.y = pos
+        if self.mini.visible:
+            self.mini.hide()
+        if not visible:
+            if self.saved_pos and self._on_screen(*self.saved_pos):
+                self.x, self.y = self.saved_pos           # where you put it last
+            else:                                         # phase 44: on the monitor your mouse is on
+                from .. import machine
+                pos = machine.place(W, 0, "center", fallback=(r.winfo_screenwidth(), r.winfo_screenheight()))
+                self.x, self.y = pos
         r.deiconify()
         self._resize()
         r.lift()
@@ -269,6 +352,66 @@ class CommandBar:
             self._answer(False)
             return
         T.fade(self.root, 0.0, step=0.2, done=self.root.withdraw)
+
+    # ---------------------------------------------------------- moving and minimizing
+    def _on_screen(self, x: int, y: int) -> bool:
+        """Is that spot still on a monitor (one may have been unplugged since)?"""
+        from .. import machine
+        area = machine.work_area(x + 40, y + 20)
+        if area is None:
+            sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+            return -W + 80 <= x <= sw - 80 and 0 <= y <= sh - 60
+        l, t, r_, b = area
+        return l - W + 80 <= x <= r_ - 80 and t <= y <= b - 60
+
+    def _drag_start(self, e):
+        self._drag = (e.x_root, e.y_root, self.x, self.y)
+
+    def _drag_move(self, e):
+        if not self._drag:
+            return
+        sx, sy, wx, wy = self._drag
+        self.x, self.y = wx + e.x_root - sx, wy + e.y_root - sy
+        self.root.geometry(f"+{self.x}+{self.y}")
+
+    def _drag_end(self, e):
+        if self._drag and (self.x, self.y) != self._drag[2:]:
+            self._moved("bar", (self.x, self.y))
+        self._drag = None
+
+    def _moved(self, which: str, pos: tuple[int, int] | None):
+        if which == "bar":
+            self.saved_pos = pos
+        else:
+            self.mini_pos = pos
+        try:
+            self.on_position(which, pos)
+        except Exception:
+            pass
+
+    def reset_position(self):
+        """Double-click the orb: back to the default place (centre of the monitor you're on)."""
+        self._moved("bar", None)
+        from .. import machine
+        self.x, self.y = machine.place(W, 0, "center", fallback=(self.root.winfo_screenwidth(),
+                                                                 self.root.winfo_screenheight()))
+        self._resize()
+
+    def minimize(self):
+        """Shrink to a small floating orb: click it to bring the bar back."""
+        if self._pending_confirm is not None:
+            return                                    # answer the question first
+        x, y = self.mini_pos if self.mini_pos and self._on_screen(*self.mini_pos) else \
+            (self.x + W - MiniOrb.SIZE - 8, self.y)
+        T.fade(self.root, 0.0, step=0.25, done=lambda: (self.root.withdraw(), self.mini.show_at(x, y)))
+
+    def restore(self):
+        self.mini.hide()
+        self.show()
+
+    @property
+    def minimized(self) -> bool:
+        return self.mini.visible
 
     def _resize(self):
         self.root.update_idletasks()

@@ -1040,6 +1040,19 @@ def main() -> None:
     jarvis = Jarvis(config, lambda *a: bar_ref["bar"].confirm(*a), background_models=True)
     jarvis.watchdog = watchdog
     bar = CommandBar(jarvis.handle)
+    bar.saved_pos = tuple(config.bar_pos) if config.bar_pos else None        # where you left it
+    bar.mini_pos = tuple(config.bar_mini_pos) if config.bar_mini_pos else None
+
+    def remember_position(which, pos):
+        if which == "bar":
+            config.bar_pos = list(pos) if pos else None
+        else:
+            config.bar_mini_pos = list(pos) if pos else None
+        try:
+            config.save()
+        except OSError as e:
+            log.warning("couldn't save the bar position: %s", e)
+    bar.on_position = remember_position
     bar_ref["bar"] = bar
     single.on_show = lambda: bar.post("open")
     jarvis.hooks["settings"] = lambda: bar.post("call", lambda: SettingsWindow(bar.root, config))

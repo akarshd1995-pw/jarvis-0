@@ -77,6 +77,11 @@ class Jarvis:
         except Exception as e:
             log.warning("usage prune failed: %s", e)
         REGISTRY["training"] = self._training_action
+        from .actions.control import LAST_EXTERNAL
+        from .context import ScreenContext           # phase 38: what "this", "these" and "here" mean right now
+        self.screen = ScreenContext(hwnd=lambda: LAST_EXTERNAL.get("hwnd"))
+        self.executor.screen = self.screen
+        REGISTRY["open_result"] = self._open_result
         from .dialog import Conversation, DialogModel  # phase 6: follow-ups and asking back
         self.conv = Conversation(DialogModel.load(PROJECT_ROOT / "checkpoints") if config.dialog_model else None,
                                  clarify=config.clarify)
@@ -546,11 +551,51 @@ class Jarvis:
             self._safe(self.usage.mark_undone)
         return self._execute(prog, source)
 
+    @staticmethod
+    def _file_row(path: str) -> dict:
+        p = Path(path)
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            mtime = 0
+        return {"title": p.name, "path": str(p), "source": "files", "ext": p.suffix.lstrip(".").lower(),
+                "mtime": mtime}
+
+    def _open_result(self, args, ctx, dry_run: bool):
+        """open_result(n=2): the second of the results I just showed you."""
+        from .context import ContextError
+        rows, n = self.screen.fresh_results(), int(args["n"])
+        if not rows:                                # "open this" with a file selected in File Explorer
+            try:
+                files, _ = self.screen.this_files()
+                rows = [self._file_row(f) for f in files]
+            except ContextError:
+                raise ContextError("I haven't shown you any results lately, and nothing is selected. "
+                                   "Search or list files first") from None
+        if not 1 <= n <= len(rows):
+            raise ContextError(f"I only showed {len(rows)} result{'s' * (len(rows) != 1)}")
+        row = rows[n - 1]
+        if not dry_run:
+            if row.get("source") == "web":
+                import webbrowser
+                webbrowser.open(row["path"])
+            else:
+                if not os.path.exists(row["path"]):
+                    raise FileNotFoundError(f"file not found: {row['path']}")
+                os.startfile(row["path"])                       # noqa: Windows only
+        return ActionResult(f"Opened {row['title']}", kind="open", data={"what": "url", "name": row["title"]})
+
     def _execute(self, prog, source: str) -> str:
         report = self.executor.run(prog)
-        for r in report.results:                    # memory search: rows the command bar can show and open
+        for r in report.results:                    # search / file list: rows the command bar can show and open
+            rows = None
             if r.kind == "memory" and r.data.get("results"):
-                self.last_results = r.data["results"]
+                rows = r.data["results"]
+            elif r.kind == "list" and r.data.get("paths"):
+                rows = [self._file_row(p) for p in r.data["paths"]]
+            if rows:
+                self.last_results = rows
+                self.screen.set_results(rows)       # "open the second one", "move these to Archive"
         if not report.failures and not any(c.action == "undo" for c in prog.calls):
             self.conv.ran(str(prog))
         else:

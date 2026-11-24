@@ -209,6 +209,8 @@ class Persona:
             name = msg.replace("no open window for ", "") if msg.startswith("no open window for ") else ""
             if name:
                 return "err_no_window", {"name": name}
+        if type(e).__name__ == "ContextError":                   # phase 38: "this"/"here" couldn't be filled
+            return "err_context", {"error": msg}
         if type(e).__name__ == "NotOnWindows":
             return "err_not_windows", {}
         return "err_other", {"action_phrase": ACTION_PHRASES.get(action, action), "error": msg}

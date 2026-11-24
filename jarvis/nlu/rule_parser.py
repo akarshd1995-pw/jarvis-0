@@ -78,7 +78,112 @@ def _window(action: str, target: str) -> str:
     return f"window(action={action}, app={key})" if key in _APP_IDENTS else f'window(action={action}, app="{t}")'
 
 
-RULES: list[tuple[re.Pattern, callable]] = [
+# ---- phase 38: "this", "these", "here", "the second one"
+_THIS = (r"(?:the selected (?:files?|ones?|items?)|selected files|this file|these files|that file|those files"
+         r"|ye wali files|ye files|this|these|that|those|it|them|ise|inhe)")
+_THESE_KIND = r"(?:these|those|the selected|selected|ye|yeh)\s+(?!(?:to|into|in|here|files?|ones?)\b)(\w+?)(?:\s+files?)?"
+_ORDINAL = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3, "fourth": 4, "4th": 4, "fifth": 5,
+            "5th": 5, "sixth": 6, "6th": 6, "pehla": 1, "pehli": 1, "dusra": 2, "dusri": 2, "teesra": 3, "teesri": 3,
+            "chautha": 4, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+
+
+def _dest_clause(rest: str) -> str | None:
+    """'to archive' / 'into a new folder called taxes' / 'here' -> DSL args."""
+    rest = rest.strip()
+    m = re.match(r"^(?:to|into|in)\s+(?:a\s+)?new folder(?:\s+(?:called|named))?\s+['\"]?(.+?)['\"]?$", rest, re.I)
+    if m:
+        return f'new_folder="{m.group(1).strip()}"'
+    if re.fullmatch(r"(?:to |into |in )?(?:here|this folder)", rest, re.I):
+        return "dest=here"
+    m = re.match(rf"^(?:to|into|in)\s+{_FOLDER}(?:\s+folder)?$|^{_FOLDER}(?:\s+folder)?\s+(?:me|mein)(?:\s+\w+)*$", rest, re.I)
+    if m:
+        return f"dest={(m.group(1) or m.group(2)).capitalize()}"
+    m = re.match(r"^(?:to|into)\s+([a-zA-Z]:[/\\].+)$", rest)
+    if m:
+        return f'dest="{m.group(1).replace(chr(92), "/")}"'
+    return None
+
+
+def _ext_word(kind: str | None) -> str | None:
+    """'pdfs' -> pdf, 'videos' -> video (a category), 'files' -> None."""
+    if not kind:
+        return None
+    k = kind.lower().strip().rstrip("s")
+    if k in ("file", "one", "item", "thing", "all", "the", "every", ""):
+        return None
+    from ..filetypes import CATEGORY_WORDS
+    for cat, words in CATEGORY_WORDS.items():
+        if k == cat or any(w.rstrip("s") == k for w in words):
+            return cat
+    return k if re.fullmatch(r"[a-z0-9]{2,5}", k) else None
+
+
+def _ref_files(m, t) -> str | None:
+    verb, kind, rest = m.group(1).lower(), m.group(2), m.group(3) or ""
+    op = {"copy": "copy_files", "duplicate": "copy_files"}.get(verb, "delete_files" if verb in (
+        "delete", "remove", "trash", "bin") else "move_files")
+    args = ["src=this"]
+    if _ext_word(kind):
+        args.append(f"ext={_ext_word(kind)}")
+    if op != "delete_files":
+        d = _dest_clause(rest)
+        if not d:
+            return None
+        args.append(d)
+    elif rest.strip():
+        return None
+    return f"{op}({', '.join(args)})"
+
+
+def _here_files(m, t) -> str | None:
+    verb, kind, rest = m.group(1).lower(), m.group(2), m.group(3)
+    op = {"list": "list_files", "show": "list_files", "copy": "copy_files", "delete": "delete_files",
+          "remove": "delete_files"}.get(verb, "move_files")
+    args = ["src=here"]
+    if _ext_word(kind):
+        args.append(f"ext={_ext_word(kind)}")
+    if op in ("move_files", "copy_files"):
+        d = _dest_clause(rest or "")
+        if not d or d == "dest=here":
+            return None
+        args.append(d)
+    return f"{op}({', '.join(args)})"
+
+
+CONTEXT_RULES: list[tuple[re.Pattern, callable]] = [
+    (re.compile(rf"^(?:(?:please|jarvis,?) )?(move|shift|put|send|copy|duplicate|delete|remove|trash|bin)\s+"
+                rf"(?:{_THESE_KIND}|{_THIS})(?:\s+(.+))?$", re.I), _ref_files),
+    (re.compile(rf"^(?:(?:please|jarvis,?) )?(list|show|move|shift|copy|delete|remove)(?: me)?\s+(?:all\s+)?(?:the\s+)?"
+                rf"(?:(\w+)\s+)?(?:files?\s+)?(?:here|in this folder|from here)(?:\s+(.+))?$", re.I), _here_files),
+    (re.compile(rf"^(?:{_THIS})\s+{_FOLDER}(?:\s+folder)?\s+(?:me|mein)\s+(daal do|daalo|rakh do|rakho|move karo|move kar do"
+                rf"|bhej do|shift karo|shift kar do|copy karo|copy kar do)$", re.I),
+     lambda m, t: f"{'copy' if 'copy' in m.group(2).lower() else 'move'}_files(src=this, dest={m.group(1).capitalize()})"),
+    (re.compile(rf"^(?:{_THIS})\s+(?:delete|hata|mita)\s*(?:karo|kar do|do)$", re.I), lambda m, t: "delete_files(src=this)"),
+    (re.compile(r"^open\s+(?:this|that|it|the selected file)$|^(?:ise|ye)\s+kholo$", re.I), lambda m, t: "open_result(n=1)"),
+    (re.compile(rf"^(move|copy)\s+(?:all\s+)?(?:the\s+)?(\w+\s+)?(?:files?\s+)?from\s+{_FOLDER}(?:\s+folder)?\s+(?:to\s+)?here$", re.I),
+     lambda m, t: f"{m.group(1).lower()}_files(src={m.group(3).capitalize()}, dest=here"
+                  + (f", ext={_ext_word(m.group(2))}" if _ext_word(m.group(2)) else "") + ")"),
+    (re.compile(rf"^(?:google|search|look up|search for)\s+(?:this|that|it|what i copied)(?:\s+on\s+({_SITES}))?$"
+                rf"|^(?:ise|ye|isko)\s+(google|youtube)\s+(?:karo|pe dhundo|par dhundo)$", re.I),
+     lambda m, t: f"search_web(query=this, site={(m.group(1) or m.group(2) or 'google').lower()})"),
+    (re.compile(r"^open\s+(?:this|that|the copied|the)\s+link(?:\s+i\s+copied)?$|^open what i copied$", re.I),
+     lambda m, t: "open_url(url=this)"),
+    (re.compile(r"^(?:play|chalao|bajao)\s+(?:this|that|what i copied)(?:\s+(?:song|video|link))?$|^(?:ye|ise)\s+(?:chalao|bajao)$", re.I),
+     lambda m, t: "play_media(query=this, site=youtube)"),
+    (re.compile(r"^(?:directions|route|navigate|take me)\s+to\s+(?:this|that)(?:\s+(?:address|place|location))?$"
+                r"|^how (?:long|far)(?: is it)? to (?:this|that)(?: address| place)?$", re.I),
+     lambda m, t: "directions(destination=this)"),
+    (re.compile(r"^(?:find|search)\s+(?:my\s+)?files\s+(?:about|for|on)\s+(?:this|that)$", re.I),
+     lambda m, t: "search_memory(query=this)"),
+    (re.compile(r"^remind me (?:about|of) (?:this|that) in (\d+) ?(m|min|mins|minutes?|h|hr|hrs|hours?)$", re.I),
+     lambda m, t: f"remind(text=this, after={m.group(1)}{'h' if m.group(2).lower().startswith('h') else 'm'})"),
+    (re.compile(r"^open\s+(?:the\s+)?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)"
+                r"(?:\s+(?:one|result|file|link|item))?$|^open\s+(?:result|number|no\.?|#)\s*(\d)$"
+                r"|^(pehla|pehli|dusra|dusri|teesra|teesri|chautha)\s+(?:wala|wali|waala)?\s*(?:kholo|open karo)$", re.I),
+     lambda m, t: f"open_result(n={_ORDINAL.get((m.group(1) or m.group(3) or '').lower()) or int(m.group(2))})"),
+]
+
+RULES: list[tuple[re.Pattern, callable]] = CONTEXT_RULES + [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
     (re.compile(r"^(?!.*\btraining\b)(?:(?:hey )?jarvis,? )?(?:what(?:'s| is) the |show (?:me )?the |give me (?:the )?|get (?:me )?(?:the )?)?"
                 r"(?:(?:fastest|quickest|best|shortest) )?(?:route|way|directions?|road)(?: please)? (?:from .+ )?to .+$"
@@ -305,8 +410,11 @@ def rule_parse(text: str) -> Program | None:
     for pattern, build in RULES[:_WHOLE_SENTENCE]:  # whole-sentence play/search rules ("open youtube and play X") go first
         m = pattern.search(text)
         if m:
+            built = build(m, text)
+            if built is None:              # the rule matched the shape but not the details: try the others
+                continue
             try:
-                return parse(build(m, text))
+                return parse(built)
             except DSLError:
                 break
     # Compound commands: split on ' and then ' / ' then ' / ' and '
@@ -317,7 +425,10 @@ def rule_parse(text: str) -> Program | None:
         for pattern, build in RULES:
             m = pattern.search(piece.strip())
             if m:
-                dsl.append(build(m, piece))
+                built = build(m, piece)
+                if built is None:
+                    continue
+                dsl.append(built)
                 break
         else:
             return None

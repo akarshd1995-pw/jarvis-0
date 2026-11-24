@@ -46,10 +46,16 @@ class Ident:
 Value = str | int | Duration | ClockTime | Ident
 
 # ---------------------------------------------------------------- schema
-# arg -> type; types: str, int, dur, time, ident, ident|str
+# arg -> type; types: str, int, dur, time, ident, ident|str, str|ref
+# Phase 38 references, filled in by Jarvis from what's on screen (jarvis/context.py):
+#   this  - the files selected in File Explorer, else the last results, else what you copied;
+#           as text ("google this"): the text or link you copied
+#   here  - the folder open in File Explorer (src/dest of file actions)
+REFS = ("this", "here")
+TEXT_REFS = ("this",)
 SCHEMA: dict[str, dict] = {
     "open_app":      {"args": {"name": "ident|str"}, "required": ["name"]},
-    "open_url":      {"args": {"url": "str"}, "required": ["url"]},
+    "open_url":      {"args": {"url": "str|ref"}, "required": ["url"]},
     "open_folder":   {"args": {"path": "ident|str"}, "required": ["path"]},
     "list_files":    {"args": {"src": "ident|str", "ext": "ident", "older_than": "dur",
                                "newer_than": "dur", "name_contains": "str"}, "required": ["src"]},
@@ -61,18 +67,18 @@ SCHEMA: dict[str, dict] = {
                       "required": ["src"], "one_of": [["dest", "new_folder"]]},   # new_folder: made inside src
     "delete_files":  {"args": {"src": "ident|str", "ext": "ident", "older_than": "dur",
                                "newer_than": "dur", "name_contains": "str"}, "required": ["src"]},
-    "remind":        {"args": {"text": "str", "at": "time", "after": "dur"}, "required": ["text"],
+    "remind":        {"args": {"text": "str|ref", "at": "time", "after": "dur"}, "required": ["text"],
                       "one_of": [["at", "after"]]},
     "system":        {"args": {"action": "ident"}, "required": ["action"],
                       "enum": {"action": ["lock", "mute", "volume_up", "volume_down", "sleep_display"]}},
-    "search_memory": {"args": {"query": "str", "ext": "ident", "newer_than": "dur", "older_than": "dur",
+    "search_memory": {"args": {"query": "str|ref", "ext": "ident", "newer_than": "dur", "older_than": "dur",
                                "where": "ident"}, "required": [],                  # phase 7
                       "enum": {"where": ["files", "web", "screenshots"]}},
-    "search_web":    {"args": {"query": "str", "site": "ident"}, "required": ["query"],
+    "search_web":    {"args": {"query": "str|ref", "site": "ident"}, "required": ["query"],
                       "enum": {"site": ["google", "youtube", "amazon", "flipkart", "swiggy", "zomato", "github",
                                         "stackoverflow", "wikipedia", "spotify", "maps", "reddit", "linkedin"]}},
     "unsupported":   {"args": {"request": "str"}, "required": ["request"]},
-    "play_media":    {"args": {"query": "str", "site": "ident", "mode": "ident"}, "required": ["query"],
+    "play_media":    {"args": {"query": "str|ref", "site": "ident", "mode": "ident"}, "required": ["query"],
                       "enum": {"site": ["youtube", "spotify"],     # play, not just search
                                "mode": ["top", "latest", "playlist", "live", "channel"]}},
     # ---- phase 5: full system control
@@ -90,7 +96,7 @@ SCHEMA: dict[str, dict] = {
                       "enum": {"kind": ["wifi", "bluetooth"], "state": ["on", "off"]}},
     "screenshot":    {"args": {"mode": "ident"}, "required": [], "enum": {"mode": ["full", "window", "region"]}},
     "screen_record": {"args": {"action": "ident"}, "required": ["action"], "enum": {"action": ["start", "stop"]}},
-    "directions":    {"args": {"destination": "str", "origin": "str", "mode": "ident"},   # routes / travel time
+    "directions":    {"args": {"destination": "str|ref", "origin": "str", "mode": "ident"},   # routes / travel time
                       "required": ["destination"],
                       "enum": {"mode": ["driving", "two_wheeler", "walking", "transit", "bicycling"]}},
     "maintenance":   {"args": {"action": "ident"}, "required": ["action"],              # phase 29
@@ -105,6 +111,7 @@ SCHEMA: dict[str, dict] = {
     "power":         {"args": {"action": "ident", "after": "dur"}, "required": ["action"],
                       "enum": {"action": ["shutdown", "restart", "sleep", "sign_out", "cancel"]}},  # part of a command Jarvis can't do
     "undo":          {"args": {}, "required": []},
+    "open_result":   {"args": {"n": "int"}, "required": ["n"]},                     # phase 38: "open the second one"
     "unknown":       {"args": {}, "required": []},   # out-of-scope request: decline, never guess
 }
 
@@ -119,7 +126,7 @@ class Call:
     args: dict[str, Value] = field(default_factory=dict)
 
     def __str__(self) -> str:
-        parts = [f"{k}={format_value(v)}" for k, v in sorted(self.args.items())]
+        parts = [f"{k}={format_value(v)}" for k, v in sorted(self.args.items()) if not k.startswith("_")]
         return f"{self.action}({', '.join(parts)})"
 
 
@@ -229,6 +236,7 @@ _TYPE_CHECK = {
     "time": lambda v: isinstance(v, ClockTime),
     "ident": lambda v: isinstance(v, Ident),
     "ident|str": lambda v: isinstance(v, (Ident, str)),
+    "str|ref": lambda v: isinstance(v, str) or (isinstance(v, Ident) and v.name in TEXT_REFS),
 }
 
 
@@ -314,6 +322,8 @@ def _value_ok(arg_type: str, enum: list[str] | None, kind: str, text: str, is_op
             return bool(allowed & {"int", "dur", "time", "ident"})
         return "int" in allowed
     if kind == "IDENT":
+        if "ref" in allowed and "ident" not in allowed:
+            return any(r.startswith(text) for r in TEXT_REFS) if is_open else text in TEXT_REFS
         if "ident" not in allowed:
             return False
         if enum:

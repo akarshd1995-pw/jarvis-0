@@ -22,8 +22,12 @@ def _unique_target(dest_dir: Path, name: str) -> Path:
     return target
 
 
+_FROM = {"selected": "your selection", "results": "those results", "copied": "the files you copied"}
+
+
 def _facts(args: dict, count: int, op: str = "list", dry: bool = False) -> dict:
-    return {"op": op, "count": count, "dry": dry, "src": str(args.get("src", "")),
+    src = _FROM.get(args.get("_from", ""), str(args.get("src", "")))
+    return {"op": op, "count": count, "dry": dry, "src": src,
             "dest": str(args["dest"]) if "dest" in args else (str(args["new_folder"]) if "new_folder" in args else None),
             "new_folder": "new_folder" in args,
             "ext": str(args["ext"]) if "ext" in args else None,
@@ -32,10 +36,27 @@ def _facts(args: dict, count: int, op: str = "list", dry: bool = False) -> dict:
             "name_contains": args.get("name_contains")}
 
 
+def _chosen(ctx: Ctx, args: dict) -> tuple[Path, list[Path]]:
+    """Files picked by "this"/"these" (phase 38): the Explorer selection, last results or copied files."""
+    paths = [check_path(Path(p), ctx.config.allowed_roots) for p in args["_files"]]
+    files = [p for p in paths if p.is_file()]
+    folders = [p for p in paths if p.is_dir()]
+    if not files:
+        if folders:
+            raise SafetyError("that's a folder; for now I move, copy and delete files, not whole folders. "
+                              "Open it and select the files inside")
+        raise FileNotFoundError(f"file not found: {paths[0] if paths else 'nothing selected'}")
+    return files[0].parent, files
+
+
 def select_files(ctx: Ctx, args: dict) -> tuple[Path, list[Path]]:
-    src = check_path(ctx.config.resolve_folder(str(args["src"])), ctx.config.allowed_roots)
-    if not src.is_dir():
-        raise FileNotFoundError(f"folder not found: {src}")
+    if "_files" in args:
+        src, candidates = _chosen(ctx, args)
+    else:
+        src = check_path(ctx.config.resolve_folder(str(args["src"])), ctx.config.allowed_roots)
+        if not src.is_dir():
+            raise FileNotFoundError(f"folder not found: {src}")
+        candidates = [p for p in sorted(src.iterdir()) if p.is_file()]
     now = time.time()
     ext = str(args["ext"]).lower().lstrip(".") if "ext" in args else None
     older: Duration | None = args.get("older_than")
@@ -43,9 +64,7 @@ def select_files(ctx: Ctx, args: dict) -> tuple[Path, list[Path]]:
     needle = args.get("name_contains", "").lower()
 
     out = []
-    for p in sorted(src.iterdir()):
-        if not p.is_file():
-            continue
+    for p in candidates:
         if ext and not filetypes.matches(p.suffix, ext):          # "video" = mp4, mkv, avi, mov, ...
             continue
         if needle and needle not in p.name.lower():
@@ -63,8 +82,9 @@ def select_files(ctx: Ctx, args: dict) -> tuple[Path, list[Path]]:
 
 def list_files(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     src, files = select_files(ctx, args)
-    return ActionResult(f"{len(files)} file(s) in {src}", [f.name for f in files], kind="list",
-                        data=_facts(args, len(files)))
+    data = _facts(args, len(files))
+    data["paths"] = [str(f) for f in files[:200]]             # "open the second one" / "move these" afterwards
+    return ActionResult(f"{len(files)} file(s) in {src}", [f.name for f in files], kind="list", data=data)
 
 
 def _transfer(args: dict, ctx: Ctx, dry_run: bool, copy: bool) -> ActionResult:

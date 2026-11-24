@@ -64,14 +64,25 @@ class RunReport:
 
 
 class Executor:
-    def __init__(self, config: Config, store: Store, confirm: ConfirmFn, describe=None):
+    def __init__(self, config: Config, store: Store, confirm: ConfirmFn, describe=None, screen=None):
         self.config, self.store, self.confirm = config, store, confirm
+        self.screen = screen          # phase 38: fills "this"/"here" from File Explorer, results, clipboard
         # describe(preview: ActionResult) -> str: in-character confirmation question (persona layer)
         self.describe = describe
 
     def run(self, prog: Program) -> RunReport:
         report = RunReport(batch_id=uuid.uuid4().hex[:12])
         ctx = Ctx(self.config, self.store, report.batch_id)
+        if self.screen is not None:
+            from .context import ContextError, uses_refs
+            if uses_refs(prog):
+                import copy
+                try:
+                    prog = self.screen.fill(copy.deepcopy(prog))
+                except ContextError as e:
+                    report.errors.append(f"context: {e}")
+                    report.failures.append((prog.calls[0].action, e))
+                    return report
         for call in prog.calls:
             try:
                 if call.action == "undo":

@@ -1911,3 +1911,134 @@ def test_dialog_model_wrapper_reads_context():
     assert seen == ["PREV: move_files(dest=Documents, ext=pdf, src=Downloads) || nah put em on the desktop"] or \
         seen[0].startswith("PREV: move_files(") and seen[0].endswith(" || nah put em on the desktop")
     assert "dest=Desktop" in prog and src == "follow-up 93%"
+
+
+# ---------------------------------------------------------------- phase 38: context awareness
+def test_ref_grammar():
+    from jarvis.dsl.grammar import DSLError, parse, viable_prefix
+    assert str(parse("search_web(query=this, site=google)")) == "search_web(query=this, site=google)"
+    assert str(parse("move_files(src=this, dest=here)")) == "move_files(dest=here, src=this)"
+    assert parse("open_result(n=2)").calls[0].args["n"] == 2
+    with pytest.raises(DSLError):
+        parse("search_web(query=Downloads)")            # only the reference, not any identifier
+    assert viable_prefix("open_url(url=th") and not viable_prefix("open_url(url=Dow")
+
+
+def _screen(sel=None, folder=None, clip=([], ""), hwnd=123):
+    from jarvis.context import Explorer, ScreenContext
+    ex = Explorer(folder, list(sel or [])) if (sel is not None or folder) else None
+    return ScreenContext(hwnd=lambda: hwnd, explorer=lambda h: ex, desktop=lambda h: None, clip=lambda: clip)
+
+
+def test_this_means_selection_then_results_then_copied(env):
+    from jarvis.context import ContextError
+    from jarvis.dsl.grammar import parse
+    cfg, store, dl, arc = env
+    a, b = str(dl / "a.pdf"), str(dl / "b.pdf")
+    p = _screen(sel=[a]).fill(parse("move_files(src=this, dest=Archive)"))
+    assert p.calls[0].args["_files"] == [a] and p.calls[0].args["_from"] == "selected"
+    assert str(p) == "move_files(dest=Archive, src=this)"      # the file list is never printed or logged
+    s = _screen()
+    s.set_results([{"title": "b.pdf", "path": b, "source": "files"}])
+    assert s.fill(parse("delete_files(src=this)")).calls[0].args["_files"] == [b]
+    assert _screen(clip=([a], "")).fill(parse("copy_files(src=this, dest=Archive)")).calls[0].args["_from"] == "copied"
+    with pytest.raises(ContextError):
+        _screen().fill(parse("delete_files(src=this)"))
+    s.set_results([{"title": "b.pdf", "path": b, "source": "files"}], now=0)
+    with pytest.raises(ContextError):                   # old results don't count
+        s.fill(parse("delete_files(src=this)"))
+
+
+def test_here_and_copied_text(env):
+    from jarvis.context import ContextError
+    from jarvis.dsl.grammar import parse
+    cfg, store, dl, arc = env
+    p = _screen(folder=str(dl)).fill(parse("list_files(src=here, ext=pdf)"))
+    assert p.calls[0].args["src"] == str(dl)
+    with pytest.raises(ContextError):
+        _screen().fill(parse("list_files(src=here)"))
+    p = _screen(clip=([], "  best biryani in hyderabad ")).fill(parse("search_web(query=this, site=google)"))
+    assert p.calls[0].args["query"] == "best biryani in hyderabad"
+    with pytest.raises(ContextError):
+        _screen(clip=([], "just some words")).fill(parse("open_url(url=this)"))
+    assert _screen(clip=([], "https://x.dev/a")).fill(parse("open_url(url=this)")).calls[0].args["url"] == "https://x.dev/a"
+
+
+def test_move_selection_end_to_end_with_undo(env):
+    from jarvis.dsl.grammar import parse
+    from jarvis.executor import Executor
+    cfg, store, dl, arc = env
+    ex = Executor(cfg, store, lambda *a: True, screen=_screen(sel=[str(dl / "a.pdf"), str(dl / "c.png")]))
+    rep = ex.run(parse("move_files(src=this, ext=pdf, dest=Archive)"))      # "move these pdfs to archive"
+    assert not rep.errors, rep.errors
+    assert (arc / "a.pdf").exists() and (dl / "c.png").exists() and (dl / "b.pdf").exists()
+    assert rep.results[0].data["src"] == "your selection"
+    ex.run(parse("undo()"))
+    assert (dl / "a.pdf").exists() and not (arc / "a.pdf").exists()
+    ex.screen = _screen(sel=[str(dl / "b.pdf")])
+    rep = ex.run(parse('move_files(src=this, new_folder="taxes")'))
+    assert (dl / "taxes" / "b.pdf").exists()
+    ex.screen = _screen()
+    rep = ex.run(parse("move_files(src=this, dest=Archive)"))
+    assert rep.failures and "select" in str(rep.failures[0][1]).lower()
+
+
+def test_list_then_open_second_and_move_these(env, tmp_path, monkeypatch):
+    from jarvis.daemon import Jarvis
+    cfg, store, dl, arc = env
+    j = Jarvis(cfg, lambda *a: True, data_root=tmp_path / "d")
+    j.config.show_details = False
+    j.screen._explorer = lambda h: None
+    j.screen._clip = lambda: ([], "")
+    j.handle("list_files(src=Downloads, ext=pdf)")
+    rows = j.take_results()
+    assert [r["title"] for r in rows] == ["a.pdf", "b.pdf", "invoice_1.pdf"]       # clickable in the bar too
+    opened = []
+    import os as _os
+    monkeypatch.setattr(_os, "startfile", opened.append, raising=False)     # not on Windows here
+    j.handle("open the second one")
+    assert opened == [str(dl / "b.pdf")]
+    assert "only showed 3" in j.handle("open the fifth one")
+    j.handle("move these to archive")
+    assert sorted(p.name for p in arc.iterdir()) == ["a.pdf", "b.pdf", "invoice_1.pdf"]
+    assert "a.pdf" not in [p.name for p in dl.iterdir()]
+
+
+def test_context_rules_and_model_gate():
+    from jarvis.nlu.brain import Brain
+    from jarvis.nlu.rule_parser import rule_parse
+    cases = {"move these pdfs to archive": "move_files(dest=Archive, ext=pdf, src=this)",
+             "delete this file": "delete_files(src=this)",
+             "put these into a new folder called taxes": 'move_files(new_folder="taxes", src=this)',
+             "show me the pdfs here": "list_files(ext=pdf, src=here)",
+             "move pdfs from downloads here": "move_files(dest=here, ext=pdf, src=Downloads)",
+             "google this": "search_web(query=this, site=google)",
+             "open the link i copied": "open_url(url=this)",
+             "open the second one": "open_result(n=2)", "dusra wala kholo": "open_result(n=2)",
+             "ise documents me daal do": "move_files(dest=Documents, src=this)",
+             "move the pdfs in downloads to documents": "move_files(dest=Documents, ext=pdf, src=Downloads)"}
+    for text, want in cases.items():
+        assert str(rule_parse(text)) == want, (text, rule_parse(text))
+
+    class Old:
+        knows = {"actions": ["move_files", "search_web"], "features": []}
+        last_alts = []
+
+        def parse(self, text):
+            from jarvis.dsl.grammar import parse
+            return parse('search_web(query="this", site=google)'), 0.95
+    b = Brain()
+    b.model, b.backend = Old(), "fake"
+    assert str(b.resolve("google this")[0]) == "search_web(query=this, site=google)"
+
+
+def test_context_training_data():
+    import random
+    from datagen.generate_intents import TEACHES, gen_context, Ctx
+    from jarvis.dsl.grammar import canonical
+    assert "context_refs" in TEACHES
+    r = random.Random(1)
+    progs = [canonical(gen_context(Ctx(r, "train"))[0]) for _ in range(2000)]
+    assert any("src=this" in p for p in progs) and any("src=here" in p for p in progs)
+    assert any("dest=here" in p for p in progs) and any("query=this" in p for p in progs)
+    assert any(p.startswith("open_result(") for p in progs)

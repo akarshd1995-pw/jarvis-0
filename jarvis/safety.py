@@ -23,6 +23,7 @@ ACTION_TIERS: dict[str, Tier] = {
     "briefing": Tier.SAFE,
     "maintenance": Tier.SAFE,
     "directions": Tier.SAFE,
+    "open_result": Tier.SAFE,
     "unsupported": Tier.SAFE,
     "search_web": Tier.SAFE,
     "play_media": Tier.SAFE,

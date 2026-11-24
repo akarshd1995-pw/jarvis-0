@@ -238,6 +238,9 @@ class Brain:
         # System-control actions (phase 5) are matched by precise rules first, so they work even with a
         # model trained before they existed. After retraining, the model and the rules agree.
         ruled_first = rule_parse(text)
+        from ..context import uses_refs
+        if ruled_first is not None and uses_refs(ruled_first) and not self.knows("context_refs"):
+            return ruled_first, "rules (model not trained on this yet)"     # phase 38: this / these / here
         if ruled_first is not None and any(c.action in RULES_FIRST and not self.knows(c.action)
                                            or (c.action, str(c.args.get("action", ""))) in NEW_VALUES
                                            and not self.knows(NEW_VALUES[(c.action, str(c.args.get("action", "")))])

@@ -1023,7 +1023,7 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review"]
+           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs"]
 
 
 # ---------------------------------------------------------------- directions (routes, travel time)
@@ -1083,6 +1083,225 @@ def gen_directions(c: Ctx):
         else:
             fill["m"] = ""
     return dsl_call("directions", args), tpl.format(**fill), {}
+
+
+# ---------------------------------------------------------------- context references (phase 38)
+# "this/these/it/the selected files" -> src=this, "here/this folder" -> src=here or dest=here,
+# "google this" -> query=this, "open the second one" -> open_result(n=2). Jarvis fills them in from the screen.
+THIS_EN = ["this", "these", "that", "those", "it", "them", "this file", "these files", "that file", "those files",
+           "the selected files", "the selected ones", "selected files", "what i selected", "the files i selected",
+           "the highlighted files", "these ones", "this one", "the stuff i selected", "everything i selected"]
+THIS_KIND_EN = ["these {k}", "those {k}", "the selected {k}", "selected {k}", "the {k} i selected", "these {k} here"]
+THIS_HI = ["ise", "inhe", "ye", "ye files", "ye wali files", "selected files ko", "inko", "isko", "is file ko"]
+CTX_FILES_EN = frames("CTX_FILES_EN", [
+    "{v} {t} to {d}", "{v} {t} into {d}", "please {v} {t} to {d}", "can you {v} {t} to {d}", "{v} {t} over to {d}",
+    "i want to {v} {t} to {d}",
+    "could you {v} {t} into {d}",                                   # 6 val_ood
+    "{v} {t} straight to {d}",                                      # 7 test_ood
+    "go ahead and {v} {t} to {d}", "{v} {t} to {d} for me", "just {v} {t} to {d}", "{v} {t} to {d} now",
+    "quickly {v} {t} to {d}", "{v} {t} in {d}",
+    "{v} {t} to {d} please",                                        # val_ood
+    "jarvis {v} {t} to {d}",                                        # test_ood
+    "could you {v} {t} to {d}", "jarvis, {v} {t} into {d}", "{v} {t} straight into {d}",
+])
+CTX_DEL_EN = frames("CTX_DEL_EN", [
+    "{v} {t}", "please {v} {t}", "{v} {t} now", "can you {v} {t}", "just {v} {t}", "{v} {t} for me",
+    "i don't need {t}, {v} them",                                  # 6 val_ood
+    "{v} {t} right away",                                          # 7 test_ood
+    "{v} {t} please", "go ahead and {v} {t}", "{v} {t}, i don't need them", "{v} all of {t}",
+    "{v} {t} right now", "{v} {t} and throw them away",
+])
+CTX_FILES_HI = frames("CTX_FILES_HI", [
+    "{t} {d} me {hv}", "{t} {d} mein {hv}", "{t} {d} folder me {hv}", "jarvis {t} {d} me {hv}", "{t} ko {d} me {hv}",
+    "{t} jaldi se {d} me {hv}",
+    "zara {t} {d} me {hv}",                                          # val_ood
+    "{t} abhi {d} me {hv}",                                          # test_ood
+    "{t} seedha {d} me {hv}", "please {t} {d} me {hv}",
+    "abhi {t} {d} me {hv}", "zara {t} ko {d} me {hv}",
+])
+CTX_DEL_HI = ["{t} {hv}", "{t} abhi {hv}", "{t} please {hv}", "jarvis {t} {hv}"]
+HERE_EN = ["here", "in this folder", "in here", "in the current folder", "in the open folder", "from here",
+           "in this directory"]
+CTX_HERE_EN = frames("CTX_HERE_EN", [
+    "{v} {w} {h} to {d}", "{v} all {w} {h} to {d}", "{v} the {w} {h} into {d}", "can you {v} {w} {h} to {d}",
+    "{v} everything {h} to {d}", "please {v} {w} {h} to {d}",
+    "{v} every {w} {h} over to {d}",                                 # val_ood
+    "take the {w} {h} and {v} them to {d}",                          # test_ood
+    "{v} {w} {h} to {d} for me", "i want to {v} {w} {h} to {d}",
+    "take {w} {h} and {v} them over to {d}", "{v} every {w} {h} to {d}",
+])
+CTX_LIST_HERE = frames("CTX_LIST_HERE", [
+    "{lv} {w} {h}", "what {w} are {h}", "{lv} all {w} {h}", "what's {h}", "{lv} the {w} {h}", "which {w} are {h}",
+    "are there any {w} {h}",                                         # val_ood
+    "how many {w} are {h}",                                          # test_ood
+    "{lv} everything {h}", "{lv} me the {w} {h}",
+    "how many {w} are there {h}", "is there any {w} {h}",
+])
+CTX_TO_HERE = frames("CTX_TO_HERE", [
+    "{v} {w} from {s} here", "{v} the {w} from {s} to here", "bring {w} from {s} here", "{v} all {w} in {s} here",
+    "get {w} from {s} in here", "{v} my {w} from {s} into this folder",
+    "fetch the {w} from {s} here",                                   # val_ood
+    "pull {w} out of {s} into here",                                 # test_ood
+    "{v} {w} from {s} into the current folder", "bring the {w} in {s} over here",
+    "fetch {w} from {s} here", "pull the {w} out of {s} here",
+])
+CTX_HERE_HI = ["yahan ki {w} {d} me {hv}", "is folder ki {w} {d} me {hv}", "yahan se {w} {d} me {hv}",
+               "is folder ki saari files {d} me {hv}"]
+CTX_TO_HERE_HI = ["{s} se {w} yahan le aao", "{s} ki {w} yahan {hv}", "{s} se {w} is folder me {hv}"]
+CTX_TEXT = {
+    "search_web": frames("CTX_SEARCH", [
+        "google this", "search this on {site}", "look this up on {site}", "search what i copied on {site}",
+        "find this on {site}", "search for this on {site}", "look up what i copied on {site}",
+        "check this on {site}",                                     # test_ood
+        "can you google this", "search {site} for this", "look this up", "google what i copied",
+        "search this", "search that on {site}",
+        "what does {site} say about this",                          # val_ood
+        "search the copied text on {site}",                         # test_ood
+        "ise google karo", "ise {site} pe dhundo", "ye {site} pe search karo", "isko google karo"
+    "check what i copied on {site}", "what does google say about the copied text",
+    "check this on google", "please check this on {site}", "quickly check this on {site}",
+    "please search this on {site}", "quickly google this",
+]),
+    "open_url": frames("CTX_URL", [
+        "open this link", "open the link i copied", "open the copied link", "go to this link", "open that link",
+        "visit the link i copied", "open this url",
+        "take me to the link i copied",                             # test_ood
+        "ye link kholo", "is link ko kholo", "open the url i copied", "open this website"
+    "take me to this link",
+    "take me to the copied link", "please take me to this url", "take me to that link",
+]),
+    "play_media": frames("CTX_PLAY", [
+        "play this", "play what i copied", "play this song", "play this video", "play that", "play this link",
+        "play the song i copied",                                   # val_ood
+        "play the video i copied",                                  # test_ood
+        "play this on {psite}", "ye chalao", "ye gaana bajao", "ise chalao", "play that song"
+    "play the link i copied",
+]),
+    "directions": frames("CTX_DIR", [
+        "directions to this address", "route to this place", "navigate to this", "how far is this address",
+        "how long to get to this address", "take me to this address",
+        "fastest way to the address i copied",                      # val_ood
+        "how long to reach this place",                             # test_ood
+        "directions to the address i copied", "is jagah tak kitna time lagega", "is address ka rasta dikhao"
+    "fastest way to this place", "how long to reach the address i copied",
+    "the fastest route to this address", "fastest route to this place", "what is the fastest way to this address",
+    "what is the route to this place", "how long to get there, to this address",
+    "what is the way to this address", "what is the distance to this place",
+]),
+    "remind": ["remind me about this in {n} minutes", "remind me of this in {n} min", "remind me about this in {n} mins",
+               "yaad dilana ise {n} min baad"],
+    "search_memory": ["find files about this", "search my files for this", "do i have files about this",
+                      "is bare me files dhundo", "find my documents about this"],
+}
+ORD_EN = {1: ["first", "1st"], 2: ["second", "2nd"], 3: ["third", "3rd"], 4: ["fourth", "4th"], 5: ["fifth", "5th"],
+          6: ["sixth", "6th"]}
+ORD_HI = {1: ["pehla", "pehli"], 2: ["dusra", "dusri"], 3: ["teesra", "teesri"], 4: ["chautha", "chauthi"]}
+CTX_RESULT = frames("CTX_RESULT", [
+    "open the {o} one", "open the {o} result", "open result {n}", "open number {n}", "open the {o} file",
+    "open the {o} link", "show me the {o} one",
+    "open up the {o} result",                                       # test_ood
+    "open the {o}", "{o} one please", "open the {o} item", "can you open the {o} one",
+    "the {o} one, open it",                                         # val_ood (index 14 % 8 == 6)
+    "open the {o} of those",                                        # test_ood
+    "show me the {o} result", "open up the {o} one",
+    "show me the {o} file", "open me the {o} one", "pull up the {o} result", "show the {o} one",
+])
+
+
+def _this_kind(c: Ctx, args: dict) -> str:
+    """'these pdfs' (ext=pdf) or plain 'these'."""
+    rng = c.rng
+    if c.hing:
+        return rng.choice(THIS_HI)
+    if rng.random() < 0.3:
+        if rng.random() < 0.5:
+            cat = rng.choice(list(FT.CATEGORY_WORDS))
+            args["ext"] = cat
+            k = rng.choice([w for w in FT.CATEGORY_WORDS[cat] if " " not in w] or [cat + "s"])
+        else:
+            e = rng.choice(LX.EXTS)
+            args["ext"] = e
+            k = rng.choice([f"{e}s", f"{e} files"] + LX.EXT_NICKNAMES.get(e, []))
+        return rng.choice(THIS_KIND_EN).format(k=slot(k))
+    return rng.choice(THIS_EN)
+
+
+def gen_context(c: Ctx):
+    rng = c.rng
+    r = rng.random()
+    if r < 0.38:                                                  # files: this / these
+        op = rng.choice(["move"] * 5 + ["copy"] * 2 + ["delete"] * 3)
+        verbs, _, hverbs = VERBS[op]
+        args: dict = {"src": "this"}
+        t = _this_kind(c, args)
+        if op == "delete":
+            tpl = c.T(CTX_DEL_HI if c.hing else CTX_DEL_EN)
+            return dsl_call("delete_files", args), tpl.format(v=rng.choice(verbs), t=t, hv=rng.choice(hverbs)), {}
+        if rng.random() < 0.15:
+            name = rng.choice(NEW_FOLDER_NAMES)
+            args["new_folder"] = q(name)
+            d = rng.choice(["naya folder {n}", "ek naya folder {n}"] if c.hing else
+                           ["a new folder called {n}", "a new folder {n}", "a new folder named {n}"]).format(n=slot(name))
+        else:
+            dv, d = folder(c)
+            args["dest"] = dv
+        tpl = c.T(CTX_FILES_HI if c.hing else CTX_FILES_EN)
+        if c.hing and "new_folder" in args:
+            tpl = "{t} {d} me {hv}"
+        return dsl_call(f"{op}_files", args), tpl.format(v=rng.choice(verbs), t=t, d=d, hv=rng.choice(hverbs)), {}
+    if r < 0.6:                                                   # here: this folder
+        args = {}
+        w = what_phrase(c, args) if rng.random() < 0.75 else rng.choice(["files", "all files", "everything", "stuff"])
+        kind = rng.random()
+        if kind < 0.4:
+            op = rng.choice(["move", "move", "copy", "delete"])
+            verbs, _, hverbs = VERBS[op]
+            args = {"src": "here", **args}
+            if op == "delete":
+                return dsl_call("delete_files", args), \
+                    rng.choice(["{v} {w} {h}", "{v} all {w} {h}", "{v} the {w} {h}"]).format(
+                        v=rng.choice(verbs), w=w, h=rng.choice(HERE_EN)), {}
+            dv, d = folder(c)
+            args["dest"] = dv
+            tpl = rng.choice(CTX_HERE_HI) if c.hing else c.T(CTX_HERE_EN)
+            return dsl_call(f"{op}_files", args), tpl.format(v=rng.choice(verbs), w=w, h=rng.choice(HERE_EN), d=d,
+                                                             hv=rng.choice(hverbs)), {}
+        if kind < 0.7:
+            args = {"src": "here", **args}
+            tpl = rng.choice(["{w} yahan dikhao", "is folder me kya hai", "yahan ki {w} dikhao"]) if c.hing \
+                else c.T(CTX_LIST_HERE)
+            return dsl_call("list_files", args), tpl.format(lv=rng.choice(VERBS["list"][0]), w=w,
+                                                            h=rng.choice(HERE_EN)), {}
+        op = rng.choice(["move", "copy"])
+        verbs, _, hverbs = VERBS[op]
+        sv, sp = folder(c)
+        args = {"src": sv, **args, "dest": "here"}
+        tpl = rng.choice(CTX_TO_HERE_HI) if c.hing else c.T(CTX_TO_HERE)
+        return dsl_call(f"{op}_files", args), tpl.format(v=rng.choice(verbs), w=w, s=sp, hv=rng.choice(hverbs)), {}
+    if r < 0.85:                                                  # text: what you copied
+        action = rng.choices(list(CTX_TEXT), [5, 2, 3, 2, 1.5, 1.5])[0]
+        tpl = c.T(CTX_TEXT[action])
+        if action == "search_web":
+            site = rng.choice(["google", "youtube", "amazon", "flipkart", "wikipedia", "reddit", "github"])
+            if "{site}" not in tpl:
+                site = "google"
+            return f"search_web(query=this, site={site})", tpl.format(site=site), {}
+        if action == "play_media":
+            site = rng.choice(["youtube", "spotify"]) if "{psite}" in tpl else "youtube"
+            return f"play_media(query=this, site={site})", tpl.format(psite=site), {}
+        if action == "remind":
+            n = rng.choice([5, 10, 15, 20, 30, 45, 60, 90])
+            return f"remind(text=this, after={n}m)", tpl.format(n=n), {}
+        key = {"open_url": "url", "directions": "destination", "search_memory": "query"}[action]
+        return f"{action}({key}=this)", tpl, {}
+    n = rng.choice([1, 1, 2, 2, 2, 3, 3, 4, 5, 6])                # "open the second one"
+    if c.hing and n in ORD_HI:
+        return f"open_result(n={n})", rng.choice(["{o} wala kholo", "{o} wali kholo", "{o} wala open karo"]).format(
+            o=rng.choice(ORD_HI[n])), {}
+    if n == 1 and rng.random() < 0.4:
+        return "open_result(n=1)", rng.choice(["open this", "open it", "open that", "open the selected file",
+                                               "open the top one", "open the top result"]), {}
+    return f"open_result(n={n})", c.T(CTX_RESULT).format(o=rng.choice(ORD_EN[n]), n=n), {}
 
 
 # ---------------------------------------------------------------- maintenance (phase 29)
@@ -1170,7 +1389,7 @@ GENERATORS = [
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",

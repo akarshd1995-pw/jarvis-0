@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from . import text as T
 
 H = 32                     # reader input height
+LINE_SIZES = [15, 18, 22, 26, 30, 36, 44]
 
 
 class FontBank:
@@ -32,7 +33,7 @@ class FontBank:
                 self.cache[key] = ImageFont.truetype(p, size)
             except OSError:
                 self.cache[key] = ImageFont.load_default()
-            if len(self.cache) > 400:
+            if len(self.cache) > 3000:
                 self.cache.pop(next(iter(self.cache)))
         return self.cache[key]
 
@@ -58,7 +59,7 @@ def _jpeg(img: Image.Image, q: int) -> Image.Image:
 def render_line(r: random.Random, fonts: FontBank, text: str | None = None) -> tuple[np.ndarray, str]:
     """Returns (float32 array H x W in 0..1, text)."""
     s = text if text is not None else T.line(r)
-    size = r.randint(14, 44)
+    size = r.choice(LINE_SIZES)                 # few sizes (all scaled to 32 px anyway): fonts load once
     font = fonts.get(r, size)
     fg, bg = _colors(r)
     try:

@@ -21,7 +21,7 @@ from jarvis.actions.training import wait_if_paused
 
 from .fonts import find_fonts
 from .models import Reader
-from .render import FontBank, _need_steps, prepare, render_line
+from .render import MAX_W, FontBank, _need_steps, prepare, render_line
 
 class Lines(IterableDataset):
     def __init__(self, fonts: list[str], seed: int):
@@ -44,6 +44,7 @@ class Lines(IterableDataset):
 
 def collate(batch):
     w = max(a.shape[1] for a, _ in batch)
+    w = min(MAX_W, ((w + 63) // 64) * 64)              # a few fixed widths: the GPU kernels stay warm
     x = np.stack([np.pad(a, ((0, 0), (0, w - a.shape[1])), mode="edge") for a, _ in batch])[:, None]
     targets = torch.tensor([i for _, ids in batch for i in ids], dtype=torch.long)
     tlen = torch.tensor([len(ids) for _, ids in batch], dtype=torch.long)
@@ -110,7 +111,7 @@ def main():
     if device.type == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.benchmark = False      # line widths vary per batch: re-tuning every shape is slow
         print("GPU:", torch.cuda.get_device_name(0), flush=True)
     fonts = find_fonts()
     print(f"fonts: {len(fonts)}", flush=True)

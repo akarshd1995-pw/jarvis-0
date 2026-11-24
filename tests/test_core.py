@@ -1173,3 +1173,72 @@ def test_background_services_start(env, tmp_path):
     assert "Self-improvement" in logs and j.sampler is sampler
     assert j.start_briefings(lambda kind, text: None).is_alive()
     assert j.start_improver(lambda text: None).is_alive()
+
+
+# ---------------------------------------------------------------- memory search (phase 7)
+def _mem_home(tmp_path):
+    import os, time, zipfile
+    home = tmp_path / "memhome"
+    for d in ("Downloads", "Documents", "Pictures/Screenshots"):
+        (home / d).mkdir(parents=True)
+    (home / "Downloads" / "Invoice_March_2026.pdf").write_bytes(b"%PDF-1.4 not really")
+    (home / "Documents" / "notes.txt").write_text("Meeting with Rahul about the transformer training budget")
+    old = home / "Documents" / "old_resume.txt"
+    old.write_text("resume: python, ml engineer")
+    os.utime(old, (time.time() - 90 * 86400,) * 2)
+    (home / "Pictures" / "Screenshots" / "Screenshot 2026-11-20 101500.png").write_bytes(b"png")
+    with zipfile.ZipFile(home / "Documents" / "report.docx", "w") as z:
+        z.writestr("word/document.xml", "<w:p><w:t>Quarterly payment receipt for Swiggy</w:t></w:p>")
+    return home
+
+
+def test_memory_index_search(tmp_path):
+    import time
+    from jarvis.memory.index import MemoryIndex
+    home = _mem_home(tmp_path)
+    idx = MemoryIndex(tmp_path / "m.sqlite")
+    roots = [home / "Downloads", home / "Documents", home / "Pictures"]
+    assert idx.crawl(roots)["added"] == 5
+    idx.add_history([{"url": "https://arxiv.org/abs/1706.03762", "title": "Attention Is All You Need",
+                      "ts": time.time() - 86400, "browser": "Chrome"}])
+    t = lambda hits: [h.title for h in hits]                                   # noqa: E731
+    assert t(idx.search("invoices", ext="pdf")) == ["Invoice_March_2026.pdf"]   # stemming + type filter
+    assert t(idx.search("transformer budget")) == ["notes.txt"]                  # inside the text
+    assert t(idx.search("payment receipt", ext="document")) == ["report.docx"]   # inside a Word file
+    assert t(idx.search("", where="screenshots")) == ["Screenshot 2026-11-20 101500.png"]
+    assert t(idx.search("attention", where="web")) == ["Attention Is All You Need"]
+    assert t(idx.search("resume", newer_than_s=7 * 86400)) == []                 # 90 days old
+    assert t(idx.search("resume")) == ["old_resume.txt"]
+    assert idx.crawl(roots)["added"] == 0                                       # incremental
+    (home / "Documents" / "notes.txt").unlink()
+    assert idx.crawl(roots)["removed"] == 1
+
+
+def test_memory_repair_for_older_models():
+    from jarvis.nlu.brain import Brain
+
+    class Fake:
+        def __init__(self, out): self.out, self.knows = out, None
+        def parse(self, text): return parse(self.out), 0.95
+
+    b = Brain(); b.model = Fake('search_memory(query="invoice pdf from last week")')
+    assert str(b.resolve("find the invoice pdf from last week")[0]) == \
+        'search_memory(ext=pdf, newer_than=7d, query="invoice")'
+    b = Brain(); b.model = Fake('search_memory(query="screenshot with the login error")')
+    assert str(b.resolve("where's that screenshot with the login error")[0]) == \
+        'search_memory(query="login error", where=screenshots)'
+
+
+def test_find_end_to_end(env, tmp_path):
+    from jarvis.daemon import Jarvis
+    from jarvis.memory import index as MI
+    cfg, store, dl, arc = env
+    home = _mem_home(tmp_path)
+    j = Jarvis(cfg, lambda *a: True, data_root=tmp_path / "d")
+    j.config.show_details = False
+    MI.get(cfg.data_dir).crawl([home / "Downloads", home / "Documents"])
+    reply = j.handle("find the invoice pdf from last week")
+    assert "Invoice_March_2026.pdf" in reply and "Downloads" in reply, reply
+    rows = j.take_results()
+    assert rows and rows[0]["path"].endswith("Invoice_March_2026.pdf") and j.take_results() == []
+    assert "couldn't find" in j.handle("find the zebra migration spreadsheet").lower()

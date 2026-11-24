@@ -214,7 +214,22 @@ RULES: list[tuple[re.Pattern, callable]] = [
     (re.compile(r"^(?:mute|unmute)(?: the)?(?: sound| audio| volume)?$", re.I), lambda m, t: "system(action=mute)"),
     (re.compile(r"^(?:volume up|louder|increase volume)$", re.I), lambda m, t: "system(action=volume_up)"),
     (re.compile(r"^(?:volume down|quieter|decrease volume)$", re.I), lambda m, t: "system(action=volume_down)"),
+    # memory search (phase 7): backup for "find ..." when there's no model or it's unsure
+    (re.compile(rf"^(?:find|locate|dig up|track down|look for|search (?:my files|memory) for|where(?:'s| is| did i save)"
+                rf"|do you remember|i'm looking for)\b(?!.*\b(?:in|from) {_FOLDER}\s*$)(?!.*\bon (?:google|youtube|amazon"
+                rf"|flipkart|github|wikipedia|reddit|spotify)\b)\s+(.+?)\??$", re.I),
+     lambda m, t: _memory(m.groups()[-1], t)),
 ]
+
+
+def _memory(rest: str, text: str) -> str:
+    from ..memory.query import split_query
+    rest = re.sub(r"\b(?:in my (?:files|stuff|computer|pc)|for me|please)\b", " ", rest, flags=re.I)
+    query, found = split_query(text, rest)
+    parts = [f"{k}={v}" for k, v in sorted(found.items())]
+    if query:
+        parts.append(f'query="{query}"')
+    return "search_memory(" + ", ".join(parts) + ")"
 
 
 _WHOLE_SENTENCE = next(i for i, (p, _) in enumerate(RULES) if p.pattern.startswith('^(?:google|search(?: google)? for)')) + 1

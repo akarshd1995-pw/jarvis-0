@@ -106,8 +106,20 @@ def system(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
 
 
 def search_memory(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
-    return ActionResult("Memory search arrives in phase 3 (own embeddings + HNSW).", kind="memory",
-                        data={"query": args["query"]})
+    """Phase 7: search the local index of your files, screenshots and browser history."""
+    from ..memory import index as MI
+    idx = MI.get(ctx.config.data_dir)
+    query = str(args.get("query", ""))
+    ext = str(args["ext"]) if "ext" in args else None
+    where = str(args["where"]) if "where" in args else None
+    newer = args["newer_than"].seconds() if "newer_than" in args else None
+    older = args["older_than"].seconds() if "older_than" in args else None
+    hits = idx.search(query, ext=ext, newer_than_s=newer, older_than_s=older, where=where)
+    results = [{"title": h.title, "path": h.path, "source": h.source, "ext": h.ext, "mtime": h.mtime,
+                "snippet": h.snippet, "screenshot": h.screenshot} for h in hits]
+    return ActionResult(f"{len(hits)} match(es) for {query!r}", [h.title for h in hits], kind="memory",
+                        data={"query": query, "ext": ext, "where": where, "count": len(hits), "results": results,
+                              "indexed": idx.count()})
 
 
 def unknown(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:

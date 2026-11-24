@@ -154,6 +154,8 @@ class CommandBar:
         self.history: list[str] = []
         self.hist_i = 0
         self.busy = False
+        self.results_provider: Callable[[], list[dict]] | None = None   # memory search rows (phase 7)
+        self._rows: list[dict] = []
         self._pending_confirm = None
         self._ui_thread = threading.current_thread()
 
@@ -202,6 +204,8 @@ class CommandBar:
         self.entry.bind("<Up>", lambda e: self._history(-1))
         self.entry.bind("<Down>", lambda e: self._history(1))
         self.entry.bind("<KeyRelease>", lambda e: self._sync_placeholder())
+        for n in range(1, 10):
+            r.bind(f"<Control-Key-{n}>", lambda e, i=n - 1: self._open_row(i))
         r.bind("<Return>", self._key_yes, add="+")
         r.bind("<Escape>", self._key_no, add="+")
 
@@ -338,8 +342,9 @@ class CommandBar:
             detail = re.sub(r"\s*·\s*reply:\s*\S+\s*$", "", detail).strip()
         return reply.strip(), badge, detail
 
-    def _show_reply(self, result: str):
+    def _show_reply(self, result: str, rows: list[dict] | None = None):
         self._clear_body()
+        self._rows = rows or []
         reply, badge, detail = self._split(result)
         head = tk.Frame(self.body, bg=T.SURFACE)
         head.pack(fill="x", pady=(0, 6))
@@ -360,11 +365,87 @@ class CommandBar:
         except (tk.TclError, TypeError):
             lines = reply.count("\n") + 1 + len(reply) // 80
         txt.configure(height=max(1, min(lines, 14)))
+        if self._rows:
+            self._draw_rows(self._rows)
         if detail:
             tk.Frame(self.body, bg=T.BORDER, height=1).pack(fill="x", pady=(10, 6))
             tk.Label(self.body, text=detail, bg=T.SURFACE, fg=T.FAINT, font=T.F(9, kind="mono"), justify="left",
                      anchor="w", wraplength=W - 40).pack(fill="x")
         self._resize()
+
+    # ---------------------------------------------------------- memory search results
+    ICONS = {"web": "◍", "image": "▣", "video": "▶", "audio": "♪", "document": "▤", "archive": "▦",
+             "installer": "⬢", "code": "‹›", "screenshot": "▣"}
+
+    def _icon(self, row: dict) -> str:
+        if row["source"] == "web":
+            return self.ICONS["web"]
+        if row.get("screenshot"):
+            return self.ICONS["screenshot"]
+        from .. import filetypes
+        for cat, exts in filetypes.CATEGORIES.items():
+            if (row.get("ext") or "") in exts:
+                return self.ICONS.get(cat, "•")
+        return "•"
+
+    @staticmethod
+    def _age(ts: float) -> str:
+        s = max(0, time.time() - (ts or 0))
+        for unit, sec in (("y", 31536000), ("mo", 2592000), ("d", 86400), ("h", 3600), ("m", 60)):
+            if s >= sec:
+                return f"{int(s // sec)}{unit} ago"
+        return "now"
+
+    def _draw_rows(self, rows: list[dict]):
+        import os
+        box = tk.Frame(self.body, bg=T.SURFACE)
+        box.pack(fill="x", pady=(10, 0))
+        for i, row in enumerate(rows[:6]):
+            line = tk.Frame(box, bg=T.RAISED, padx=10, pady=6, cursor="hand2", highlightthickness=1,
+                            highlightbackground=T.BORDER)
+            line.pack(fill="x", pady=2)
+            icon = tk.Label(line, text=self._icon(row), bg=T.RAISED, fg=T.ACCENT, font=T.F(12), width=2)
+            icon.pack(side="left")
+            mid = tk.Frame(line, bg=T.RAISED)
+            mid.pack(side="left", fill="x", expand=True, padx=(6, 0))
+            title = tk.Label(mid, text=row["title"][:80], bg=T.RAISED, fg=T.TEXT, font=T.F(10, "bold"), anchor="w")
+            title.pack(fill="x")
+            if row["source"] == "web":
+                where = row["path"].split("//")[-1].split("/")[0]
+            else:
+                where = os.path.dirname(row["path"])
+            sub_text = f"{where}  ·  {self._age(row.get('mtime', 0))}"
+            if row.get("snippet"):
+                sub_text += "  ·  " + row["snippet"].replace("[", "").replace("]", "")[:70]
+            sub = tk.Label(mid, text=sub_text, bg=T.RAISED, fg=T.FAINT, font=T.F(8), anchor="w")
+            sub.pack(fill="x")
+            key = tk.Label(line, text=f"Ctrl+{i + 1}", bg=T.RAISED, fg=T.FAINT, font=T.F(8))
+            key.pack(side="right")
+            for w in (line, icon, mid, title, sub, key):
+                w.bind("<Button-1>", lambda e, k=i: self._open_row(k))
+                w.bind("<Button-3>", lambda e, k=i: self._open_row(k, reveal=True))
+                w.bind("<Enter>", lambda e, l=line: l.configure(highlightbackground=T.ACCENT_DIM))
+                w.bind("<Leave>", lambda e, l=line: l.configure(highlightbackground=T.BORDER))
+        tk.Label(self.body, text="Click to open  ·  right-click to show in folder", bg=T.SURFACE, fg=T.FAINT,
+                 font=T.F(8)).pack(anchor="w", pady=(4, 0))
+
+    def _open_row(self, i: int, reveal: bool = False):
+        if i >= len(self._rows):
+            return
+        row = self._rows[i]
+        try:
+            if row["source"] == "web":
+                import webbrowser
+                webbrowser.open(row["path"])
+            elif reveal:
+                import subprocess
+                subprocess.Popen(["explorer", "/select,", row["path"]])
+            else:
+                import os
+                os.startfile(row["path"])                 # noqa: Windows
+            self.hide()
+        except (OSError, AttributeError) as e:
+            self._show_reply(f"Couldn't open it: {e}")
 
     def _show_confirm(self, tier: Tier, summary: str, items: list[str]):
         self._clear_body()
@@ -448,7 +529,8 @@ class CommandBar:
         bad = low.startswith(("something went wrong", "sorry", "i couldn't", "couldn't")) or "failed" in low[:80]
         self.orb.set("error" if bad else "success")
         self.root.after(1800, lambda: self.orb.set("idle") if not self.busy else None)
-        self._show_reply(result)
+        rows = self.results_provider() if self.results_provider else []
+        self._show_reply(result, rows)
 
     # ---------------------------------------------------------- confirmations (called from the worker thread)
     def confirm(self, tier: Tier, summary: str, items: list[str]) -> bool:

@@ -147,7 +147,7 @@ class Persona:
                 return f"play_{mode}", {"query": d["query"]}
             return "play", {"query": d["query"]}
         if k == "memory":
-            return "memory", {"query": d["query"]}
+            return self._plan_memory(d)
         if k == "unsupported":
             return "unsupported", {"request": _lower_first(d["request"])}
         if k == "unknown":
@@ -259,6 +259,42 @@ class Persona:
         day = "today" if due_dt.date() == now_dt.date() else \
             "tomorrow" if due_dt.date() == (now_dt + dt.timedelta(days=1)).date() else due_dt.strftime("on %A")
         return f"at {clock} {day}"
+
+    def _plan_memory(self, d: dict) -> tuple[str, dict]:
+        what = d.get("query") or ("your latest screenshot" if d.get("where") == "screenshots" else
+                                  f"your latest {files_word(2, d['ext'])}" if d.get("ext") else "that")
+        if not d.get("count"):
+            if not sum((d.get("indexed") or {}).values()):
+                return "memory_indexing", {}
+            return "memory_none", {"query": what}
+        top = d["results"][0]
+        if top["source"] == "web":
+            place = "your browser history"
+        else:
+            import os
+            place = os.path.basename(os.path.dirname(top["path"])) or "your files"
+        more = d["count"] - 1
+        return ("memory_found" if more else "memory_found_one"), {
+            "title": top["title"], "place": place, "age": self.ago(top["mtime"]), "more": self._num(more, False),
+            "More": self._num(more, True),
+            "query": what}
+
+    def ago(self, ts: float) -> str:
+        import time as _t
+        s = max(0, _t.time() - (ts or 0))
+        if s < 3600:
+            return "just now" if s < 120 else f"{int(s // 60)} minutes ago"
+        if s < 86400:
+            return f"{int(s // 3600)} hour{'s' if s >= 7200 else ''} ago"
+        days = int(s // 86400)
+        if days == 1:
+            return "yesterday"
+        if days < 30:
+            return f"{days} days ago"
+        if days < 365:
+            m = days // 30
+            return f"{m} month{'s' if m > 1 else ''} ago"
+        return f"{days // 365} year{'s' if days >= 730 else ''} ago"
 
     def _plan_training(self, d: dict) -> tuple[str, dict]:
         if d["action"] == "improve":

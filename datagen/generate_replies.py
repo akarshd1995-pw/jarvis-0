@@ -108,7 +108,19 @@ def random_case(rng: random.Random, p: Persona) -> tuple[str, dict]:
         return p.plan(AR("", kind="play", data={"query": query, "site": site, "mode": mode,
                                                  "fallback": site == "youtube" and rng.random() < 0.08}))
     if r < 0.84:
-        return p.plan(AR("", kind="memory", data={"query": LX.search_query(rng)}))
+        import time as _t
+        q = rng.choice(["invoice", "resume", "login error", "transformer notes", "tax receipt", "offer letter",
+                        "budget", "flight ticket", LX.pseudo_word(rng)])
+        n = rng.choice([0, 1, 1, 2, 3, 5, 8])
+        web = rng.random() < 0.25
+        res = [{"title": (f"{q.title()} - {rng.choice(['GitHub', 'Medium', 'Wikipedia', 'YouTube'])}" if web else
+                          f"{q.replace(' ', '_')}_{rng.randint(1, 30)}.{rng.choice(['pdf', 'docx', 'png', 'txt'])}"),
+                "path": ("https://example.com/" + q.replace(" ", "-")) if web else
+                        f"C:/Users/me/{rng.choice(['Downloads', 'Documents', 'Desktop', 'Screenshots'])}/x",
+                "source": "web" if web else "file", "ext": "", "mtime": _t.time() - rng.randint(60, 200 * 86400),
+                "snippet": "", "screenshot": False} for _ in range(n)]
+        return p.plan(AR("", kind="memory", data={"query": q, "count": n, "results": res, "where": None,
+                                                   "ext": None, "indexed": {"files": 0 if rng.random() < 0.05 else 900}}))
     if r < 0.89:
         return p.plan(AR("", kind="unsupported", data={"request": LX.unsupported_text(rng)}))
     if r < 0.91:

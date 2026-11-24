@@ -28,6 +28,7 @@ from pathlib import Path
 
 from jarvis.dsl.grammar import DSLError, canonical
 from jarvis import filetypes as FT
+from jarvis.memory import query as MQ
 from jarvis.nlu.media_text import tidy_program_text
 from . import lexicon as LX
 from .noise import L, R, apply_noise
@@ -558,21 +559,64 @@ def gen_system(c: Ctx):
     return f"system(action={key})", pre + phrase, {}
 
 
-SEARCH_V = ["find", "search for", "look up", "locate", "dig up", "find me", "search my files for", "track down"]
-SEARCH_EN = frames("SEARCH_EN", [
-    "{v} {q}", "can you {v} {q}", "where is {q}", "where did i save {q}", "i'm looking for {q}", "please {v} {q}",
-    "could you {v} {q}",                                                 # val_ood
-    "please help me {v} {q}",                                            # test_ood
-    "do you remember {q}", "{v} {q} in my files", "help me {v} {q}", "search memory for {q}",
-    "could you please {v} {q}",
+# ---------------------------------------------------------------- memory search (phase 7)
+# search_memory(query="invoice", ext=pdf, newer_than=7d, where=files|web|screenshots)
+# The query holds only WHAT the thing is about; the kind of thing and the time go in their own fields.
+MEM_TOPICS = ["invoice", "resume", "login error", "transformer notes", "tax receipt", "offer letter", "budget",
+              "flight ticket", "bank statement", "electricity bill", "meeting notes", "rent agreement", "GST",
+              "python error", "API key", "wedding photos", "trip itinerary", "salary slip", "insurance policy",
+              "lecture notes", "project proposal", "the server crash", "react hooks", "docker setup", "cv",
+              "passport scan", "aadhaar", "train booking", "hotel booking", "recipe", "workout plan", "jarvis",
+              "everway", "q3 report", "client contract", "design mockup", "pricing table", "cover letter",
+              "college admission", "exam timetable", "bug report", "stack trace", "the blue chart", "logo",
+              "attention is all you need", "linear regression", "cricket score", "laptop review", "car insurance"]
+MEM_KIND, MEM_TIME, MEM_TIME_HI = MQ.KIND, MQ.TIME, MQ.TIME_HI
+MEM_EN = frames("MEM_EN", [
+    "find the {kind} about {q}{t}", "where's that {kind} with {q}{t}", "find {q}", "find my {q} {kind}{t}",
+    "search my files for {q}", "where did i save the {q} {kind}",
+    "can you find that {kind} about {q}{t}",                                # val_ood
+    "help me find the {kind} with {q}{t}",                                  # test_ood
+    "dig up the {kind} about {q}{t}", "i'm looking for the {kind} about {q}{t}", "show me the {kind} with {q}{t}",
+    "find that {q} {kind} i saw{t}", "look for {q} in my stuff", "where is my {q}",
+    "do you remember the {kind} about {q}{t}",                              # val_ood
+    "locate the {q} {kind}{t}",                                             # test_ood
+    "find the {q} {kind}{t}", "track down the {kind} about {q}", "search memory for {q}",
+    "open the {kind} about {q}{t}", "find my latest {kind}", "show my last {kind}",
+    "the {kind} about {q}{t}, where is it",                                 # val_ood
+    "find the {kind} i opened{t} about {q}",                                # test_ood
+    "i remember a {kind} about {q}, find it", "locate my {q}", "the {q} {kind} i opened{t}",
+    "can you help me find {q}", "do you know where my {q} is",
 ])
-SEARCH_HI = ["{q} dhundo", "{q} kahan hai", "{q} search karo", "{q} dhoondh ke do", "mera {q} kahan rakha hai"]
+MEM_HI = ["{q} wala {kind} dhundo", "{q} ka {kind} kahan hai", "{t}{q} {kind} dhundo", "mera {q} kahan rakha hai",
+          "{q} dhundo", "{q} wali {kind} dikhao", "{t}{kind} dhundo jisme {q} tha", "{q} search karo mere files me"]
 
 
 def gen_search(c: Ctx):
-    query = LX.search_query(c.rng)
-    tpl = c.T(SEARCH_HI if c.hing else SEARCH_EN)
-    return f"search_memory(query={q(query)})", tpl.format(q=slot(query), v=c.rng.choice(SEARCH_V)), {}
+    rng = c.rng
+    tpl = c.T(MEM_HI if c.hing else MEM_EN)
+    args: dict = {}
+    fill: dict = {}
+    if "{q}" in tpl:
+        topic = rng.choice(MEM_TOPICS) if rng.random() < 0.75 else " ".join(
+            LX.pseudo_word(rng).lower().strip("_-") for _ in range(rng.choice([1, 1, 2])))
+        args["query"] = q(topic)
+        fill["q"] = slot(topic)
+    if "{kind}" in tpl:
+        word = rng.choice(list(MEM_KIND))
+        ext, where = MEM_KIND[word]
+        if ext:
+            args["ext"] = ext
+        if where:
+            args["where"] = where
+        fill["kind"] = word
+    if "{t}" in tpl:
+        if rng.random() < 0.45:
+            phrase, d = rng.choice(MEM_TIME_HI if c.hing else MEM_TIME)
+            args["newer_than"] = d
+            fill["t"] = (phrase + " ") if c.hing else (" " + phrase)
+        else:
+            fill["t"] = ""
+    return dsl_call("search_memory", args), tpl.format(**fill), {}
 
 
 # ---------------------------------------------------------------- web search ("play X on youtube")
@@ -974,7 +1018,7 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve"]
+           "training_control", "song_suffix", "self_improve", "memory_filters"]
 
 
 # ---------------------------------------------------------------- briefings (phase 24)

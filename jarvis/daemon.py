@@ -52,11 +52,49 @@ class Jarvis:
         self.last_text: str | None = None
         self.monitor = None
         self.sampler = None
+        self.last_results: list[dict] = []
         self.last_program: str | None = None
         from .executor import REGISTRY
         REGISTRY["briefing"] = self._briefing_action
         self.briefings = briefing.Scheduler(config.data_dir / "briefing_state.json", config.briefing_morning,
                                             config.briefing_evening, enabled=config.briefing_auto)
+
+    def take_results(self) -> list[dict]:
+        out, self.last_results = self.last_results, []
+        return out
+
+    # ------------------------------------------------------------ memory index (phase 7)
+    def memory_roots(self) -> list:
+        roots = []
+        for name in self.config.memory_folders:
+            try:
+                p = self.config.resolve_folder(name)
+            except Exception:
+                continue
+            if p.is_dir() and p not in roots:
+                roots.append(p)
+        return roots
+
+    def start_indexer(self, every_min: float = 20) -> threading.Thread:
+        """Keep the memory index fresh: files every 20 minutes (only new/changed ones are read), browser history too."""
+        from .memory import browser, index as MI
+
+        def loop():
+            idx = MI.get(self.config.data_dir)
+            while True:
+                if self.config.memory_enabled:
+                    try:
+                        st = idx.crawl(self.memory_roots())
+                        if self.config.memory_browser:
+                            idx.add_history(browser.history())
+                        log.info("memory index: %s (%s)", idx.count(), st)
+                    except Exception as e:
+                        log.warning("memory indexing failed: %s", e)
+                time.sleep(every_min * 60)
+
+        t = threading.Thread(target=loop, daemon=True, name="indexer")
+        t.start()
+        return t
 
     # ------------------------------------------------------------ briefings (phase 24)
     @property
@@ -397,6 +435,9 @@ class Jarvis:
             self._hud("success" if source == "smalltalk" else "error", reply, hold=2)
             return self._with_details(reply, source, prog)
         report = self.executor.run(prog)
+        for r in report.results:                    # memory search: rows the command bar can show and open
+            if r.kind == "memory" and r.data.get("results"):
+                self.last_results = r.data["results"]
         reply = self.persona.report(report)
         state = "error" if report.failures else ("idle" if report.declined and not report.results else "success")
         self._hud(state, reply, hold=2)
@@ -456,6 +497,7 @@ def main() -> None:
         jarvis.start_monitor(lambda a, text: print(f"\n[{a.level.upper()}] {text}\n> ", end=""))
         jarvis.start_briefings(lambda kind, text: print(f"\n[{kind.upper()} BRIEFING] {text}\n> ", end=""))
         jarvis.start_improver(lambda text: print(f"\n[MODEL] {text}\n> ", end=""))
+        jarvis.start_indexer()
         print("Jarvis-0 (cli). Ctrl+C to quit.")
         try:
             while True:
@@ -546,6 +588,8 @@ def main() -> None:
                 pass
 
     jarvis.start_briefings(deliver_briefing)
+    jarvis.start_indexer()
+    bar.results_provider = jarvis.take_results
     from .ui.command_bar import Toast
     jarvis.start_improver(lambda text: bar.post("call", lambda: Toast(bar.root, "Model update", text, seconds=30)))
 

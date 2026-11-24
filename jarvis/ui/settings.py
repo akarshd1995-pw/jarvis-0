@@ -165,6 +165,9 @@ class SettingsWindow:
         self.encrypt = tk.BooleanVar(value=c.encrypt_logs)
         self.titles = tk.BooleanVar(value=c.keep_window_titles)
         self.auto = tk.BooleanVar(value=autostart.is_enabled())
+        self.mem_on = tk.BooleanVar(value=c.memory_enabled)
+        self.mem_web = tk.BooleanVar(value=c.memory_browser)
+        self.mem_folders = tk.StringVar(value=", ".join(c.memory_folders))
 
     def _build_page(self, name: str) -> tk.Frame:
         pg = tk.Frame(self.content, bg=T.SURFACE)
@@ -227,6 +230,12 @@ class SettingsWindow:
             self._title(pg, "Privacy", "Everything stays on this PC.")
             self._row(pg, "Encrypt the activity log", tog(self.encrypt), "Windows DPAPI: only your account can read it.")
             self._row(pg, "Store full window titles", tog(self.titles), "Off: only app names (used for briefings).")
+            self._row(pg, "Index my files for search", tog(self.mem_on),
+                      "\"find the invoice pdf\". Names and text of your files, kept in a local index.")
+            self._row(pg, "Folders to index", lambda p: self._entry(p, self.mem_folders, 30),
+                      "Comma-separated names or paths, e.g. Downloads, Documents, D:/work")
+            self._row(pg, "Include browser history", tog(self.mem_web),
+                      "Titles and addresses from Chrome, Edge, Brave and Firefox. Never leaves this PC.")
         return pg
 
     def _conf_text(self):
@@ -267,6 +276,8 @@ class SettingsWindow:
             if not _re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", var.get().strip()):
                 messagebox.showerror("Briefings", f"{label} time must look like 07:30.", parent=self.win)
                 return
+        c.memory_enabled, c.memory_browser = self.mem_on.get(), self.mem_web.get()
+        c.memory_folders = [x.strip() for x in self.mem_folders.get().split(",") if x.strip()] or c.memory_folders
         c.briefing_auto = self.b_auto.get()
         c.briefing_morning, c.briefing_evening = self.b_morning.get().strip(), self.b_evening.get().strip()
         path = c.save()

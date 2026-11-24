@@ -215,6 +215,9 @@ class Brain:
             prog = repair_file_kind(prog, text)
         if not self.knows("play_modes"):
             prog = upgrade_play(prog, text)
+        if not self.knows("memory_filters"):
+            from ..memory.query import repair as memory_repair
+            prog = memory_repair(prog, text)
         return prog
 
     def resolve(self, text: str) -> tuple[Program | None, str]:

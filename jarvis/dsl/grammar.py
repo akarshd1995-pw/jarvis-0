@@ -65,7 +65,9 @@ SCHEMA: dict[str, dict] = {
                       "one_of": [["at", "after"]]},
     "system":        {"args": {"action": "ident"}, "required": ["action"],
                       "enum": {"action": ["lock", "mute", "volume_up", "volume_down", "sleep_display"]}},
-    "search_memory": {"args": {"query": "str"}, "required": ["query"]},
+    "search_memory": {"args": {"query": "str", "ext": "ident", "newer_than": "dur", "older_than": "dur",
+                               "where": "ident"}, "required": [],                  # phase 7
+                      "enum": {"where": ["files", "web", "screenshots"]}},
     "search_web":    {"args": {"query": "str", "site": "ident"}, "required": ["query"],
                       "enum": {"site": ["google", "youtube", "amazon", "flipkart", "swiggy", "zomato", "github",
                                         "stackoverflow", "wikipedia", "spotify", "maps", "reddit", "linkedin"]}},

@@ -14,3 +14,4 @@ pytest>=8
 # Training (RTX 5070 PC only), installed separately:
 #   pip install torch --index-url https://download.pytorch.org/whl/cu128
 #   pip install onnx            (needed by training.export_onnx)
+pypdf>=4.0          # memory search: text from PDFs (optional; PDFs are still found by name without it)

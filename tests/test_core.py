@@ -1017,3 +1017,42 @@ def test_briefing_command_end_to_end(env, tmp_path):
     reply = j.handle("how was my day")
     assert reply.startswith("Good") and "reminders tomorrow" in reply or "reminder" in reply
     assert j.briefings.given_today("evening", __import__("datetime").datetime.now())
+
+
+# ---------------------------------------------------------------- file categories ("video files") and new folders
+def test_category_matching():
+    from jarvis import filetypes as FT
+    assert FT.matches(".MKV", "video") and FT.matches(".mp4", "video") and not FT.matches(".zip", "video")
+    assert FT.matches(".pdf", "pdf") and not FT.matches(".pdf", "mp4")
+    assert FT.category_in("move all videos files in downloads to a new folder videos") == "video"
+    assert FT.category_in("move everything from downloads to videos") is None        # Videos is the destination
+    assert FT.category_in("move pdfs from downloads to the videos folder") is None
+
+
+def test_move_video_files_to_new_folder_end_to_end(env, tmp_path):
+    from jarvis.daemon import Jarvis
+    cfg, store, dl, arc = env
+    for name in ["trip.mp4", "clip.MKV", "talk.mov", "setup.exe", "app.zip", "notes.pdf", "song.mp3"]:
+        (dl / name).write_bytes(b"x")
+    j = Jarvis(cfg, lambda *a: True, data_root=tmp_path / "d")
+    j.config.show_details = False
+    reply = j.handle("move all videos files in downloads to a new folder videos")
+    moved = sorted(p.name for p in (dl / "videos").iterdir())
+    assert moved == ["clip.MKV", "talk.mov", "trip.mp4"], moved                       # never the zip or exe
+    left = {p.name for p in dl.iterdir() if p.is_file()}
+    assert {"app.zip", "notes.pdf", "setup.exe", "song.mp3"} <= left                   # still in Downloads
+    assert "three videos" in reply.lower() and 'new folder "videos"' in reply, reply
+
+
+def test_brain_adds_missing_file_type():
+    from jarvis.nlu.brain import Brain
+
+    class Fake:
+        def __init__(self, out): self.out = out
+        def parse(self, text): return parse(self.out), 0.95
+
+    b = Brain(); b.model = Fake("move_files(dest=Videos, src=Downloads)")
+    assert str(b.resolve("move all video files in downloads to a new folder videos")[0]) == \
+        'move_files(ext=video, new_folder="videos", src=Downloads)'
+    b = Brain(); b.model = Fake("move_files(dest=Videos, src=Downloads)")
+    assert str(b.resolve("move everything from downloads to videos")[0]) == "move_files(dest=Videos, src=Downloads)"

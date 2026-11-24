@@ -15,7 +15,9 @@ from ..safety import SafetyError
 from .templates import (ACTION_PHRASES, ADDRESS_RATE, OP_VERBS, SITE_NAMES, SYSTEM_PHRASES, T, TONES)
 
 _WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"]
-_NOUN_EXT = {"pdf": "PDF", "exe": "installer", "msi": "installer", "apk": "APK", "iso": "ISO image"}
+_NOUN_EXT = {"pdf": "PDF", "exe": "installer", "msi": "installer", "apk": "APK", "iso": "ISO image",
+             "video": "video", "image": "image", "audio": "audio file", "document": "document", "archive": "archive",
+             "installer": "installer", "code": "code file"}
 _UNITS = {"m": "minute", "h": "hour", "d": "day", "w": "week"}
 APP_DISPLAY = {"vscode": "VS Code", "explorer": "File Explorer", "terminal": "Terminal", "chrome": "Chrome",
                "edge": "Edge", "notepad": "Notepad", "spotify": "Spotify", "calculator": "Calculator",
@@ -103,7 +105,8 @@ class Persona:
             filt += f" with {d['name_contains']} in the name"
         return {"count": self._num(count, False), "Count": self._num(count, True), "files": files_word(count, ext),
                 "files_pl": files_word(2, ext), "filt": filt, "src": folder_name(d.get("src")),
-                "dest": folder_name(d.get("dest")), "opverb": OP_VERBS.get(d.get("op", ""), "do")}
+                "dest": (f'a new folder "{d.get("dest")}" in {folder_name(d.get("src"))}' if d.get("new_folder")
+                         else folder_name(d.get("dest"))), "opverb": OP_VERBS.get(d.get("op", ""), "do")}
 
     def plan(self, r: ActionResult) -> tuple[str, dict]:
         """Facts for a result: (template key, fields). Shared by templates and the reply model."""

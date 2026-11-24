@@ -53,12 +53,12 @@ SCHEMA: dict[str, dict] = {
     "open_folder":   {"args": {"path": "ident|str"}, "required": ["path"]},
     "list_files":    {"args": {"src": "ident|str", "ext": "ident", "older_than": "dur",
                                "newer_than": "dur", "name_contains": "str"}, "required": ["src"]},
-    "move_files":    {"args": {"src": "ident|str", "dest": "ident|str", "ext": "ident",
+    "move_files":    {"args": {"src": "ident|str", "dest": "ident|str", "new_folder": "str", "ext": "ident",
                                "older_than": "dur", "newer_than": "dur", "name_contains": "str"},
-                      "required": ["src", "dest"]},
-    "copy_files":    {"args": {"src": "ident|str", "dest": "ident|str", "ext": "ident",
+                      "required": ["src"], "one_of": [["dest", "new_folder"]]},   # new_folder: made inside src
+    "copy_files":    {"args": {"src": "ident|str", "dest": "ident|str", "new_folder": "str", "ext": "ident",
                                "older_than": "dur", "newer_than": "dur", "name_contains": "str"},
-                      "required": ["src", "dest"]},
+                      "required": ["src"], "one_of": [["dest", "new_folder"]]},   # new_folder: made inside src
     "delete_files":  {"args": {"src": "ident|str", "ext": "ident", "older_than": "dur",
                                "newer_than": "dur", "name_contains": "str"}, "required": ["src"]},
     "remind":        {"args": {"text": "str", "at": "time", "after": "dur"}, "required": ["text"],

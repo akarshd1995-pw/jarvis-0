@@ -1,11 +1,13 @@
 """File actions. Every mutating op journals its inverse so it can be undone."""
 from __future__ import annotations
 
+import re
 import shutil
 import time
 from pathlib import Path
 
 from ..dsl.grammar import Duration
+from .. import filetypes
 from ..safety import MAX_FILES_PER_ACTION, SafetyError, check_path
 from .base import ActionResult, Ctx
 
@@ -21,7 +23,8 @@ def _unique_target(dest_dir: Path, name: str) -> Path:
 
 def _facts(args: dict, count: int, op: str = "list", dry: bool = False) -> dict:
     return {"op": op, "count": count, "dry": dry, "src": str(args.get("src", "")),
-            "dest": str(args["dest"]) if "dest" in args else None,
+            "dest": str(args["dest"]) if "dest" in args else (str(args["new_folder"]) if "new_folder" in args else None),
+            "new_folder": "new_folder" in args,
             "ext": str(args["ext"]) if "ext" in args else None,
             "older_than": str(args["older_than"]) if "older_than" in args else None,
             "newer_than": str(args["newer_than"]) if "newer_than" in args else None,
@@ -42,7 +45,7 @@ def select_files(ctx: Ctx, args: dict) -> tuple[Path, list[Path]]:
     for p in sorted(src.iterdir()):
         if not p.is_file():
             continue
-        if ext and p.suffix.lower().lstrip(".") != ext:
+        if ext and not filetypes.matches(p.suffix, ext):          # "video" = mp4, mkv, avi, mov, ...
             continue
         if needle and needle not in p.name.lower():
             continue
@@ -65,7 +68,11 @@ def list_files(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
 
 def _transfer(args: dict, ctx: Ctx, dry_run: bool, copy: bool) -> ActionResult:
     src, files = select_files(ctx, args)
-    dest = check_path(ctx.config.resolve_folder(str(args["dest"])), ctx.config.allowed_roots)
+    if "new_folder" in args:                                  # "to a new folder videos": made inside the source
+        name = re.sub(r'[<>:"/\\|?*]', "", str(args["new_folder"])).strip(" .") or "New folder"
+        dest = check_path(src / name, ctx.config.allowed_roots)
+    else:
+        dest = check_path(ctx.config.resolve_folder(str(args["dest"])), ctx.config.allowed_roots)
     verb = "copy" if copy else "move"
     preview = [f"{f.name} -> {dest}" for f in files]
     if dry_run:

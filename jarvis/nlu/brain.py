@@ -114,6 +114,33 @@ def repair_slots(prog: Program, text: str) -> Program | None:
     return prog if changed else None
 
 
+_FILE_OPS = {"move_files", "copy_files", "delete_files", "list_files"}
+_NEW_FOLDER = re.compile(r"\b(?:in)?to (?:a |an )?new folder(?: called| named)? ['\"]?([\w .-]+?)['\"]?\s*$", re.I)
+
+
+def repair_file_kind(prog: Program, text: str) -> Program:
+    """Never act on every file when the user named a type. Older models don't know categories:
+    'move all video files in downloads' -> add ext=video (mp4, mkv, mov, ...). Also 'to a new folder X'."""
+    from .. import filetypes
+    from .rule_parser import _ext
+    ops = [c for c in prog.calls if c.action in _FILE_OPS]
+    if len(ops) != 1:                               # chained commands: can't tell which clause a type belongs to
+        return prog
+    call = ops[0]
+    single = _ext(filetypes.object_words(text))
+    cat = filetypes.category_in(text)
+    have = str(call.args["ext"]) if "ext" in call.args else None
+    if have is None and (single or cat):
+        call.args["ext"] = Ident(single or cat)
+    elif have and cat and not single and have in filetypes.CATEGORIES.get(cat, set()):
+        call.args["ext"] = Ident(cat)                # said "videos", model picked just "mp4"
+    m = _NEW_FOLDER.search(text)
+    if m and call.action in ("move_files", "copy_files") and "new_folder" not in call.args:
+        call.args.pop("dest", None)
+        call.args["new_folder"] = m.group(1).strip()
+    return prog
+
+
 class Brain:
     def __init__(self, checkpoint: Path | None = None, tokenizer: Path | None = None,
                  min_confidence: float = 0.55, prefer: str = "auto"):
@@ -167,13 +194,13 @@ class Brain:
                     fixed = repair_slots(prog, text)
                     if fixed is not None:
                         return upgrade_play(fixed, text), f"model {conf:.0%} + rules slot"
-                    return upgrade_play(prog, text), f"model {conf:.0%}"
+                    return upgrade_play(repair_file_kind(prog, text), text), f"model {conf:.0%}"
                 # The model says it can't: a newer rule may know better (e.g. actions added after it was trained)
                 ruled = rule_parse(text)
                 if ruled is not None and not any(c.action in ("unknown", "unsupported") for c in ruled.calls):
                     return ruled, "rules"
                 if str(prog) != "unknown()":
-                    return upgrade_play(prog, text), f"model {conf:.0%}"
+                    return upgrade_play(repair_file_kind(prog, text), text), f"model {conf:.0%}"
                 model_unknown = (prog, f"model {conf:.0%}")
         prog = rule_parse(text)
         if prog is not None:

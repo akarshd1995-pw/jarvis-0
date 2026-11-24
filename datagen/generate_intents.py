@@ -27,6 +27,7 @@ import re
 from pathlib import Path
 
 from jarvis.dsl.grammar import DSLError, canonical
+from jarvis import filetypes as FT
 from jarvis.nlu.media_text import tidy_program_text
 from . import lexicon as LX
 from .noise import L, R, apply_noise
@@ -179,9 +180,26 @@ GENERIC_WHAT_EN = ["files", "everything", "all files", "the files", "all the stu
 GENERIC_WHAT_HI = ["saari files", "sab kuch", "files", "saara saman", "sab files"]
 
 
+CAT_HOME = {"video": "Videos", "image": "Pictures", "audio": "Music", "document": "Documents"}
+NEW_FOLDER_NAMES = ["videos", "photos", "pics", "music", "songs", "docs", "old stuff", "installers", "zips",
+                    "trip pics", "college", "work", "movies", "screenshots", "backup", "misc", "2026", "clips",
+                    "wallpapers", "receipts", "setup files", "sorted", "keep", "archive 2025"]
+
+
 def what_phrase(c: Ctx, args: dict) -> str:
     rng = c.rng
-    if rng.random() < 0.72:
+    r = rng.random()
+    if 0.5 <= r < 0.72:                         # a whole category: "video files" = mp4, mkv, mov, ...
+        cat = rng.choice(list(FT.CATEGORY_WORDS))
+        args["ext"] = cat
+        w = rng.choice(FT.CATEGORY_WORDS[cat])
+        forms = [w, f"all {w}", f"all the {w}", f"my {w}", f"the {w}"]
+        if " " not in w and w.endswith("s"):                     # "videos" -> "every video file", "all video files"
+            forms += [f"every {w[:-1]} file", f"all {w[:-1]} files"]
+        if c.hing:
+            forms += [f"saari {w}", f"saare {w}", f"{w} wali files", f"sab {w}"]
+        return slot(rng.choice(forms))
+    if r < 0.5:
         e = rng.choice(LX.EXTS)
         args["ext"] = e
         forms = [f"{e} files", f"{e}s", f".{e} files", f"{e.upper()} files", f"all {e} files", f"all the {e}s",
@@ -389,7 +407,19 @@ def gen_file_op(c: Ctx, op: str):
     verbs, pp, hverbs = VERBS[op]
     fill = dict(verb=rng.choice(verbs), pp=pp, hverb=rng.choice(hverbs), what=what, filt=filt, src=S)
     if op in ("move", "copy"):
-        dest_v, D = folder(c, exclude=src_v)
+        home = CAT_HOME.get(str(args.get("ext")))
+        if rng.random() < 0.15:                 # "to a new folder called X": made inside the source
+            name = rng.choice(NEW_FOLDER_NAMES) if rng.random() < 0.7 else LX.path_part(rng)
+            phrase = rng.choice(["naya folder {n}", "naye folder {n}", "ek naya folder {n}", "new folder {n}"]
+                                if c.hing else ["a new folder {n}", "a new folder called {n}", "a new folder named {n}",
+                                                "new folder {n}", "a new folder '{n}'", "a fresh folder called {n}"])
+            args["new_folder"] = q(name)
+            fill["dest"] = phrase.format(n=slot(name))
+            return dsl_call(f"{op}_files", args), tpl.format(**fill), meta
+        if home and home != src_v and rng.random() < 0.4:      # "move videos from downloads to videos"
+            dest_v, D = home, slot(rng.choice(LX.FOLDERS[home]))
+        else:
+            dest_v, D = folder(c, exclude=src_v)
         if dest_v == src_v:
             dest_v, D = ("Archive", slot("archive")) if src_v != "Archive" else ("Documents", slot("documents"))
         args["dest"] = dest_v

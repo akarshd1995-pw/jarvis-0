@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 
+from .. import filetypes
+
 from ..dsl.grammar import DSLError, Program, parse
 
 _FOLDER = r"(downloads|documents|desktop|pictures|music|videos|archive)"
@@ -53,7 +55,7 @@ def _ext(text: str) -> str | None:
 
 def _filters(text: str) -> str:
     parts = []
-    ext = _ext(text)
+    ext = _ext(filetypes.object_words(text)) or filetypes.category_in(text)
     if ext:
         parts.append(f"ext={ext}")
     m = re.search(r"older than (\d+) (\w+)", text)
@@ -183,6 +185,14 @@ RULES: list[tuple[re.Pattern, callable]] = [
      lambda m, t: f'remind(text="{m.group(1)}", after={_dur(m.group(2), m.group(3))})'),
     (re.compile(r"^remind me (?:to )?(.+?) at (\d{1,2})(?::(\d{2}))? ?(am|pm)?$", re.I),
      lambda m, t: f'remind(text="{m.group(1)}", at={_time(m.group(2), m.group(3), m.group(4))})'),
+    (re.compile(rf"^(move|copy|put|shift) .*?(?:from|in|inside) {_FOLDER} (?:in)?to (?:a |an )?new folder(?: called| named)? ['\"]?([\w .-]+?)['\"]?$", re.I),
+     lambda m, t: '{}_files(src={}, new_folder="{}"{})'.format(
+         "copy" if m.group(1).lower() == "copy" else "move", m.group(2).capitalize(), m.group(3).strip(),
+         (", " + _filters(t)) if _filters(t) else "")),
+    (re.compile(rf"^(move|copy|put|shift) .*?(?:from|in|inside) {_FOLDER} (?:in)?to (?:the |my )?{_FOLDER}(?: folder)?$", re.I),
+     lambda m, t: "{}_files(src={}, dest={}{})".format(
+         "copy" if m.group(1).lower() == "copy" else "move", m.group(2).capitalize(), m.group(3).capitalize(),
+         (", " + _filters(t)) if _filters(t) else "")),
     (re.compile(rf"^(move|copy) .*?from {_FOLDER} to {_FOLDER}", re.I),
      lambda m, t: "{}_files(src={}, dest={}{})".format(
          m.group(1).lower(), m.group(2).capitalize(), m.group(3).capitalize(),

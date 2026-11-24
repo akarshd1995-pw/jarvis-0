@@ -1162,3 +1162,14 @@ def test_improve_and_rollback_commands():
     from jarvis.nlu.rule_parser import rule_parse
     assert str(rule_parse("improve yourself")) == "training(action=improve)"
     assert str(rule_parse("roll back the model")) == "training(action=rollback)"
+
+
+def test_background_services_start(env, tmp_path):
+    """The startup path (monitor, briefings, self-improvement) must at least start without errors."""
+    from jarvis.daemon import Jarvis
+    cfg, store, dl, arc = env
+    j = Jarvis(cfg, lambda *a: True, data_root=tmp_path / "d")
+    sampler, logs = j.start_monitor(lambda a, text: None)
+    assert "Self-improvement" in logs and j.sampler is sampler
+    assert j.start_briefings(lambda kind, text: None).is_alive()
+    assert j.start_improver(lambda text: None).is_alive()

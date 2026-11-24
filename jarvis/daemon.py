@@ -297,7 +297,8 @@ class Jarvis:
         from .hud.metrics import MetricsSampler
         from .monitor.engine import Monitor, Thresholds
         ck = PROJECT_ROOT / "checkpoints"
-        sampler = MetricsSampler(self.job_logs)
+        logs = self.job_logs
+        sampler = MetricsSampler(logs)
         sampler.start()
         self.sampler = sampler
         monitor = None

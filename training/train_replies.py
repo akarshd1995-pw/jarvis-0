@@ -96,6 +96,10 @@ def main():
     cfg = ModelConfig(vocab_size=tok.vocab_size, d_model=args.d_model, n_enc=args.layers, n_dec=args.layers,
                       d_ff=3 * args.d_model, max_src=192, max_tgt=128, dropout=0.1)
     train_rows = load(args.data / "train.jsonl", tok, cfg)
+    try:
+        knows = json.loads((args.data / "meta.json").read_text(encoding="utf-8"))     # {"keys": [...]}
+    except (OSError, ValueError):
+        knows = None
     val_rows = load(args.data / "val.jsonl", tok, cfg)
     model = IntentTransformer(cfg).to(device)
     print(f"train={len(train_rows)} val={len(val_rows)} params: {model.n_params() / 1e6:.2f}M", flush=True)
@@ -142,7 +146,7 @@ def main():
                 if m["fact_pass"] > best:
                     best = m["fact_pass"]
                     torch.save({"config": cfg.to_dict(), "model": model.state_dict(), "step": step,
-                                "metrics": {"fact_pass": best, "loss": m["loss"]}}, args.out)
+                                "metrics": {"fact_pass": best, "loss": m["loss"]}, "knows": knows}, args.out)
                     print(f"  saved {args.out} (fact-check pass {best:.4f})", flush=True)
             if step >= args.steps:
                 break

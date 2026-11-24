@@ -5,6 +5,8 @@ first that passes the fact checker, else tries greedy, else returns None so the 
 """
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +14,13 @@ import numpy as np
 from training.tokenizer import BOS, EOS, PAD, BPETokenizer
 
 from .checker import check, linearize
+
+
+# Reply types added after the first reply model was trained (it has no record of what it learned)
+NEWER_THAN_FIRST_REPLY_MODEL = {"memory", "memory_found", "memory_found_one", "memory_none", "memory_indexing",
+                                "training_improve_started", "training_improve_running", "training_improve_nomodel",
+                                "training_rollback", "training_rollback_none", "play_nomatch", "play_none",
+                                "play_offline"}
 
 
 class ReplyModel:
@@ -30,6 +39,18 @@ class ReplyModel:
         self.max_src, self.max_tgt = max_src, max_tgt
         self.rng = np.random.default_rng(seed)
         self.stats = {"generated": 0, "rejected": 0}
+        self.keys = None                   # reply types this model was trained on (None: trained before we recorded it)
+        try:
+            meta = json.loads((Path(encoder).parent / "reply_onnx.json").read_text(encoding="utf-8"))
+            self.keys = set((meta.get("knows") or {}).get("keys") or []) or None
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def knows_key(self, key: str) -> bool:
+        """Only speak for reply types it learned; newer ones use the templates (never an outdated sentence)."""
+        if self.keys is not None:
+            return key in self.keys
+        return key not in NEWER_THAN_FIRST_REPLY_MODEL and not key.startswith("memory")
 
     def _decode_batch(self, ids: list[int], n: int, greedy: bool) -> list[str]:
         src = np.array([ids], dtype=np.int64)

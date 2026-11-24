@@ -220,6 +220,9 @@ def main():
             for ex in data:
                 f.write(json.dumps(ex, ensure_ascii=False) + "\n")
         print(f"{name:6s} {len(data):>8,d}")
+    keys = sorted({ex["key"] for ex in splits["train"] if ex.get("key")})
+    (args.out / "meta.json").write_text(json.dumps({"keys": keys}, indent=2), encoding="utf-8")
+    print(f"teaches {len(keys)} reply types")
 
 
 if __name__ == "__main__":

@@ -1242,3 +1242,25 @@ def test_find_end_to_end(env, tmp_path):
     rows = j.take_results()
     assert rows and rows[0]["path"].endswith("Invoice_March_2026.pdf") and j.take_results() == []
     assert "couldn't find" in j.handle("find the zebra migration spreadsheet").lower()
+
+
+def test_old_reply_model_never_speaks_for_newer_reply_types():
+    from jarvis.actions.base import ActionResult
+    from jarvis.nlg.generator import ReplyModel
+    from jarvis.persona.persona import Persona
+
+    class OldModel:                        # trained before memory search: only knows the outdated sentence
+        keys = None
+        knows_key = ReplyModel.knows_key
+        def generate(self, key, fields, tone, address):
+            return f"I can't search my memory for {fields.get('query')} just yet."
+
+    p = Persona("Jarvis", "sir", "butler")
+    p.model = OldModel()
+    r = ActionResult("", kind="memory", data={"query": "login error", "count": 1, "where": "screenshots", "ext": None,
+                                              "indexed": {"files": 5}, "results": [{"title": "Screenshot 1.png",
+                                              "path": "C:/x/Screenshots/Screenshot 1.png", "source": "file",
+                                              "mtime": 0, "screenshot": True}]})
+    reply = p.result(r)
+    assert "can't search" not in reply and "Screenshot 1.png" in reply, reply
+    assert p.last_source == "template"

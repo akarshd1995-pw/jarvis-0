@@ -426,7 +426,8 @@ class CommandBar:
                 w.bind("<Button-3>", lambda e, k=i: self._open_row(k, reveal=True))
                 w.bind("<Enter>", lambda e, l=line: l.configure(highlightbackground=T.ACCENT_DIM))
                 w.bind("<Leave>", lambda e, l=line: l.configure(highlightbackground=T.BORDER))
-        tk.Label(self.body, text="Click to open  ·  right-click to show in folder", bg=T.SURFACE, fg=T.FAINT,
+        tk.Label(self.body, text="Click to open  ·  right-click to show in folder  ·  Esc closes", bg=T.SURFACE,
+                 fg=T.FAINT,
                  font=T.F(8)).pack(anchor="w", pady=(4, 0))
 
     def _open_row(self, i: int, reveal: bool = False):
@@ -458,7 +459,10 @@ class CommandBar:
             rows = self._rows
             self._show_reply(f"I couldn't open {row['title']}: {e}", rows)
             return
-        self.root.after(900, self.hide)                  # the file's own window comes to the front
+        # stay open on top with the same results, so you can open another one (Esc closes the bar)
+        rows = self._rows
+        self.root.after(400, lambda: self._show_reply(
+            f"Opened {row['title']}. Pick another, or press Esc to close.", rows))
 
     def _show_confirm(self, tier: Tier, summary: str, items: list[str]):
         self._clear_body()

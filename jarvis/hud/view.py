@@ -51,9 +51,10 @@ class HUD:
                 self.win.attributes("-transparentcolor", BG)     # only the rounded panel is visible
         except tk.TclError:
             pass
+        from .. import machine                        # phase 44: inside the primary monitor's usable area
         sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
-        x = sw - W - 24 if "right" in corner else 24
-        y = 24 if "top" in corner else sh - H - 64
+        x, y = machine.place(W, H, corner if corner in ("top-left", "top-right", "bottom-left", "bottom-right")
+                             else "top-right", margin=24, fallback=(sw, sh - 40))
         self.win.geometry(f"{W}x{H}+{x}+{y}")
         self.c = tk.Canvas(self.win, width=W, height=H, bg=BG, highlightthickness=0)
         self.c.pack()

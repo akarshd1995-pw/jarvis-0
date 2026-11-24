@@ -2083,3 +2083,114 @@ def test_every_setting_survives_save_and_restart(tmp_path):
     p.write_text(json.dumps(data), encoding="utf-8")
     Config.load(p).save(p)
     assert "from_a_newer_version" in p.read_text(encoding="utf-8")         # unknown keys are kept
+
+
+# ---------------------------------------------------------------- phase 44: any Windows setup
+APPS = [{"name": "Visual Studio Code", "target": "VSCODE!App", "kind": "appid"},
+        {"name": "WhatsApp", "target": "5319275A.WhatsAppDesktop!App", "kind": "appid"},
+        {"name": "Microsoft Word", "target": "C:/sm/Word.lnk", "kind": "shortcut"},
+        {"name": "Obsidian", "target": "C:/sm/Obsidian.lnk", "kind": "shortcut"},
+        {"name": "Spotify", "target": "SpotifyAB.Spotify!App", "kind": "appid"}]
+
+
+def _index(tmp_path, entries=APPS):
+    from jarvis.apps import AppIndex
+    return AppIndex(tmp_path / "apps.json", scanners=(lambda: list(entries),))
+
+
+def test_app_index_finds_apps_any_way_you_say_them(tmp_path):
+    idx = _index(tmp_path)
+    assert idx.find("whatsapp")["kind"] == "appid"                  # a Store app
+    assert idx.find("word")["name"] == "Microsoft Word"
+    assert idx.find("obsdian")["name"] == "Obsidian"                 # typo
+    assert idx.find("visual studio")["name"] == "Visual Studio Code"
+    assert idx.find("photoshop") is None
+    assert "Obsidian" in idx.suggest("obsidan")
+    assert (tmp_path / "apps.json").exists()                         # cached for next time
+
+
+def test_scan_skips_uninstallers(tmp_path):
+    from jarvis.apps import scan_shortcuts
+    d = tmp_path / "Programs" / "Obsidian"
+    d.mkdir(parents=True)
+    for n in ("Obsidian.lnk", "Uninstall Obsidian.lnk", "Obsidian Help.url", "notes.txt"):
+        (d / n).write_text("x")
+    assert [e["name"] for e in scan_shortcuts([tmp_path / "Programs"])] == ["Obsidian"]
+
+
+def test_open_app_resolution_and_browser_fallback(tmp_path):
+    from jarvis.apps import AppNotFound, resolve
+    from jarvis.config import Config
+    cfg = Config(data_dir=tmp_path)
+    idx = _index(tmp_path)
+    edge = {"name": "Microsoft Edge", "alias": "edge", "exe": "C:/edge/msedge.exe"}
+    assert resolve("vscode", cfg, idx)[0:3:2] == ("index", "Visual Studio Code")
+    assert resolve("settings", cfg, idx)[1]["target"] == "ms-settings:"
+    how, entry, label = resolve("chrome", cfg, _index(tmp_path, []), edge)
+    assert (how, label) == ("browser", "Microsoft Edge")             # no Chrome here: your default browser
+    with pytest.raises(AppNotFound) as e:
+        resolve("Obsidan Notes", cfg, idx)
+    assert e.value.suggestions == [] or "Obsidian" in e.value.suggestions
+    from jarvis.persona.persona import Persona
+    p = Persona("Jarvis", "sir", "butler")
+    assert "Obsidian" in p.speak(*p.plan_error("open_app", AppNotFound("obsidan", ["Obsidian"])))
+    from jarvis.actions.base import ActionResult
+    txt = p.result(ActionResult("", kind="open", data={"what": "app", "name": "chrome", "instead": "Microsoft Edge"}))
+    assert "isn't installed" in txt and "Microsoft Edge" in txt
+
+
+def test_one_jarvis_per_windows_user():
+    import random
+    from jarvis.machine import user_port
+    from jarvis.reliability import SingleInstance
+    assert user_port("akars") == user_port("Akars") != user_port("guest")
+    port = random.randint(30000, 40000)
+    a = SingleInstance(port=port, user="akars")
+    assert a.acquire()
+    try:
+        b = SingleInstance(port=port, user="guest")                   # another person signed in on the same PC
+        assert b.acquire() and b.port == port + 1
+        a2 = SingleInstance(port=port, user="akars")                  # you, starting Jarvis twice
+        assert not a2.acquire() and a2.ping_existing()
+        b.release()
+    finally:
+        a.release()
+
+
+def test_power_and_placement(monkeypatch):
+    from jarvis import machine
+    from jarvis.config import Config
+    cfg = Config()
+    assert machine.heavy_work_ok(cfg, machine.Power(None))            # desktop
+    assert machine.heavy_work_ok(cfg, machine.Power(False))           # plugged in
+    assert not machine.heavy_work_ok(cfg, machine.Power(True))        # on battery
+    assert not machine.heavy_work_ok(cfg, machine.Power(False, saver=True))
+    cfg.pause_heavy_on_battery = False
+    assert machine.heavy_work_ok(cfg, machine.Power(True))
+    monkeypatch.setattr(machine, "work_area", lambda x=None, y=None: (1920, 0, 3840, 1040) if x is None else (0, 0, 1920, 1040))
+    assert machine.place(760, 0, "center") == (1920 + (1920 - 760) // 2, int(1040 * 0.18))   # second monitor
+    assert machine.place(340, 500, "top-right", margin=24) == (1920 - 340 - 24, 24)           # HUD: primary
+    assert machine.place(380, 0, "toast") == (3840 - 380 - 20, 1040 - 20)                     # above the taskbar
+
+
+def test_moved_standard_folders_are_allowed(tmp_path, monkeypatch):
+    import jarvis.config as C
+    docs = tmp_path / "D_drive" / "Documents"
+    docs.mkdir(parents=True)
+    monkeypatch.setattr(C, "known_folder", lambda n: docs if n == "Documents" else None)
+    roots = C.with_standard_folders([str(tmp_path / "home")], {"Documents": str(docs), "Work": str(tmp_path / "x")})
+    assert str(docs) in roots and str(tmp_path / "x") not in roots    # only Windows' own folders, at their real place
+
+
+def test_setup_check_reports_and_reruns_on_new_pc(tmp_path, monkeypatch):
+    from jarvis import machine
+    from jarvis.config import Config
+    cfg = Config(data_dir=tmp_path, folders={"Downloads": str(tmp_path), "Documents": str(tmp_path / "missing")})
+    r = machine.scan(cfg, _index(tmp_path))
+    assert r["apps"] == 5 and any("Documents isn't at" in n for n in r["notes"])
+    assert "Set up for" in machine.summary(r)
+    assert machine.needs_setup(tmp_path)
+    machine.save_report(tmp_path, r)
+    assert not machine.needs_setup(tmp_path)
+    monkeypatch.setattr(machine, "fingerprint", lambda: "laptop|akars")      # Jarvis restored on another PC
+    assert machine.needs_setup(tmp_path)

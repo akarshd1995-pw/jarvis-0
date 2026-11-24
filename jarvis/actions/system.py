@@ -24,12 +24,24 @@ def _startfile(target: str) -> None:
         subprocess.Popen(["xdg-open", target])
 
 
-def open_app(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
+def open_app(args: dict, ctx: Ctx, dry_run: bool, index=None, browser=None) -> ActionResult:
+    """Your alias, a program Windows knows by name, the Start menu (Store apps too), or your default browser."""
+    from .. import apps, machine
     name = str(args["name"])
-    target = ctx.config.apps.get(name.lower(), name)
+    if index is None:
+        index = apps.get_index(ctx.config.data_dir) if sys.platform == "win32" else None
+    if browser is None and name.lower() in apps.BROWSER_ALIASES:
+        browser = machine.default_browser()
+    how, entry, label = apps.resolve(name, ctx.config, index, browser)
     if not dry_run:
-        _startfile(target)
-    return ActionResult(f"Opening {name}", kind="open", data={"what": "app", "name": name})
+        if how == "index":
+            apps.launch(entry)
+        else:
+            _startfile(entry["target"])
+    data = {"what": "app", "name": name}
+    if how == "browser" and name.lower() != "browser":
+        data.update(instead=label)
+    return ActionResult(f"Opening {label}", kind="open", data=data)
 
 
 def open_url(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:

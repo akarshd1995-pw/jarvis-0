@@ -172,6 +172,7 @@ class SettingsWindow:
         self.maps_osm = tk.BooleanVar(value=c.maps_osm)
         self.learn = tk.BooleanVar(value=c.learn_from_usage)
         self.clarify = tk.BooleanVar(value=c.clarify)
+        self.battery = tk.BooleanVar(value=c.pause_heavy_on_battery)
         self.mem_on = tk.BooleanVar(value=c.memory_enabled)
         self.mem_web = tk.BooleanVar(value=c.memory_browser)
         self.mem_folders = tk.StringVar(value=", ".join(c.memory_folders))
@@ -193,6 +194,8 @@ class SettingsWindow:
                 return f
             self._row(pg, "Minimum model confidence", conf, "Below this, the trained model's answer isn't run.")
             self._row(pg, "Model backend", lambda p: self._combo(p, self.backend, ["auto", "onnx", "torch"]))
+            self._row(pg, "Save battery", tog(self.battery),
+                      "On a laptop, reading screenshots and self-training wait until you're plugged in.")
             self._row(pg, "Ask when unsure", tog(self.clarify),
                       "\"Did you mean A or B?\" when two readings are close, instead of guessing.")
             self._row(pg, "Ask before", lambda p: self._entry(p, self.confirm, 30),
@@ -307,6 +310,7 @@ class SettingsWindow:
         c.maps_osm = self.maps_osm.get()
         c.learn_from_usage = self.learn.get()
         c.clarify = self.clarify.get()
+        c.pause_heavy_on_battery = self.battery.get()
         c.memory_enabled, c.memory_browser = self.mem_on.get(), self.mem_web.get()
         c.memory_folders = [x.strip() for x in self.mem_folders.get().split(",") if x.strip()] or c.memory_folders
         c.briefing_auto = self.b_auto.get()

@@ -89,28 +89,57 @@ def recent_crashes(data_dir: Path, days: float = 7) -> list[Path]:
 
 # ------------------------------------------------------------------ one Jarvis at a time
 class SingleInstance:
-    """Holds a localhost port while Jarvis runs. A second Jarvis sends 'show' to it and exits."""
+    """Holds a localhost port while Jarvis runs. A second Jarvis of the SAME Windows user sends 'show' to it and
+    exits. Each user has their own port (phase 44); if another user's Jarvis holds it, the next one is tried."""
 
-    def __init__(self, port: int = PORT):
-        self.port = port
+    TRIES = 5
+
+    def __init__(self, port: int | None = None, user: str | None = None):
+        from .machine import user_name, user_port
+        self.user = (user or user_name()).lower()
+        self.port = port if port is not None else user_port(self.user)
         self.sock: socket.socket | None = None
         self.on_show = None
 
-    def acquire(self) -> bool:
+    def _bind(self, port: int) -> socket.socket | None:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):              # Windows: nobody else may share the port
             s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         else:                                                   # elsewhere: reuse right after a restart
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            s.bind(("127.0.0.1", self.port))
+            s.bind(("127.0.0.1", port))
         except OSError:
             s.close()
-            return False
-        s.listen(4)
-        self.sock = s
-        threading.Thread(target=self._serve, daemon=True, name="single-instance").start()
-        return True
+            return None
+        return s
+
+    def _whose(self, port: int) -> str | None:
+        """The user of the Jarvis on that port (None: not a Jarvis, or none)."""
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as c:
+                c.sendall(b"who\n")
+                reply = c.recv(128).decode(errors="ignore").strip()
+                return reply[4:].lower() if reply.startswith("ok: ") else None
+        except OSError:
+            return None
+
+    def acquire(self) -> bool:
+        """True: this is the only Jarvis for this user. False: this user's Jarvis is already running."""
+        base = self.port
+        for i in range(self.TRIES):
+            port = base + i
+            s = self._bind(port)
+            if s is not None:
+                self.port, self.sock = port, s
+                s.listen(4)
+                threading.Thread(target=self._serve, daemon=True, name="single-instance").start()
+                return True
+            if self._whose(port) == self.user:                  # ours: tell it to show itself
+                self.port = port
+                return False
+        self.port = base
+        return False
 
     def _serve(self):
         while self.sock is not None:
@@ -121,6 +150,9 @@ class SingleInstance:
             with conn:
                 try:
                     msg = conn.recv(64).decode(errors="ignore").strip()
+                    if msg == "who":
+                        conn.sendall(f"ok: {self.user}".encode())
+                        continue
                     if msg == "show" and self.on_show:
                         self.on_show()
                     conn.sendall(b"ok")
@@ -128,7 +160,7 @@ class SingleInstance:
                     pass
 
     def ping_existing(self) -> bool:
-        """Ask the running Jarvis to show its command bar. True if one answered."""
+        """Ask this user's running Jarvis to show its command bar. True if one answered."""
         try:
             with socket.create_connection(("127.0.0.1", self.port), timeout=2) as c:
                 c.sendall(b"show\n")

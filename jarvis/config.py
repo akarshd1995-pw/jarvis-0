@@ -65,6 +65,28 @@ def _default_folders() -> dict[str, str]:
     return folders
 
 
+def with_standard_folders(roots: list[str], folders: dict[str, str]) -> list[str]:
+    """Your standard folders are always allowed, even when Windows keeps them outside your user folder
+    (Documents moved to D:\\, Desktop in a OneDrive on another drive)."""
+    out = list(roots)
+    have = [Path(r).expanduser() for r in roots]
+    for name, path in folders.items():
+        p = Path(path).expanduser()
+        inside = False
+        for r in have:
+            try:
+                p.relative_to(r)
+                inside = True
+                break
+            except ValueError:
+                continue
+        real = known_folder(name)
+        if not inside and real is not None and Path(real) == p:       # Windows' own folder, at its real place
+            out.append(str(p))
+            have.append(p)
+    return out
+
+
 def _default_apps() -> dict[str, str]:
     # alias -> executable / URI understood by os.startfile on Windows
     return {
@@ -87,6 +109,7 @@ class Config:
     apps: dict[str, str] = field(default_factory=_default_apps)
     # Jarvis may only touch files under these roots (resolved paths).
     allowed_roots: list[str] = field(default_factory=lambda: [str(HOME)])
+    pause_heavy_on_battery: bool = True   # phase 44: OCR / meaning vectors / self-training wait for the charger
     hotkey: str = "ctrl+alt+j"
     hud_enabled: bool = True
     hud_hotkey: str = "ctrl+alt+h"
@@ -130,6 +153,9 @@ class Config:
     model_backend: str = "auto"         # auto | onnx | torch
     model_checkpoint: str = "checkpoints/intent.pt"
     tokenizer_path: str = "checkpoints/tokenizer.json"
+
+    def __post_init__(self):
+        self.allowed_roots = with_standard_folders(self.allowed_roots, self.folders)
 
     # Not settings: where Jarvis keeps its data, and the model files it was built with
     NOT_SAVED = ("data_dir", "model_checkpoint", "tokenizer_path")
@@ -185,6 +211,7 @@ class Config:
                     getattr(cfg, k).update(v)
                 elif hasattr(cfg, k):
                     setattr(cfg, k, v)
+        cfg.allowed_roots = with_standard_folders(cfg.allowed_roots, cfg.folders)
         cfg.data_dir.mkdir(parents=True, exist_ok=True)
         cfg.trash_dir.mkdir(parents=True, exist_ok=True)
         return cfg

@@ -31,6 +31,7 @@ HELP = """Commands:
   /fix <program>  save the correct program for your last command (trains the next model)
   /improve        fine-tune on your corrections now (switches only if better)
   /doctor         health check: tests every part of Jarvis and repairs what it can
+  /setup          what I found on this PC: folders (OneDrive, moved), apps, browser, monitors, battery
   /review         go through the commands I wasn't sure about (also: "review my commands")
   /usage          how sure I've been this week; /usage forget wipes the saved commands
   /backup         back up your settings, history, corrections and models now
@@ -88,6 +89,20 @@ class Jarvis:
         self.briefings = briefing.Scheduler(config.data_dir / "briefing_state.json", config.briefing_morning,
                                             config.briefing_evening, enabled=config.briefing_auto)
 
+    # ------------------------------------------------------------ phase 44: this PC
+    def setup_check(self, force: bool = False) -> str:
+        """The first-run check (also after Jarvis's data moves to another PC). Returns the summary ('' if not due)."""
+        from . import apps, machine
+        if not force and not machine.needs_setup(self.config.data_dir):
+            return ""
+        idx = apps.get_index(self.config.data_dir) if sys.platform == "win32" else None
+        if idx is not None and force:
+            idx.refresh()
+        report = machine.scan(self.config, idx)
+        machine.save_report(self.config.data_dir, report)
+        log.info("setup check: %s", report.get("notes"))
+        return machine.summary(report)
+
     def recovery_message(self) -> str:
         r = self.recovered or {}
         fin, back, miss = r.get("finished", []), r.get("rolled_back", []), r.get("missing", [])
@@ -130,8 +145,10 @@ class Jarvis:
                         st = idx.crawl(self.memory_roots())
                         if self.config.memory_browser:
                             idx.add_history(browser.history())
-                        self._ocr_pass(idx)
-                        self._embed_pass(idx)
+                        from . import machine
+                        if machine.heavy_work_ok(self.config):     # phase 44: OCR / vectors wait for the charger
+                            self._ocr_pass(idx)
+                            self._embed_pass(idx)
                         log.info("memory index: %s (%s)", idx.count(), st)
                     except Exception as e:
                         log.warning("memory indexing failed: %s", e)
@@ -221,6 +238,9 @@ class Jarvis:
             snap = self.sampler.snapshot if self.sampler else None
             if snap is not None and snap.battery is not None and not snap.charging:
                 return False                                     # on battery
+            from . import machine
+            if not machine.heavy_work_ok(self.config):
+                return False                                     # battery saver
             ck = PROJECT_ROOT / "checkpoints"
             for log_name in ("train_log.txt", "reply_log.txt"):
                 p = ck / log_name
@@ -369,6 +389,8 @@ class Jarvis:
                 self.hooks["restart"]()
                 return msg + "\nRestarting..."
             return msg + ("\nRestart Jarvis to use the new version." if changed else "")
+        if cmd == "/setup":
+            return self.setup_check(force=True)
         if cmd == "/review":
             return self._review_cmd(arg)
         if cmd == "/usage":
@@ -1015,6 +1037,18 @@ def main() -> None:
     bar.show()
     if jarvis.recovery_message():
         bar.post("message", jarvis.recovery_message())
+
+    def first_run():                                   # phase 44: a new PC (or Jarvis moved to one): look around
+        try:
+            text = jarvis.setup_check()
+        except Exception as e:
+            log.warning("setup check failed: %s", e)
+            return
+        if text:
+            bar.post("call", lambda: Toast(bar.root, "Set up for this PC", text + "\n\n/setup shows this again.",
+                                           seconds=25))
+    if not args.safe_mode:
+        threading.Thread(target=first_run, daemon=True, name="setup-check").start()
     if args.safe_mode:
         bar.post("message", "I restarted in safe mode after crashing several times: rules only, no HUD or "
                             "background services. Type /doctor to check what's wrong; the next start is normal "

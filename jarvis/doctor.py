@@ -157,9 +157,32 @@ def check_crashes(data_dir: Path) -> Check:
     return Check("Crashes", "warn", f"{len(crashes)} in the last 7 days; latest report: {crashes[-1].name}")
 
 
+def check_this_pc(cfg: Config) -> list[Check]:
+    """Phase 44: standard folders where Windows says they are; power."""
+    from . import machine
+    from .config import known_folder
+    out = []
+    moved = []
+    for name in ("Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos"):
+        real = known_folder(name)
+        saved = cfg.folders.get(name)
+        if real and saved and Path(saved).expanduser() != real:
+            moved.append(f"{name} is set to {saved} but Windows keeps it at {real}")
+    if moved:
+        out.append(Check("Standard folders", "warn", "; ".join(moved) + " (Settings > Folders & apps)"))
+    p = machine.power()
+    if p.on_battery is not None:
+        state = "on battery" + (" (battery saver)" if p.saver else "") if p.on_battery or p.saver else "plugged in"
+        out.append(Check("Power", "info", f"laptop, {state}"
+                         + ("; heavy background work is waiting for the charger" if (p.on_battery or p.saver)
+                            and cfg.pause_heavy_on_battery else "")))
+    return out
+
+
 def run(cfg: Config, services: dict[str, bool] | None = None, ck: Path = CK) -> list[Check]:
     checks = [check_config(cfg.data_dir / "config.json")]
     checks += check_folders(cfg)
+    checks += check_this_pc(cfg)
     checks.append(check_command_model(ck))
     checks += check_optional_models(ck)
     checks.append(check_sqlite(cfg.data_dir / "memory.sqlite", "Memory index", rebuildable=True))

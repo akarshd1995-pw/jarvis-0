@@ -120,6 +120,8 @@ class Persona:
                 return "list_none", f
             shown = ", ".join(r.items[:5]) + (f", and {len(r.items) - 5} more" if len(r.items) > 5 else "")
             return "list", {**f, "items": shown}
+        if k == "open" and d.get("instead"):              # phase 44: Chrome not installed -> your default browser
+            return "open_app_instead", {"name": app_name(d["name"]), "instead": d["instead"]}
         if k == "open":
             name = folder_name(d["name"]) if d["what"] == "folder" else app_name(d["name"]) if d["what"] == "app" \
                 else d["name"]
@@ -209,6 +211,10 @@ class Persona:
             name = msg.replace("no open window for ", "") if msg.startswith("no open window for ") else ""
             if name:
                 return "err_no_window", {"name": name}
+        if type(e).__name__ == "AppNotFound":
+            sug = getattr(e, "suggestions", [])
+            return ("err_no_app_suggest", {"name": e.name, "suggestions": " or ".join(sug)}) if sug else \
+                ("err_no_app", {"name": e.name})
         if type(e).__name__ == "ContextError":                   # phase 38: "this"/"here" couldn't be filled
             return "err_context", {"error": msg}
         if type(e).__name__ == "NotOnWindows":

@@ -124,13 +124,15 @@ class Toast:
         w.after(int(seconds * 1000), self.close)
 
     def _place(self):
-        sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
-        y = sh - 64
+        from .. import machine                        # bottom-right of the monitor you're on, above the taskbar
+        x, bottom = machine.place(380, 0, "toast", fallback=(self.win.winfo_screenwidth(),
+                                                             self.win.winfo_screenheight() - 44))
+        y = bottom
         for t in Toast._stack:
             y -= t.h + 10
             if t is self:
                 break
-        self.win.geometry(f"380x{self.h}+{sw - 380 - 20}+{y}")
+        self.win.geometry(f"380x{self.h}+{x}+{y}")
 
     def close(self):
         if self not in Toast._stack:
@@ -249,6 +251,10 @@ class CommandBar:
     def show(self):
         r = self.root
         visible = r.state() == "normal"
+        if not visible:                               # phase 44: open on the monitor your mouse is on
+            from .. import machine
+            pos = machine.place(W, 0, "center", fallback=(r.winfo_screenwidth(), r.winfo_screenheight()))
+            self.x, self.y = pos
         r.deiconify()
         self._resize()
         r.lift()

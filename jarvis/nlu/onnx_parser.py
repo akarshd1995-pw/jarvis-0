@@ -18,18 +18,20 @@ from .beam import constrained_beam
 from .copy_guard import copy_ok
 
 
+class OverBudget(Exception):
+    """The model took longer than this command's time budget (phase 41)."""
+
+
 class ONNXParser:
     def __init__(self, encoder: Path, decoder: Path, tokenizer: Path, beam: int = 4,
                  min_confidence: float = 0.55, max_src: int = 160, max_tgt: int = 160,
                  sessions: tuple | None = None, meta: Path | None = None):
         self.tok = BPETokenizer.load(tokenizer)
         if sessions is None:
-            import onnxruntime as ort
-            opts = ort.SessionOptions()
-            opts.intra_op_num_threads = 4
-            providers = ["CPUExecutionProvider"]
-            sessions = (ort.InferenceSession(str(encoder), opts, providers=providers),
-                        ort.InferenceSession(str(decoder), opts, providers=providers))
+            from ..onnxutil import session
+            name = Path(encoder).stem.replace("_encoder", "")
+            sessions = (session(encoder, name=f"{name} model (encoder)"),
+                        session(decoder, name=f"{name} model (decoder)"))
         self.enc, self.dec = sessions
         self.knows = None
         try:
@@ -52,14 +54,19 @@ class ONNXParser:
         return self.dec.run(["logprobs"], {"tgt_in": np.array([[BOS]], dtype=np.int64),
                                            "mem": mem, "src_pad": pad})[0]
 
-    def parse(self, text: str) -> tuple[Program | None, float]:
-        """Returns (program or None, confidence in 0..1)."""
+    def parse(self, text: str, budget_s: float | None = None) -> tuple[Program | None, float]:
+        """Returns (program or None, confidence in 0..1). Past budget_s: (None, 0.0) and self.timed_out."""
+        import time
+        self.timed_out = False
+        deadline = time.perf_counter() + budget_s if budget_s else None
         ids = self.tok.encode(text)[: self.max_src]
         if not ids:
             return None, 0.0
         mem, pad = self._encode(ids)
 
         def step(seqs: list[list[int]]) -> np.ndarray:
+            if deadline is not None and time.perf_counter() > deadline:
+                raise OverBudget()
             n = len(seqs)
             return self.dec.run(["logprobs"], {"tgt_in": np.array(seqs, dtype=np.int64),
                                                "mem": np.repeat(mem, n, axis=0),
@@ -67,13 +74,17 @@ class ONNXParser:
 
         decode = self.tok.decode
         results = []
-        for guard in (True, False):      # copy guard first; if it leaves no valid output, decode without it
-            results = constrained_beam(step, BOS, EOS, k=self.beam, max_len=self.max_tgt - 1,
-                                       prefix_ok=(lambda t: viable_prefix(decode(t)) and copy_ok(decode(t), text))
-                                       if guard else (lambda t: viable_prefix(decode(t))),
-                                       complete_ok=lambda t: is_complete(decode(t)))
-            if results:
-                break
+        try:
+            for guard in (True, False):  # copy guard first; if it leaves no valid output, decode without it
+                results = constrained_beam(step, BOS, EOS, k=self.beam, max_len=self.max_tgt - 1,
+                                           prefix_ok=(lambda t: viable_prefix(decode(t)) and copy_ok(decode(t), text))
+                                           if guard else (lambda t: viable_prefix(decode(t))),
+                                           complete_ok=lambda t: is_complete(decode(t)))
+                if results:
+                    break
+        except OverBudget:
+            self.timed_out, self.last_alts = True, []
+            return None, 0.0
         self.last_alts = []                       # phase 39: every valid reading, best first
         best = None
         for score, out in results:

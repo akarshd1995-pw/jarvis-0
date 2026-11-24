@@ -2194,3 +2194,167 @@ def test_setup_check_reports_and_reruns_on_new_pc(tmp_path, monkeypatch):
     assert not machine.needs_setup(tmp_path)
     monkeypatch.setattr(machine, "fingerprint", lambda: "laptop|akars")      # Jarvis restored on another PC
     assert machine.needs_setup(tmp_path)
+
+
+# ---------------------------------------------------------------- phase 41: speed & footprint
+def test_int8_copy_is_picked_only_when_allowed(tmp_path):
+    from jarvis import onnxutil
+    full = tmp_path / "intent_encoder.onnx"
+    full.write_bytes(b"x")
+    assert onnxutil.pick(full) == full
+    onnxutil.int8_path(full).write_bytes(b"x")
+    assert onnxutil.pick(full).name == "intent_encoder.int8.onnx"
+    assert onnxutil.pick(full, int8=False) == full
+    old, onnxutil.USE_INT8 = onnxutil.USE_INT8, False
+    try:
+        assert onnxutil.pick(full) == full
+    finally:
+        onnxutil.USE_INT8 = old
+
+
+def test_lazy_model_loads_once_on_first_use():
+    from jarvis.lazy import Lazy
+    calls = []
+
+    class M:
+        stats = {"generated": 0}
+
+        def knows_key(self, k):
+            return True
+    lazy = Lazy(lambda: calls.append(1) or M(), "reply model")
+    assert calls == [] and not lazy.loaded                 # nothing loaded at start-up
+    assert lazy.knows_key("x") and lazy.stats == {"generated": 0} and calls == [1]
+    missing = Lazy(lambda: None, "dialog model")
+    assert not missing and getattr(missing, "knows_key", "none") == "none"
+    broken = Lazy(lambda: 1 / 0, "x")
+    assert not broken
+
+
+def test_parser_time_budget(tmp_path):
+    import time as _t
+    p = _fake_onnx(tmp_path, "open_app(name=chrome)")
+    prog, _ = p.parse("open chrome")
+    assert str(prog) == "open_app(name=chrome)" and not p.timed_out
+    slow_run = p.dec.run
+    p.dec.run = lambda names, feeds: (_t.sleep(0.02), slow_run(names, feeds))[1]
+    prog, conf = p.parse("open chrome", budget_s=0.03)
+    assert prog is None and p.timed_out
+
+
+def test_brain_falls_back_to_rules_over_budget_and_while_loading():
+    import threading
+    from jarvis.nlu.brain import Brain
+    from jarvis.perf import PERF
+
+    class Slow:
+        knows = {"actions": ["open_app"], "features": []}
+        timed_out = False
+
+        def parse(self, text, budget_s=None):
+            self.timed_out = True
+            return None, 0.0
+    b = Brain(budget_s=0.5)
+    b.model, b.backend = Slow(), "fake"
+    before = PERF.timeouts
+    prog, src = b.resolve("open notepad")
+    assert str(prog) == "open_app(name=notepad)" and "time budget" in src and PERF.timeouts == before + 1
+    b2 = Brain(budget_s=None)
+    b2._ready = threading.Event()                         # the model is still loading in the background
+    b2._ready.wait = lambda timeout=None: False
+    prog, src = b2.resolve("open notepad")
+    assert str(prog) == "open_app(name=notepad)" and src == "rules (model still loading)"
+
+
+def test_perf_records_stages_and_reports(tmp_path):
+    from jarvis.perf import Perf, rss_mb
+    p = Perf()
+    p.mark("command bar ready")
+    for ms in (0.01, 0.02, 0.2):
+        p.begin()
+        with p.stage("understand"):
+            import time as _t
+            _t.sleep(ms)
+        with p.stage("act"):
+            pass
+        p.command_done("model 97%")
+    p.model_loaded("intent model (encoder)", tmp_path / "intent_encoder.int8.onnx", 0.12)
+    r = p.report()
+    assert "Last 3 commands" in r and "understand" in r and "int8" in r and "command bar ready" in r
+    assert rss_mb() is None or rss_mb() > 1
+
+
+def test_jarvis_perf_command(tmp_path):
+    j = _jarvis(tmp_path)
+    j.handle('remind(text="stretch", after=10m)')
+    out = j.handle("/perf")
+    assert "Last 1 commands" in out or "commands: typical" in out
+    assert "int8" in out
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")   # Stop ends the loop
+def test_yield_pauses_training_while_gaming_and_respects_manual_pause(tmp_path, monkeypatch):
+    import jarvis.actions.training as TR
+    from jarvis import machine
+    flag = tmp_path / "PAUSE"
+    monkeypatch.setattr(TR, "PAUSE_FLAG", flag)
+    monkeypatch.setattr(TR, "jobs", lambda *a, **k: [{"name": "command model", "state": "running"}])
+    state = {"busy": "game"}
+    monkeypatch.setattr(machine, "fullscreen_busy", lambda: state["busy"])
+    monkeypatch.setattr(machine, "power", lambda: machine.Power(None))
+    sleeps = []
+    import jarvis.daemon as D
+
+    class Stop(Exception):
+        pass
+
+    def fake_sleep(s):
+        sleeps.append(s)
+        if len(sleeps) == 1:
+            state["busy"] = None                          # the game was closed
+        if len(sleeps) >= 2:
+            raise Stop()
+    monkeypatch.setattr(D.time, "sleep", fake_sleep)
+    j = _jarvis(tmp_path)
+    notes = []
+    t = j.start_yield(notes.append, every_s=0)
+    t.join(timeout=5)
+    assert notes and "game" in notes[0]                   # paused while gaming...
+    assert not flag.exists()                              # ...and resumed afterwards
+    flag.write_text("paused by Jarvis\n")                 # your own pause is never lifted
+    sleeps.clear()
+    state["busy"] = None
+    t = j.start_yield(notes.append, every_s=0)
+    t.join(timeout=5)
+    assert flag.exists()
+
+
+def test_rollback_never_pairs_old_model_with_new_int8(tmp_path, monkeypatch):
+    import training.loop as L
+    monkeypatch.setattr(L, "CK", tmp_path)
+    monkeypatch.setattr(L, "STATE", tmp_path / "state.json")
+    old = tmp_path / "versions" / "v000-baseline"
+    old.mkdir(parents=True)
+    for f in ("intent.pt", "intent_encoder.onnx", "intent_decoder.onnx", "intent_onnx.json"):
+        (old / f).write_text("old")
+        (tmp_path / f).write_text("new")
+    for f in L.INT8:
+        (tmp_path / f).write_text("new int8")
+    L.make_live(old)
+    assert (tmp_path / "intent_encoder.onnx").read_text() == "old"
+    assert not any((tmp_path / f).exists() for f in L.INT8)
+
+
+def test_after_export_drops_stale_int8(tmp_path, monkeypatch):
+    import builtins
+    from training.quantize import after_export
+    (tmp_path / "intent_encoder.int8.onnx").write_text("stale")
+    real_import = builtins.__import__
+
+    def no_onnx(name, *a, **k):
+        if name == "onnx":
+            raise ImportError
+        return real_import(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", no_onnx)
+    logs = []
+    after_export("intent", tmp_path, log=logs.append)
+    assert not (tmp_path / "intent_encoder.int8.onnx").exists() and "pip install onnx" in logs[0]

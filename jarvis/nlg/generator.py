@@ -29,11 +29,9 @@ class ReplyModel:
                  seed: int | None = None, sessions: tuple | None = None):
         self.tok = BPETokenizer.load(tokenizer)
         if sessions is None:
-            import onnxruntime as ort
-            opts = ort.SessionOptions()
-            opts.intra_op_num_threads = 2
-            sessions = (ort.InferenceSession(str(encoder), opts, providers=["CPUExecutionProvider"]),
-                        ort.InferenceSession(str(decoder), opts, providers=["CPUExecutionProvider"]))
+            from ..onnxutil import session
+            sessions = (session(encoder, threads=2, name="reply model (encoder)"),
+                        session(decoder, threads=2, name="reply model (decoder)"))
         self.enc, self.dec = sessions
         self.samples, self.temperature, self.top_k = samples, temperature, top_k
         self.max_src, self.max_tgt = max_src, max_tgt

@@ -109,7 +109,10 @@ class Config:
     apps: dict[str, str] = field(default_factory=_default_apps)
     # Jarvis may only touch files under these roots (resolved paths).
     allowed_roots: list[str] = field(default_factory=lambda: [str(HOME)])
-    pause_heavy_on_battery: bool = True   # phase 44: OCR / meaning vectors / self-training wait for the charger
+    pause_heavy_on_battery: bool = True
+    use_int8: bool = True                 # phase 41: the smaller, faster int8 model copies when they exist
+    command_budget_ms: int = 1500         # past this, the model's answer is dropped and the rules answer
+    yield_when_gaming: bool = True        # pause training / OCR while a full-screen game or video runs   # phase 44: OCR / meaning vectors / self-training wait for the charger
     hotkey: str = "ctrl+alt+j"
     hud_enabled: bool = True
     hud_hotkey: str = "ctrl+alt+h"

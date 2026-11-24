@@ -27,7 +27,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CK = ROOT / "checkpoints"
 VERSIONS = CK / "versions"
-LIVE = ["intent.pt", "intent_encoder.onnx", "intent_decoder.onnx", "intent_onnx.json"]
+LIVE = ["intent.pt", "intent_encoder.onnx", "intent_decoder.onnx", "intent_encoder.int8.onnx",
+        "intent_decoder.int8.onnx", "intent_onnx.json"]          # json last: Jarvis reloads when it changes
+INT8 = ("intent_encoder.int8.onnx", "intent_decoder.int8.onnx")
 REPORT = CK / "improve_report.json"
 LOG = CK / "improve_log.txt"
 STATE = CK / "improve_state.json"
@@ -109,6 +111,8 @@ def make_live(version_dir: Path) -> None:
             tmp = CK / (f + ".tmp")
             shutil.copy2(version_dir / f, tmp)
             tmp.replace(CK / f)
+        elif f in INT8:                     # an older version without int8: never pair it with a newer int8 copy
+            (CK / f).unlink(missing_ok=True)
     state = _json(STATE, {})
     state["live"] = version_dir.name
     STATE.write_text(json.dumps(state, indent=2), encoding="utf-8")
@@ -330,7 +334,8 @@ def run(args) -> dict:
         vdir.mkdir(parents=True)
         shutil.copy2(cand, vdir / "intent.pt")
         for f in LIVE[1:]:
-            shutil.copy2(cand.parent / f, vdir / f)
+            if (cand.parent / f).exists():
+                shutil.copy2(cand.parent / f, vdir / f)
         (vdir / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         make_live(vdir)
         report["version"] = vdir.name

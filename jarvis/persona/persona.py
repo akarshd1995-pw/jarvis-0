@@ -226,7 +226,7 @@ class Persona:
         fact check), otherwise the templates."""
         if not key:
             return fields.get("summary", "")
-        if self.model is not None and getattr(self.model, "knows_key", lambda k: True)(key):
+        if self.model and getattr(self.model, "knows_key", lambda k: True)(key):
             out = self.model.generate(key, fields, self.tone, self.address)
             if out:
                 self.last_source = "reply-model"

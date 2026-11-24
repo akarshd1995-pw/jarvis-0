@@ -173,6 +173,8 @@ class SettingsWindow:
         self.learn = tk.BooleanVar(value=c.learn_from_usage)
         self.clarify = tk.BooleanVar(value=c.clarify)
         self.battery = tk.BooleanVar(value=c.pause_heavy_on_battery)
+        self.int8 = tk.BooleanVar(value=c.use_int8)
+        self.games = tk.BooleanVar(value=c.yield_when_gaming)
         self.mem_on = tk.BooleanVar(value=c.memory_enabled)
         self.mem_web = tk.BooleanVar(value=c.memory_browser)
         self.mem_folders = tk.StringVar(value=", ".join(c.memory_folders))
@@ -194,6 +196,10 @@ class SettingsWindow:
                 return f
             self._row(pg, "Minimum model confidence", conf, "Below this, the trained model's answer isn't run.")
             self._row(pg, "Model backend", lambda p: self._combo(p, self.backend, ["auto", "onnx", "torch"]))
+            self._row(pg, "Faster, smaller models", tog(self.int8),
+                      "int8 copies of the models (checked to answer the same). Takes effect after a restart.")
+            self._row(pg, "Step aside for games", tog(self.games),
+                      "Pause training and screenshot reading while a full-screen game or video runs.")
             self._row(pg, "Save battery", tog(self.battery),
                       "On a laptop, reading screenshots and self-training wait until you're plugged in.")
             self._row(pg, "Ask when unsure", tog(self.clarify),
@@ -311,6 +317,7 @@ class SettingsWindow:
         c.learn_from_usage = self.learn.get()
         c.clarify = self.clarify.get()
         c.pause_heavy_on_battery = self.battery.get()
+        c.use_int8, c.yield_when_gaming = self.int8.get(), self.games.get()
         c.memory_enabled, c.memory_browser = self.mem_on.get(), self.mem_web.get()
         c.memory_folders = [x.strip() for x in self.mem_folders.get().split(",") if x.strip()] or c.memory_folders
         c.briefing_auto = self.b_auto.get()

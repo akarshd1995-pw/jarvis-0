@@ -128,7 +128,7 @@ def search_memory(args: dict, ctx: Ctx, dry_run: bool) -> ActionResult:
     older = args["older_than"].seconds() if "older_than" in args else None
     from ..memory.meaning import get_embedder
     from pathlib import Path as _P
-    emb = get_embedder(_P(__file__).resolve().parents[2] / "checkpoints") if ctx.config.memory_meaning else None
+    emb = get_embedder(_P(__file__).resolve().parents[2] / "checkpoints", searching=True) if ctx.config.memory_meaning else None
     hits = idx.search(query, ext=ext, newer_than_s=newer, older_than_s=older, where=where, embedder=emb)
     results = [{"title": h.title, "path": h.path, "source": h.source, "ext": h.ext, "mtime": h.mtime,
                 "snippet": h.snippet, "screenshot": h.screenshot} for h in hits]

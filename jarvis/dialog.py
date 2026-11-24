@@ -190,7 +190,7 @@ class Conversation:
         c = self.active(now)
         if c is None:
             return None, ""
-        if self.model is not None:
+        if self.model:
             try:
                 prog, conf = self.model.read(c, text)
             except Exception as e:

@@ -145,11 +145,30 @@ def repair_file_kind(prog: Program, text: str) -> Program:
 
 class Brain:
     def __init__(self, checkpoint: Path | None = None, tokenizer: Path | None = None,
-                 min_confidence: float = 0.55, prefer: str = "auto"):
+                 min_confidence: float = 0.55, prefer: str = "auto", budget_s: float | None = None,
+                 background: bool = False):
+        """background=True: load the model in a thread so Jarvis shows up at once (phase 41); commands in the
+        first moment wait up to a few seconds for it, then use the rules."""
+        import threading
         self._args = (checkpoint, tokenizer, min_confidence, prefer)
+        self.budget_s = budget_s
         self.last_detail: dict = {"conf": None, "alts": []}
         self._stamp = self._files_stamp()
-        self._load(*self._args)
+        self._ready = threading.Event()
+        self.model, self.backend = None, "loading"
+        if background:
+            def load():
+                try:
+                    self._load(*self._args)
+                except Exception as e:
+                    log.warning("intent model failed to load: %s", e)
+                    self.model, self.backend = None, "rules"
+                finally:
+                    self._ready.set()
+            threading.Thread(target=load, daemon=True, name="load-intent-model").start()
+        else:
+            self._load(*self._args)
+            self._ready.set()
 
     def _files_stamp(self) -> tuple:
         checkpoint, tokenizer = self._args[0], self._args[1]
@@ -157,7 +176,7 @@ class Brain:
             return ()
         d = (checkpoint or tokenizer).parent
         out = []
-        for name in ("intent_onnx.json", "intent.pt"):
+        for name in ("intent_onnx.json", "intent.pt", "intent_encoder.int8.onnx"):
             try:
                 out.append((d / name).stat().st_mtime)
             except OSError:
@@ -227,6 +246,9 @@ class Brain:
         """(program, how it was understood). self.last_detail keeps the model's confidence and runner-up
         readings for real-usage learning (phase 39)."""
         self.last_detail = {"conf": None, "alts": []}
+        if not self._ready.wait(timeout=4.0):           # still loading right after start-up: rules for now
+            ruled = rule_parse(text.strip())
+            return ruled, "rules (model still loading)" if ruled is not None else "unparsed"
         self.maybe_reload()
         text = text.strip()
         if not text:
@@ -248,7 +270,16 @@ class Brain:
             return ruled_first, "rules (model not trained on this yet)"
         model_unknown = None
         if self.model is not None:
-            prog, conf = self.model.parse(text)
+            try:
+                prog, conf = self.model.parse(text, budget_s=self.budget_s) if self.budget_s else self.model.parse(text)
+            except TypeError:                            # a parser without a time budget (PyTorch / tests)
+                prog, conf = self.model.parse(text)
+            if getattr(self.model, "timed_out", False):  # phase 41: too slow this time -> rules answer
+                from ..perf import PERF
+                PERF.timeouts += 1
+                ruled = rule_parse(text)
+                if ruled is not None:
+                    return ruled, "rules (model over its time budget)"
             self.last_detail = {"conf": conf, "alts": list(getattr(self.model, "last_alts", []) or [])[:4]}
             if prog is not None:
                 gave_up = any(c.action in ("unknown", "unsupported") for c in prog.calls)

@@ -89,11 +89,9 @@ class OCR:
         f, r = ck / "ocr_finder.onnx", ck / "ocr_reader.onnx"
         if not (f.exists() and r.exists()):
             return None
-        import onnxruntime as ort
-        opts = ort.SessionOptions()
-        opts.intra_op_num_threads = threads
-        prov = ["CPUExecutionProvider"]
-        return cls(ort.InferenceSession(str(f), opts, providers=prov), ort.InferenceSession(str(r), opts, providers=prov))
+        from ..onnxutil import session              # OCR stays full precision: CTC reading is sensitive to it
+        return cls(session(f, threads=threads, int8=False, name="OCR text finder"),
+                   session(r, threads=threads, int8=False, name="OCR reader"))
 
     def find(self, gray: np.ndarray) -> list[tuple[int, int, int, int]]:
         h, w = gray.shape

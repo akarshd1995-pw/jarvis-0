@@ -21,11 +21,9 @@ class Embedder:
         m, t = ck / "meaning.onnx", ck / "meaning_tokenizer.json"
         if not (m.exists() and t.exists()):
             return None
-        import onnxruntime as ort
         from training.tokenizer import BPETokenizer
-        opts = ort.SessionOptions()
-        opts.intra_op_num_threads = threads
-        return cls(ort.InferenceSession(str(m), opts, providers=["CPUExecutionProvider"]), BPETokenizer.load(t))
+        from ..onnxutil import session
+        return cls(session(m, threads=threads, name="meaning model"), BPETokenizer.load(t))
 
     def embed(self, texts: list[str], batch: int = 64) -> np.ndarray:
         out = []
@@ -60,8 +58,15 @@ def chunks(title: str, body: str, n: int = 3, size: int = 400) -> list[str]:
 _loaded: dict = {}
 
 
-def get_embedder(ck: Path):
+last_used = 0.0           # phase 41: the indexer frees the model when no search used it for 10 minutes
+
+
+def get_embedder(ck: Path, searching: bool = False):
     """The trained meaning model (loaded once; reloaded if the files change). None until it's trained."""
+    global last_used
+    if searching:
+        import time as _t
+        last_used = _t.time()
     m = ck / "meaning.onnx"
     stamp = m.stat().st_mtime if m.exists() else None
     if _loaded.get("stamp") != stamp:

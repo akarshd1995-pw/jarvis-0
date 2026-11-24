@@ -20,6 +20,8 @@ def main(ck: Path = Path("checkpoints")):
     _export(model, (ids, keep), ck / "meaning.onnx", ["ids", "keep"], ["vec"],
             {"ids": {0: "n", 1: "len"}, "keep": {0: "n", 1: "len"}, "vec": {0: "n"}})
     print(f"wrote {ck / 'meaning.onnx'} (recall {state.get('recall')})")
+    from training.quantize import after_export
+    after_export("meaning", ck)
 
 
 if __name__ == "__main__":

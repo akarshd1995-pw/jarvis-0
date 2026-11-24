@@ -31,6 +31,7 @@ HELP = """Commands:
   /fix <program>  save the correct program for your last command (trains the next model)
   /improve        fine-tune on your corrections now (switches only if better)
   /doctor         health check: tests every part of Jarvis and repairs what it can
+  /perf           where the time and memory go: start-up, each step of a command, models in memory
   /setup          what I found on this PC: folders (OneDrive, moved), apps, browser, monitors, battery
   /review         go through the commands I wasn't sure about (also: "review my commands")
   /usage          how sure I've been this week; /usage forget wipes the saved commands
@@ -46,14 +47,20 @@ HELP = """Commands:
 
 
 class Jarvis:
-    def __init__(self, config: Config, confirm, data_root: Path | None = None):
+    def __init__(self, config: Config, confirm, data_root: Path | None = None, background_models: bool = False):
         self.config = config
         self.store = Store(config.db_path, encrypt=config.encrypt_logs)
+        from . import onnxutil
+        from .lazy import Lazy
+        from .perf import PERF
+        onnxutil.USE_INT8 = config.use_int8
         self.brain = Brain(PROJECT_ROOT / config.model_checkpoint, PROJECT_ROOT / config.tokenizer_path,
-                           min_confidence=config.min_confidence, prefer=config.model_backend)
+                           min_confidence=config.min_confidence, prefer=config.model_backend,
+                           budget_s=config.command_budget_ms / 1000 if config.command_budget_ms else None,
+                           background=background_models)
         self.hooks: dict = {}   # UI callbacks: settings, restart
         self.persona = Persona(config.persona_name, config.persona_address, config.persona_tone,
-                               model=self._load_reply_model() if config.persona_model else None)
+                               model=Lazy(self._load_reply_model, "reply model") if config.persona_model else None)
         self.executor = Executor(config, self.store, confirm, describe=self.persona.confirm_question)
         self.data_root = data_root or PROJECT_ROOT / "data"
         self.last_text: str | None = None
@@ -84,8 +91,10 @@ class Jarvis:
         self.executor.screen = self.screen
         REGISTRY["open_result"] = self._open_result
         from .dialog import Conversation, DialogModel  # phase 6: follow-ups and asking back
-        self.conv = Conversation(DialogModel.load(PROJECT_ROOT / "checkpoints") if config.dialog_model else None,
-                                 clarify=config.clarify)
+        dialog = Lazy(lambda: DialogModel.load(PROJECT_ROOT / "checkpoints"), "dialog model") \
+            if config.dialog_model and (PROJECT_ROOT / "checkpoints" / "dialog_encoder.onnx").exists() else None
+        self.conv = Conversation(dialog, clarify=config.clarify)
+        PERF.mark("jarvis ready")
         self.briefings = briefing.Scheduler(config.data_dir / "briefing_state.json", config.briefing_morning,
                                             config.briefing_evening, enabled=config.briefing_auto)
 
@@ -146,9 +155,10 @@ class Jarvis:
                         if self.config.memory_browser:
                             idx.add_history(browser.history())
                         from . import machine
-                        if machine.heavy_work_ok(self.config):     # phase 44: OCR / vectors wait for the charger
-                            self._ocr_pass(idx)
+                        if machine.heavy_work_ok(self.config) and not getattr(self, "busy", False):
+                            self._ocr_pass(idx)                  # phase 44/41: not on battery, not while gaming
                             self._embed_pass(idx)
+                        self._release_heavy_models()             # phase 41: give the memory back until next time
                         log.info("memory index: %s (%s)", idx.count(), st)
                     except Exception as e:
                         log.warning("memory indexing failed: %s", e)
@@ -157,6 +167,62 @@ class Jarvis:
         t = threading.Thread(target=loop, daemon=True, name="indexer")
         t.start()
         return t
+
+    def start_yield(self, notify=None, every_s: float = 15) -> threading.Thread:
+        """Phase 41: while a full-screen game runs (or the laptop is on battery), pause training runs and skip
+        OCR / meaning passes so the game gets the GPU and CPU. Only pauses it made itself are lifted again;
+        a pause you asked for stays."""
+        from . import machine
+        from .actions.training import PAUSE_FLAG, jobs
+        AUTO = "auto: "
+
+        def mine() -> bool:
+            try:
+                return PAUSE_FLAG.read_text(encoding="utf-8").startswith(AUTO)
+            except OSError:
+                return False
+
+        def loop():
+            while True:
+                try:
+                    why = None
+                    if self.config.yield_when_gaming:
+                        why = {"game": "a game is running", "fullscreen": "something is running full screen"}.get(
+                            machine.fullscreen_busy() or "")
+                    if why is None and not machine.heavy_work_ok(self.config):
+                        why = "the laptop is on battery"
+                    self.busy = why is not None
+                    training = any(j["state"] == "running" for j in jobs())
+                    if why and training and not PAUSE_FLAG.exists():
+                        PAUSE_FLAG.parent.mkdir(parents=True, exist_ok=True)
+                        PAUSE_FLAG.write_text(AUTO + why + "\n", encoding="utf-8")
+                        log.info("paused training: %s", why)
+                        if notify:
+                            notify(f"I paused training because {why}. It carries on by itself afterwards.")
+                    elif not why and mine():
+                        PAUSE_FLAG.unlink(missing_ok=True)
+                        log.info("resumed training")
+                except Exception as e:
+                    log.warning("yield check failed: %s", e)
+                time.sleep(every_s)
+
+        t = threading.Thread(target=loop, daemon=True, name="yield")
+        t.start()
+        return t
+
+    def _release_heavy_models(self) -> None:
+        """OCR and the meaning model are only needed during an indexing pass (and a search): free them after."""
+        from .perf import PERF
+        if getattr(self, "_ocr", None) is not None:
+            self._ocr = None
+            PERF.model_released("OCR text finder")
+            PERF.model_released("OCR reader")
+        from .memory import meaning
+        if time.time() - getattr(meaning, "last_used", 0) > 600 and meaning._loaded.get("emb") is not None:
+            meaning._loaded.clear()
+            PERF.model_released("meaning model")
+        import gc
+        gc.collect()
 
     def _ocr_pass(self, idx, limit: int = 150) -> int:
         """Read the text in up to `limit` new screenshots/images with our OCR models (if trained)."""
@@ -389,6 +455,16 @@ class Jarvis:
                 self.hooks["restart"]()
                 return msg + "\nRestarting..."
             return msg + ("\nRestart Jarvis to use the new version." if changed else "")
+        if cmd == "/perf":
+            from .perf import PERF
+            from . import onnxutil
+            ck = PROJECT_ROOT / "checkpoints"
+            int8 = [p.name.split(".")[0] for p in sorted(ck.glob("*.int8.onnx"))] if ck.exists() else []
+            note = (f"\nint8 copies on disk: {', '.join(int8)}" if int8 else
+                    "\nNo int8 copies yet: run quantize.bat once (smaller, faster models).")
+            if not onnxutil.USE_INT8:
+                note += " (off in settings)"
+            return PERF.report() + note
         if cmd == "/setup":
             return self.setup_check(force=True)
         if cmd == "/review":
@@ -438,7 +514,7 @@ class Jarvis:
         if by_model or by_rules:
             lines.append(f"  last 24 h: {by_model} commands understood by the model, {by_rules} by backup rules")
         rm = self.persona.model
-        if rm is not None:
+        if rm:
             st = rm.stats
             lines.append(f"Reply model: on ({st['generated']} generated, {st['rejected']} rejected by the fact check)")
         else:
@@ -490,12 +566,20 @@ class Jarvis:
     def handle(self, text: str) -> str:
         if text.strip().startswith("/"):
             return self._meta(text.strip())
+        from .perf import PERF
         self._hud("thinking")
+        PERF.begin()
+        self._source = ""
         try:
             reply = self._handle(text)
         except Exception:
             self._hud("error", hold=3)
             raise
+        finally:
+            rec = PERF.command_done(self._source)
+            if rec and rec["total"] > 3:
+                log.info("slow command (%.1fs): %s", rec["total"],
+                         ", ".join(f"{k} {v:.2f}s" for k, v in rec["stages"].items()))
         return reply
 
     def _mood(self, text: str, prog=None) -> str | None:
@@ -540,9 +624,12 @@ class Jarvis:
         c = self.conv.active()
         if c is None:
             return None
-        program, source = self.conv.read(text)
+        from .perf import PERF
+        with PERF.stage("follow-up"):
+            program, source = self.conv.read(text)
         if program is None:
             return None
+        self._source = source
         if program == "unknown()":
             if c.kind == "prev":
                 return None                              # not a follow-up: a new command
@@ -608,7 +695,10 @@ class Jarvis:
         return ActionResult(f"Opened {row['title']}", kind="open", data={"what": "url", "name": row["title"]})
 
     def _execute(self, prog, source: str) -> str:
-        report = self.executor.run(prog)
+        from .perf import PERF
+        self._source = source
+        with PERF.stage("act"):
+            report = self.executor.run(prog)
         for r in report.results:                    # search / file list: rows the command bar can show and open
             rows = None
             if r.kind == "memory" and r.data.get("results"):
@@ -622,16 +712,20 @@ class Jarvis:
             self.conv.ran(str(prog))
         else:
             self.conv.clear()
-        reply = self.persona.report(report)
+        with PERF.stage("reply"):
+            reply = self.persona.report(report)
         state = "error" if report.failures else ("idle" if report.declined and not report.results else "success")
         self._hud(state, reply, hold=2)
         return self._with_details(reply, source, prog, report)
 
     def _handle(self, text: str) -> str:
+        from .perf import PERF
         followed = self._converse(text)
         if followed is not None:
             return followed
-        prog, source = self.brain.resolve(text)
+        with PERF.stage("understand"):
+            prog, source = self.brain.resolve(text)
+        self._source = source
         # Feelings win only when the sentence isn't a real command ("i'm tired of these pdfs, delete them" stays a delete);
         # crisis words always win.
         is_command = prog is not None and any(c.action not in ("unknown", "unsupported", "play_media", "search_web", "mood")
@@ -924,7 +1018,9 @@ def main() -> None:
             return
         log.warning("port %s is taken by another program; starting anyway", single.port)
     bar_ref: dict = {}
-    jarvis = Jarvis(config, lambda *a: bar_ref["bar"].confirm(*a))
+    from .perf import PERF
+    PERF.mark("settings loaded")
+    jarvis = Jarvis(config, lambda *a: bar_ref["bar"].confirm(*a), background_models=True)
     jarvis.watchdog = watchdog
     bar = CommandBar(jarvis.handle)
     bar_ref["bar"] = bar
@@ -1020,6 +1116,8 @@ def main() -> None:
         watchdog.register("self-improvement", jarvis.start_improver(improver_msg),
                           lambda: jarvis.start_improver(improver_msg))
         watchdog.register("backups", jarvis.start_maintenance(), jarvis.start_maintenance)
+        yield_msg = lambda text: bar.post("call", lambda: Toast(bar.root, "Training paused", text, seconds=8))  # noqa
+        watchdog.register("yield", jarvis.start_yield(yield_msg), lambda: jarvis.start_yield(yield_msg))
     watchdog.start()
     bar.results_provider = jarvis.take_results
 
@@ -1035,6 +1133,14 @@ def main() -> None:
     if hk.error:
         log.warning(hk.error)
     bar.show()
+    PERF.mark("command bar ready")
+    log.info("start-up: %s", ", ".join(f"{k} {v:.2f}s" for k, v in PERF.marks.items()))
+
+    def warm_up():                                     # phase 41: load the reply model once you can already type
+        time.sleep(3)
+        if jarvis.persona.model is not None and hasattr(jarvis.persona.model, "warm"):
+            jarvis.persona.model.warm()
+    threading.Thread(target=warm_up, daemon=True, name="warm-up").start()
     if jarvis.recovery_message():
         bar.post("message", jarvis.recovery_message())
 

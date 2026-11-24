@@ -117,11 +117,15 @@ def main():
     ap.add_argument("--prefix", default="intent", help="intent (command model) or reply (reply model)")
     ap.add_argument("--verify", type=int, default=0, help="compare ONNX vs PyTorch on N validation examples")
     ap.add_argument("--data", type=Path, default=Path("data/intents/val.jsonl"))
+    ap.add_argument("--no-int8", action="store_true", help="don't make the smaller int8 copy")
     args = ap.parse_args()
     enc, dec = export(args.checkpoint, args.out, args.prefix)
     print(f"wrote {enc} ({enc.stat().st_size / 1e6:.1f} MB) and {dec} ({dec.stat().st_size / 1e6:.1f} MB)")
     if args.verify and args.prefix == "intent":
         verify(args.checkpoint, args.out, args.tokenizer, args.data, args.verify)
+    if not args.no_int8:                              # phase 41: a checked int8 copy next to the full model
+        from training.quantize import after_export
+        after_export(args.prefix, args.out)
 
 
 if __name__ == "__main__":

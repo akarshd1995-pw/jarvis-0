@@ -163,6 +163,22 @@ def place(width: int, height: int, where: str = "center", margin: int = 20,
     return x, y
 
 
+def fullscreen_busy() -> str | None:
+    """'game' when a full-screen game (Direct3D) runs, 'fullscreen' for a full-screen app or presentation
+    (a film, slides), else None. Uses what Windows itself uses to hold back notifications."""
+    if not IS_WINDOWS:
+        return None
+    try:
+        import ctypes
+        state = ctypes.c_int(0)
+        if ctypes.windll.shell32.SHQueryUserNotificationState(ctypes.byref(state)) != 0:
+            return None
+        # 2 busy (full-screen app), 3 Direct3D full screen (games), 4 presentation mode
+        return {3: "game", 2: "fullscreen", 4: "fullscreen"}.get(state.value)
+    except Exception:
+        return None
+
+
 # ------------------------------------------------------------------ browser
 BROWSERS = {   # ProgId prefix -> (name, app alias)
     "ChromeHTML": ("Google Chrome", "chrome"), "MSEdgeHTM": ("Microsoft Edge", "edge"),

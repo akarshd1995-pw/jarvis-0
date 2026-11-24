@@ -10,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def command() -> str:
+    if getattr(sys, "frozen", False):                  # the installed app (JarvisSetup.exe): its own Jarvis.exe
+        return f'"{sys.executable}"'
     exe = Path(sys.executable)
     pyw = exe.with_name("pythonw.exe") if exe.name.lower() == "python.exe" else exe
     return f'"{pyw}" "{PROJECT_ROOT / "jarvis_launcher.pyw"}"'

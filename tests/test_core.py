@@ -2358,3 +2358,131 @@ def test_after_export_drops_stale_int8(tmp_path, monkeypatch):
     logs = []
     after_export("intent", tmp_path, log=logs.append)
     assert not (tmp_path / "intent_encoder.int8.onnx").exists() and "pip install onnx" in logs[0]
+
+
+# ---------------------------------------------------------------- phase 42: release safety
+def _repos(tmp_path):
+    """A 'GitHub' repo and your local clone of it, plus a helper to publish a new version."""
+    import subprocess as sp
+
+    def git(cwd, *a):
+        return sp.run(["git", *a], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+    origin, dev, mine = tmp_path / "origin.git", tmp_path / "dev", tmp_path / "mine"
+    sp.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    sp.run(["git", "clone", "-q", str(origin), str(dev)], check=True, capture_output=True)
+    for d in (dev,):
+        git(d, "config", "user.email", "t@t")
+        git(d, "config", "user.name", "t")
+    (dev / "app.txt").write_text("v1")
+    git(dev, "add", ".")
+    git(dev, "commit", "-qm", "v1")
+    git(dev, "push", "-q", "origin", "HEAD")
+    sp.run(["git", "clone", "-q", str(origin), str(mine)], check=True, capture_output=True)
+
+    def publish(text):
+        (dev / "app.txt").write_text(text)
+        git(dev, "commit", "-qam", text)
+        git(dev, "push", "-q", "origin", "HEAD")
+        return git(dev, "rev-parse", "HEAD")
+    return mine, publish, (lambda: git(mine, "rev-parse", "HEAD"))
+
+
+def test_update_is_tested_before_switching(tmp_path):
+    from jarvis import release
+    from jarvis.updater import update
+    mine, publish, head = _repos(tmp_path)
+    data = tmp_path / "data"
+    v1 = head()
+    assert update(mine, data_dir=data, tester=lambda *a: (True, "ok"))[1] == "Already up to date."
+    v2 = publish("v2 broken")
+    changed, msg = update(mine, data_dir=data, tester=lambda *a: (False, "the new version failed its tests"))
+    assert not changed and head() == v1 and "didn't install" in msg            # stayed on the working version
+    changed, msg = update(mine, data_dir=data, tester=lambda *a: (True, "ok"))
+    assert not changed and "didn't pass its checks earlier" in msg              # never retried
+    v3 = publish("v3 fixed")
+    seen = []
+    changed, msg = update(mine, data_dir=data, tester=lambda root, commit, progress: seen.append(commit) or (True, "205 passed"))
+    assert changed and head() == v3 and seen == [v3] and "Checked first: 205 passed" in msg
+    assert release.pending(data)["previous"] == v1                               # remembered for a rollback
+
+
+def test_rollback_after_a_failed_start_keeps_your_changes(tmp_path):
+    from jarvis import release
+    from jarvis.updater import update
+    mine, publish, head = _repos(tmp_path)
+    data = tmp_path / "data"
+    v1 = head()
+    (mine / "my_notes.txt").write_text("my own file")                           # something of yours
+    v2 = publish("v2 crashes on start")
+    assert update(mine, data_dir=data, tester=lambda *a: (True, "ok"))[0]
+    done, msg = release.rollback(mine, data, why="crashed while starting (exit code 1)")
+    assert done and head() == v1 and (mine / "app.txt").read_text() == "v1"
+    assert (mine / "my_notes.txt").read_text() == "my own file"
+    assert "crashed while starting" in release.message_once(data) and release.message_once(data) == ""
+    assert "didn't pass its checks earlier" in update(mine, data_dir=data, tester=lambda *a: (True, "ok"))[1]
+
+
+def test_confirmed_update_is_not_rolled_back(tmp_path):
+    from jarvis import release
+    from jarvis.updater import update
+    mine, publish, head = _repos(tmp_path)
+    data = tmp_path / "data"
+    publish("v2")
+    update(mine, data_dir=data, tester=lambda *a: (True, "ok"))
+    assert release.confirm(data) and release.pending(data) is None
+    assert release.rollback(mine, data) == (False, "nothing to roll back")
+
+
+def test_supervisor_rolls_back_a_crashing_update(tmp_path, monkeypatch):
+    import jarvis.supervisor as S
+    codes = iter([1, 0])                                     # new version crashes, the previous one runs
+    monkeypatch.setattr(S.subprocess, "call", lambda cmd, env=None: next(codes))
+    state = {"pending": True}
+    monkeypatch.setattr(S.release, "pending", lambda d: state if state["pending"] else None)
+
+    def fake_rollback(root, data_dir, why=""):
+        state["pending"] = False
+        state["why"] = why
+        return True, "rolled back"
+    monkeypatch.setattr(S.release, "rollback", fake_rollback)
+    monkeypatch.setattr(S.time, "sleep", lambda s: None)
+    assert S.run([], tmp_path) == 0 and "exit code 1" in state["why"]
+
+
+def test_selftest_passes_and_leaves_registry_alone():
+    from jarvis import selftest
+    from jarvis.executor import REGISTRY
+    before = dict(REGISTRY)
+    checks = selftest.run(log=lambda s: None)
+    assert all(c.ok for c in checks), selftest.summary(checks)
+    assert REGISTRY == before
+
+
+def test_new_version_is_tested_in_its_own_worktree(tmp_path):
+    import subprocess as sp
+    from jarvis.updater import test_version
+    repo = tmp_path / "repo"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "jarvis").mkdir()
+    (repo / "jarvis" / "__init__.py").write_text("")
+    (repo / "jarvis" / "selftest.py").write_text("print('Self-test passed: 1 checks')\n")
+    (repo / "tests" / "test_a.py").write_text("def test_ok():\n    assert True\n")
+
+    def git(*a):
+        return sp.run(["git", *a], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    git("add", ".")
+    git("commit", "-qm", "good")
+    good = git("rev-parse", "HEAD")
+    (repo / "tests" / "test_a.py").write_text("def test_broken():\n    assert 1 == 2\n")
+    git("commit", "-qam", "broken")
+    broken = git("rev-parse", "HEAD")
+    steps = []
+    ok, msg = test_version(repo, good, steps.append)
+    assert ok and "1 passed" in msg and "Self-test passed" in msg, msg
+    ok, msg = test_version(repo, broken, steps.append)
+    assert not ok and "test_broken" in msg
+    assert "worktree" not in git("status", "--porcelain")                       # nothing left behind
+    assert git("worktree", "list").count("\n") == 0

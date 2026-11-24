@@ -41,7 +41,9 @@ HELP = """Commands:
   /wrong          flag the last command as wrong, to label later
   /status         model backend, accuracy, autostart and encryption status
   /settings       open the settings window
-  /update         pull the latest version from GitHub and restart
+  /update         get the latest version: it's tested first (tests + self-test) and only then switched to;
+                  if it can't start, I go back by myself. /update force skips the tests.
+  /selftest       run every action in a throwaway folder to check everything works
   /hud            show or hide the HUD overlay
   /help           this message"""
 
@@ -62,7 +64,9 @@ class Jarvis:
         self.persona = Persona(config.persona_name, config.persona_address, config.persona_tone,
                                model=Lazy(self._load_reply_model, "reply model") if config.persona_model else None)
         self.executor = Executor(config, self.store, confirm, describe=self.persona.confirm_question)
-        self.data_root = data_root or PROJECT_ROOT / "data"
+        # your corrections etc.: in the project folder, or (installed app, read-only folder) in your data folder
+        self.data_root = data_root or (config.data_dir / "data" if getattr(sys, "frozen", False)
+                                       else PROJECT_ROOT / "data")
         self.last_text: str | None = None
         self.monitor = None
         self.sampler = None
@@ -450,11 +454,15 @@ class Jarvis:
             return "\n".join(rows) if rows else "No model versions yet: the first improvement run creates them."
         if cmd == "/update":
             from .updater import update
-            changed, msg = update()
+            changed, msg = update(progress=self.hooks.get("message", lambda s: None), data_dir=self.config.data_dir,
+                                  test=arg.strip().lower() != "force")
             if changed and "restart" in self.hooks:
                 self.hooks["restart"]()
                 return msg + "\nRestarting..."
             return msg + ("\nRestart Jarvis to use the new version." if changed else "")
+        if cmd == "/selftest":
+            from . import selftest
+            return selftest.summary(selftest.run(log=lambda s: None))
         if cmd == "/perf":
             from .perf import PERF
             from . import onnxutil
@@ -969,7 +977,14 @@ def main() -> None:
     ap.add_argument("--child", action="store_true", help=argparse.SUPPRESS)       # run by the supervisor
     ap.add_argument("--safe-mode", action="store_true", help="rules only, no HUD or background services")
     ap.add_argument("--no-supervisor", action="store_true", help="don't restart automatically after a crash")
+    ap.add_argument("--selftest-exe", action="store_true", help=argparse.SUPPRESS)  # checks a built Jarvis.exe
     args = ap.parse_args()
+    if args.selftest_exe:                              # build_installer.bat: does the packaged app work?
+        import tempfile
+        from . import selftest
+        checks = selftest.run(log=lambda s: None)
+        (Path(tempfile.gettempdir()) / "jarvis_selftest.txt").write_text(selftest.summary(checks), encoding="utf-8")
+        sys.exit(0 if all(c.ok for c in checks) else 1)
     if args.autostart:
         from . import autostart
         print(autostart.enable() if args.autostart == "on" else autostart.disable())
@@ -1027,6 +1042,7 @@ def main() -> None:
     single.on_show = lambda: bar.post("open")
     jarvis.hooks["settings"] = lambda: bar.post("call", lambda: SettingsWindow(bar.root, config))
     jarvis.hooks["restart"] = lambda: bar.post("call", lambda: (bar.root.destroy(), restart()))
+    jarvis.hooks["message"] = lambda text: bar.post("message", text)
 
     def open_review():
         from .ui.review import ReviewSession, ReviewWindow
@@ -1044,7 +1060,8 @@ def main() -> None:
     hk.start()
 
     def tray_update():
-        changed, msg = update()
+        bar.post("message", "Checking for updates...")
+        changed, msg = update(progress=lambda s: bar.post("message", s), data_dir=config.data_dir)
         bar.post("message", msg + ("\nRestarting..." if changed else ""))
         if changed:
             jarvis.hooks["restart"]()
@@ -1134,6 +1151,11 @@ def main() -> None:
         log.warning(hk.error)
     bar.show()
     PERF.mark("command bar ready")
+    from . import release                              # phase 42: this version started fine -> trust it
+    threading.Timer(release.CONFIRM_AFTER_S, lambda: release.confirm(config.data_dir)).start()
+    rolled = release.message_once(config.data_dir)
+    if rolled:
+        bar.post("message", rolled)
     log.info("start-up: %s", ", ".join(f"{k} {v:.2f}s" for k, v in PERF.marks.items()))
 
     def warm_up():                                     # phase 41: load the reply model once you can already type

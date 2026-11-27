@@ -28,7 +28,8 @@ class Toggle(tk.Canvas):
 
 
 class SettingsWindow:
-    PAGES = ["General", "Persona", "HUD & alerts", "Briefings", "Places & maps", "Folders & apps", "Privacy"]
+    PAGES = ["General", "Persona", "HUD & alerts", "Briefings", "Focus & gaming", "Places & maps", "Folders & apps",
+             "Privacy"]
 
     def __init__(self, parent: tk.Misc, config: Config):
         self.config = config
@@ -171,6 +172,11 @@ class SettingsWindow:
         self.maps_key = tk.StringVar(value=unprotect(c.maps_api_key) if c.maps_api_key else "")
         self.maps_osm = tk.BooleanVar(value=c.maps_osm)
         self.learn = tk.BooleanVar(value=c.learn_from_usage)
+        self.focus_min = tk.StringVar(value=str(c.focus_minutes))
+        self.focus_block = tk.BooleanVar(value=c.focus_block)
+        self.block_sites = tk.StringVar(value=", ".join(c.focus_block_sites))
+        self.block_apps = tk.StringVar(value=", ".join(c.focus_block_apps))
+        self.gaming_auto = tk.BooleanVar(value=c.gaming_auto)
         wa = c.workspace_apps or {}
         self.coding_apps = tk.StringVar(value=", ".join(wa.get("coding", [])))
         self.study_apps = tk.StringVar(value=", ".join(wa.get("study", [])))
@@ -235,6 +241,19 @@ class SettingsWindow:
             self._row(pg, "Morning briefing from", lambda p: self._entry(p, self.b_morning, 8),
                       "The first time you're at the PC after this time (until noon). HH:MM")
             self._row(pg, "Evening briefing at", lambda p: self._entry(p, self.b_evening, 8), "HH:MM")
+        elif name == "Focus & gaming":
+            self._title(pg, "Focus & gaming", "\"focus for 45 minutes\", \"start a pomodoro\", \"gaming mode on\".")
+            self._row(pg, "Focus length (minutes)", lambda p: self._entry(p, self.focus_min, 6),
+                      "Used when you don't say how long. A pomodoro round is this long too.")
+            self._row(pg, "Pause distractions by default", tog(self.focus_block),
+                      "While you focus, a blocked app or site that comes to the front is minimized. "
+                      "Say \"focus without blocking\" to skip it once.")
+            self._row(pg, "Sites to pause", lambda p: self._entry(p, self.block_sites, 34),
+                      "Words in the window title, comma separated: youtube, instagram, netflix ...")
+            self._row(pg, "Apps to pause", lambda p: self._entry(p, self.block_apps, 34),
+                      "Program files, comma separated: steam.exe, discord.exe ...")
+            self._row(pg, "Gaming mode by itself", tog(self.gaming_auto),
+                      "When a full-screen game starts: quiet, HUD hidden, training paused; a summary afterwards.")
         elif name == "Places & maps":
             self._title(pg, "Places & maps", "\"how long to get home\", \"fastest route to the airport\".")
             self._row(pg, "Home", lambda p: self._entry(p, self.home_addr, 34), "An address or area, e.g. HSR Layout, Bengaluru")
@@ -321,6 +340,13 @@ class SettingsWindow:
         c.maps_api_key = protect(key) if key else ""        # encrypted to your Windows account
         c.maps_osm = self.maps_osm.get()
         c.learn_from_usage = self.learn.get()
+        try:
+            c.focus_minutes = max(1, min(600, int(self.focus_min.get().strip())))
+        except ValueError:
+            pass
+        split = lambda v: [x.strip().lower() for x in v.get().split(",") if x.strip()]   # noqa: E731
+        c.focus_block, c.gaming_auto = self.focus_block.get(), self.gaming_auto.get()
+        c.focus_block_sites, c.focus_block_apps = split(self.block_sites), split(self.block_apps)
         apps_of = lambda v: [a.strip().lower() for a in v.get().split(",") if a.strip()]   # noqa: E731
         c.workspace_apps = {**(c.workspace_apps or {}), "coding": apps_of(self.coding_apps) or ["cursor", "claude"],
                             "study": apps_of(self.study_apps) or ["chrome"]}

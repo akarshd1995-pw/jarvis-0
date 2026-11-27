@@ -117,6 +117,11 @@ SCHEMA: dict[str, dict] = {
     "find_notes":    {"args": {"query": "str|ref", "kind": "ident", "when": "ident"}, "required": [],
                       "enum": {"kind": ["note", "journal"], "when": ["today", "yesterday", "week", "month"]}},
     "delete_note":   {"args": {"query": "str"}, "required": ["query"]},
+    "focus":         {"args": {"action": "ident", "minutes": "int", "mode": "ident", "block": "ident",   # phase 32
+                               "quiet": "ident"}, "required": ["action"],
+                      "enum": {"action": ["start", "stop", "status"], "mode": ["single", "pomodoro"],
+                               "block": ["yes", "no"], "quiet": ["normal", "total"]}},
+    "gaming":        {"args": {"action": "ident"}, "required": ["action"], "enum": {"action": ["on", "off"]}},
     "workspace":     {"args": {"action": "ident", "name": "str"}, "required": ["action"],          # phase 31
                       "enum": {"action": ["start", "save", "close", "list", "delete"]}},                     # phase 38: "open the second one"
     "unknown":       {"args": {}, "required": []},   # out-of-scope request: decline, never guess

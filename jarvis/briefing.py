@@ -61,6 +61,7 @@ class Facts:
     improve: str = ""                          # what the self-improving loop did overnight
     learning: list[str] = field(default_factory=list)   # phase 39: weekly review nudge, drift alert
     notes: list[tuple[str, str]] = field(default_factory=list)   # phase 30: today's (kind, text), oldest first
+    focus_min: float = 0.0                                        # phase 32: minutes of focus sessions today
     active_min: int = 0
     commands: int = 0
     alerts: int = 0
@@ -183,6 +184,8 @@ def gather(kind: str, store, snapshot, logs: dict[str, Path], eval_report: Path 
     if kind == "evening" and hasattr(store, "notes"):
         f.notes = [(k, t) for _, _, k, t in reversed(store.notes(since=day_start))]
     events = store.events_since(day_start)
+    if kind == "evening":
+        f.focus_min = sum(float(p.get("minutes", 0)) for _, k, p in events if k == "focus_session")
     secs = focus_minutes(events, now)
     f.active_min = int(sum(secs.values()) // 60)
     f.apps = [(a, int(s // 60)) for a, s in sorted(secs.items(), key=lambda x: -x[1]) if s >= 120][:4]
@@ -322,6 +325,9 @@ def render(f: Facts, name: str = "Jarvis", address: str = "sir", tone: str = "bu
         lines.append(f.improve)
     lines.extend(f.learning)
     lines.extend(notes_lines(f.notes))
+    if f.focus_min >= 5:
+        from .focus import fmt_left
+        lines.append(f"You focused for {fmt_left(int(f.focus_min * 60))} today.")
 
     # Downloads clutter
     c = f.clutter

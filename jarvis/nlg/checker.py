@@ -14,7 +14,8 @@ from .bank import variants
 
 FIELD_ORDER = ["count", "files", "files_pl", "filt", "src", "dest", "name", "query", "site", "text", "when",
                "request", "items", "action_phrase", "error", "opverb", "target", "level", "device", "delay",
-               "pct", "eta", "best", "temp", "free_gb", "minutes", "metric", "value", "typical", "channel", "title", "closest", "place", "age", "more", "version", "time", "km", "via", "what", "thing", "about", "changes", "done", "miss", "tip", "known", "apps", "msg"]
+               "pct", "eta", "best", "temp", "free_gb", "minutes", "metric", "value", "typical", "channel", "title", "closest", "place", "age", "more", "version", "time", "km", "via", "what", "thing", "about", "changes", "done", "miss", "tip", "known", "apps", "until", "quiet", "blocking",
+               "extra", "left", "focused", "cycle", "msg"]
 KNOWN_FOLDERS = ["Downloads", "Documents", "Desktop", "Pictures", "Music", "Videos", "Archive"]
 NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
                 "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",

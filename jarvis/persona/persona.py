@@ -5,6 +5,8 @@ Deterministic templates (not a generative model) on purpose: replies must be fac
 """
 from __future__ import annotations
 
+import time
+
 import datetime as dt
 import random
 import re
@@ -183,6 +185,15 @@ class Persona:
             return self._plan_notes(d)
         if k == "workspace":
             return self._plan_workspace(d)
+        if k == "focus":
+            return self._plan_focus(d)
+        if k == "gaming":
+            if d["action"] == "on":
+                return "gaming_on", {}
+            s = d.get("summary") or {}
+            from ..focus import held_summary
+            held = held_summary(s.get("held") or [])
+            return "gaming_off", {"extra": f" While you played, {held}." if held else ""}
         if k == "note_deleted":
             return "note_deleted", {"text": _short(d["text"], 80)}
         if k == "note_read":
@@ -333,6 +344,31 @@ class Persona:
     def _and(items: list[str]) -> str:
         items = list(dict.fromkeys(items))
         return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1] if items else ""
+
+    def _plan_focus(self, d: dict) -> tuple[str, dict]:
+        from ..focus import fmt_left, held_summary
+        act = d["action"]
+        if act == "status":
+            st = d.get("status")
+            if st is None:
+                return ("focus_status_gaming" if d.get("gaming") else "focus_status_none"), {}
+            key = "focus_status" if st["phase"] == "work" else "focus_status_break"
+            return key, {"left": fmt_left(st["left_s"]), "focused": fmt_left(st["focused_min"] * 60)}
+        if act == "stop":
+            s = d.get("summary")
+            if not s:
+                return "focus_status_none", {}
+            held = held_summary(s.get("held") or [])
+            return "focus_stopped", {"minutes": fmt_left(s["minutes"] * 60),
+                                     "extra": f" Meanwhile {held}." if held else ""}
+        until = time.strftime("%H:%M", time.localtime(d["until"])) if d.get("until") else ""
+        blocking = (" I'll pause " + self._and([b.title() if "." not in b else b for b in d["blocking"][:5]])
+                    + (" and the rest of your list" if len(d["blocking"]) > 5 else "") + " if they come up."
+                    ) if d.get("block") else ""
+        quiet = " No interruptions at all, not even reminders." if d.get("total") else \
+            " I'll hold my notices; reminders still come through."
+        key = "focus_pomodoro" if d.get("mode") == "pomodoro" else "focus_started"
+        return key, {"minutes": d["minutes"], "until": until, "blocking": blocking, "quiet": quiet}
 
     def _plan_workspace(self, d: dict) -> tuple[str, dict]:
         act, name = d["action"], d.get("name", "")

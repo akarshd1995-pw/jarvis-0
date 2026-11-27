@@ -95,6 +95,12 @@ class Jarvis:
         self.screen = ScreenContext(hwnd=lambda: LAST_EXTERNAL.get("hwnd"))
         self.executor.screen = self.screen
         REGISTRY["open_result"] = self._open_result
+        from . import focus as F                      # phase 32: focus & gaming mode
+        self.focus = F.Engine(log=lambda kind, data: self.store.log_event(kind, data),
+                              sites=list(config.focus_block_sites), apps=list(config.focus_block_apps))
+        F.CURRENT = self.focus
+        REGISTRY["focus"] = self._focus_action
+        REGISTRY["gaming"] = self._gaming_action
         from .dialog import Conversation, DialogModel  # phase 6: follow-ups and asking back
         dialog = Lazy(lambda: DialogModel.load(PROJECT_ROOT / "checkpoints"), "dialog model") \
             if config.dialog_model and (PROJECT_ROOT / "checkpoints" / "dialog_encoder.onnx").exists() else None
@@ -214,6 +220,114 @@ class Jarvis:
         t = threading.Thread(target=loop, daemon=True, name="yield")
         t.start()
         return t
+
+    # ------------------------------------------------------------ phase 32: focus & gaming
+    def _focus_action(self, args, ctx, dry_run: bool):
+        from . import focus as F
+        act = str(args["action"])
+        e = self.focus
+        if act == "status":
+            return ActionResult("focus status", kind="focus", data={"action": "status", "status": e.status(),
+                                                                     "gaming": e.gaming is not None})
+        if act == "stop":
+            summary = None if dry_run else e.stop("stopped")
+            return ActionResult("focus stopped", kind="focus", data={"action": "stop", "summary": summary})
+        minutes = int(args.get("minutes") or self.config.focus_minutes)
+        mode = str(args.get("mode", "single"))
+        block = str(args.get("block")) == "yes" if args.get("block") is not None else self.config.focus_block
+        total = str(args.get("quiet", "normal")) == "total"
+        data = {"action": "start", "minutes": minutes, "mode": mode, "block": block, "total": total,
+                "blocking": (e.sites + [a[:-4] for a in e.apps]) if block else []}
+        if dry_run:
+            return ActionResult(f"Focus for {minutes} min" + (f", pausing {', '.join(data['blocking'][:6])}"
+                                                              if block else ""), kind="focus", data={**data, "dry": True})
+        e.sites, e.apps = list(self.config.focus_block_sites), list(self.config.focus_block_apps)  # latest Settings
+        s = e.start(minutes, mode, block, total)
+        ctx.store.record(ctx.batch_id, "focus", {"op": "focus_stop"})        # "undo" ends it (and the blocking)
+        data["until"] = s.phase_end
+        self._focus_hud()
+        return ActionResult(f"focus {minutes} min", kind="focus", data=data)
+
+    def _gaming_action(self, args, ctx, dry_run: bool):
+        on = str(args["action"]) == "on"
+        if dry_run:
+            return ActionResult("gaming", kind="gaming", data={"action": "on" if on else "off", "dry": True})
+        if on:
+            self.focus.gaming_on(auto=False)
+            if "hud_hide" in self.hooks:
+                self.hooks["hud_hide"](True)
+            return ActionResult("gaming on", kind="gaming", data={"action": "on"})
+        summary = self.focus.gaming_off()
+        if "hud_hide" in self.hooks:
+            self.hooks["hud_hide"](False)
+        return ActionResult("gaming off", kind="gaming", data={"action": "off", "summary": summary})
+
+    def _focus_hud(self):
+        if "focus_hud" in self.hooks:
+            self.hooks["focus_hud"](self.focus.countdown())
+
+    def notify_or_hold(self, kind: str, text: str) -> bool:
+        """True: show it now. False: focus / gaming is on, it was kept for the summary afterwards."""
+        return not self.focus.hold(kind, text)
+
+    def start_focus_ticker(self, say, every_s: float = 1.0) -> threading.Thread:
+        """Countdown, breaks, the end of a session, gentle blocking and automatic gaming mode."""
+        from . import focus as F
+        from . import machine, winlayout
+        state = {"last_block": 0.0, "game_seen": 0.0}
+
+        def loop():
+            while True:
+                try:
+                    for ev, d in self.focus.tick():
+                        say(self.persona.say(*self._focus_event(ev, d)))
+                    if self.focus.session is not None or self.focus.gaming is not None:
+                        self._focus_hud()
+                    s = self.focus.session
+                    if s is not None and s.block and s.phase == "work":
+                        fg = winlayout.foreground()
+                        name = self.focus.blocked(fg.title, fg.exe) if fg else None
+                        if name:
+                            winlayout.minimize(fg.hwnd)
+                            if time.time() - state["last_block"] > 20:
+                                state["last_block"] = time.time()
+                                until = time.strftime("%H:%M", time.localtime(s.phase_end))
+                                say(self.persona.say("focus_blocked", name=name, until=until))
+                    if self.config.gaming_auto:                  # a full-screen game: gaming mode by itself
+                        busy = machine.fullscreen_busy()
+                        g = self.focus.gaming
+                        if busy == "game" and g is None:
+                            self.focus.gaming_on(auto=True)
+                            if "hud_hide" in self.hooks:
+                                self.hooks["hud_hide"](True)
+                        elif busy != "game" and g is not None and g.auto:
+                            summary = self.focus.gaming_off()
+                            if "hud_hide" in self.hooks:
+                                self.hooks["hud_hide"](False)
+                            if summary and (summary["held"] or summary["minutes"] >= 10):
+                                say(self.persona.say(*self._gaming_end(summary)))
+                except Exception as e:
+                    log.warning("focus ticker: %s", e)
+                time.sleep(every_s)
+
+        t = threading.Thread(target=loop, daemon=True, name="focus")
+        t.start()
+        return t
+
+    def _focus_event(self, ev: str, d: dict) -> tuple[str, dict]:
+        from .focus import held_summary
+        held = held_summary(d.get("held") or [])
+        extra = f" Meanwhile {held}." if held else ""
+        if ev == "break":
+            return ("focus_break_long" if d["long"] else "focus_break"), {"minutes": d["minutes"], "extra": extra}
+        if ev == "work":
+            return "focus_back", {"minutes": d["minutes"], "cycle": d["cycle"]}
+        return "focus_done", {"minutes": d["minutes"], "extra": extra}
+
+    def _gaming_end(self, summary: dict) -> tuple[str, dict]:
+        from .focus import held_summary
+        held = held_summary(summary.get("held") or [])
+        return "gaming_done", {"minutes": summary["minutes"], "extra": f" While you played, {held}." if held else ""}
 
     def _release_heavy_models(self) -> None:
         """OCR and the meaning model are only needed during an indexing pass (and a search): free them after."""
@@ -1093,6 +1207,8 @@ def main() -> None:
 
     def deliver_alert(a, text):
         """Monitoring alert -> HUD flash + last line, Windows notification (tray), command bar if no tray."""
+        if a.level != "critical" and not jarvis.notify_or_hold("alert", text):
+            return                                       # focus / gaming: kept for the summary afterwards
         if hud is not None:
             state = "alert" if a.level in ("critical", "warning") else "success"
             bar.post("call", lambda: (hud.set_state(state, 6), hud.set_last(text)))
@@ -1121,12 +1237,16 @@ def main() -> None:
             jarvis.hooks["state"] = lambda state, hold=0.0: bar.post("call", lambda: hud.set_state(state, hold))
             jarvis.hooks["last"] = lambda text: bar.post("call", lambda: hud.set_last(text))
             jarvis.hooks["hud_toggle"] = lambda: bar.post("call", hud.toggle)
+            jarvis.hooks["focus_hud"] = lambda text: bar.post("call", lambda: hud.set_focus(text))
+            jarvis.hooks["hud_hide"] = lambda hide: bar.post("call", lambda: hud.game_hide(hide))
             HotkeyThread(config.hud_hotkey, lambda: bar.post("call", hud.toggle), hotkey_id=2).start()
         except Exception as e:     # never let the HUD stop Jarvis from starting
             log.warning("HUD unavailable: %s", e)
             hud = None
 
     def on_reminder(text):
+        if not jarvis.notify_or_hold("reminder", text):  # only with "no interruptions at all"
+            return
         bar.post("reminder", text)
         if hud is not None:
             bar.post("call", lambda: (hud.set_state("alert", 4), hud.set_last(text)))
@@ -1136,6 +1256,8 @@ def main() -> None:
 
     def deliver_briefing(kind, text):
         """Full text in the command bar, the gist on the HUD and as a Windows notification."""
+        if not jarvis.notify_or_hold("briefing", text):
+            return
         bar.post("message", text)
         gist = briefing.short(text)
         if hud is not None:
@@ -1147,7 +1269,11 @@ def main() -> None:
                 pass
 
     from .ui.command_bar import Toast
-    improver_msg = lambda text: bar.post("call", lambda: Toast(bar.root, "Model update", text, seconds=30))  # noqa
+    def toast(title, text, seconds=10):
+        """Jarvis's own notices: held back during focus / gaming, then summarised."""
+        if jarvis.notify_or_hold("toast", f"{title}: {text}"):
+            bar.post("call", lambda: Toast(bar.root, title, text, seconds=seconds))
+    improver_msg = lambda text: toast("Model update", text, 30)  # noqa: E731
     if not args.safe_mode:
         watchdog.register("briefings", jarvis.start_briefings(deliver_briefing),
                           lambda: jarvis.start_briefings(deliver_briefing))
@@ -1155,7 +1281,9 @@ def main() -> None:
         watchdog.register("self-improvement", jarvis.start_improver(improver_msg),
                           lambda: jarvis.start_improver(improver_msg))
         watchdog.register("backups", jarvis.start_maintenance(), jarvis.start_maintenance)
-        yield_msg = lambda text: bar.post("call", lambda: Toast(bar.root, "Training paused", text, seconds=8))  # noqa
+        yield_msg = lambda text: toast("Training paused", text, 8)  # noqa: E731
+        focus_say = lambda text: bar.post("message", text)  # noqa: E731
+        watchdog.register("focus", jarvis.start_focus_ticker(focus_say), lambda: jarvis.start_focus_ticker(focus_say))
         watchdog.register("yield", jarvis.start_yield(yield_msg), lambda: jarvis.start_yield(yield_msg))
     watchdog.start()
     bar.results_provider = jarvis.take_results

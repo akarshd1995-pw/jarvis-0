@@ -263,7 +263,60 @@ WORKSPACE_RULES: list[tuple[re.Pattern, callable]] = [
      lambda m, t: _ws("start", next(g for g in m.groups() if g))),
 ]
 
-RULES: list[tuple[re.Pattern, callable]] = NOTE_RULES + WORKSPACE_RULES + CONTEXT_RULES + [
+# ---- phase 32: focus & gaming
+_DUR = (r"(?:(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h|ghante?)\b|(\d+)\s*(?:minutes?|mins?|m|minute)\b|(an hour|one hour|ek ghanta)"
+        r"|(half an hour|aadha ghanta|30 min)|(two hours|do ghante))")
+
+
+def _minutes(text: str) -> int | None:
+    m = re.search(_DUR, text, re.I)
+    if not m:
+        return None
+    h, mins, one, half, two = m.groups()
+    if h:
+        return round(float(h) * 60)
+    if mins:
+        return int(mins)
+    return 60 if one else 30 if half else 120 if two else None
+
+
+def _focus(text: str) -> str:
+    t = text.lower()
+    args = ["action=start"]
+    n = _minutes(t)
+    if n:
+        args.append(f"minutes={n}")
+    if "pomodoro" in t:
+        args.append("mode=pomodoro")
+    if re.search(r"without block|no block|don'?t block|bina block", t):
+        args.append("block=no")
+    elif re.search(r"\bblock|strict|no distractions|distraction[- ]free", t):
+        args.append("block=yes")
+    if re.search(r"no interruptions at all|completely quiet|total(?:ly)? quiet|not even reminders|koi disturb nahi", t):
+        args.append("quiet=total")
+    return f"focus({', '.join(args)})"
+
+
+FOCUS_RULES: list[tuple[re.Pattern, callable]] = [
+    (re.compile(r"^(?:stop|end|cancel|finish|exit|quit) (?:the |my )?(?:focus(?: mode| session)?|pomodoro|deep work)$"
+                r"|^(?:focus|pomodoro)(?: mode)? off$|^i'?m done focusing$|^focus (?:mode )?band karo$", re.I),
+     lambda m, t: "focus(action=stop)"),
+    (re.compile(r"^how (?:long|much (?:time|focus time)) (?:is |do i have )?left(?: in (?:my )?(?:focus|pomodoro|this session))?\??$"
+                r"|^focus status$|^how long have i been focusing\??$|^(?:focus ka )?kitna time bacha hai\??$", re.I),
+     lambda m, t: "focus(action=status)"),
+    (re.compile(r"^(?:(?:turn on|start|enable|switch to|activate) )?(?:gaming|game) mode(?: on| please)?$"
+                r"|^i'?m (?:going to|gonna) (?:play|game)(?: now)?$|^gaming mode (?:on|chalu) karo$", re.I),
+     lambda m, t: "gaming(action=on)"),
+    (re.compile(r"^(?:(?:turn off|stop|end|disable|exit) )?(?:gaming|game) mode(?: off)?$|^(?:i'?m )?done gaming$"
+                r"|^gaming mode band karo$", re.I),
+     lambda m, t: "gaming(action=off)" if re.search(r"off|stop|end|disable|exit|done|band", t, re.I) else "gaming(action=on)"),
+    (re.compile(r"^(?:(?:start|begin|turn on|enable) )?(?:a |my )?(?:focus(?: mode| session)?|pomodoro|deep work)\b.*$"
+                r"|^(?:i (?:need|want) to|let me|help me) focus\b.*$|^focus (?:for|karna hai|karna|karo)\b.*$"
+                r"|^.*\bfocus (?:karna hai|karo)$|^do not disturb for .+$", re.I),
+     lambda m, t: _focus(t)),
+]
+
+RULES: list[tuple[re.Pattern, callable]] = FOCUS_RULES + NOTE_RULES + WORKSPACE_RULES + CONTEXT_RULES + [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
     (re.compile(r"^(?!.*\btraining\b)(?:(?:hey )?jarvis,? )?(?:what(?:'s| is) the |show (?:me )?the |give me (?:the )?|get (?:me )?(?:the )?)?"
                 r"(?:(?:fastest|quickest|best|shortest) )?(?:route|way|directions?|road)(?: please)? (?:from .+ )?to .+$"

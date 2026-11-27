@@ -66,12 +66,32 @@ class HUD:
         self._refresh()
 
     # ------------------------------------------------------------------ public API (call on the UI thread)
+    focus_text: str | None = None              # phase 32: "FOCUS 23:12" replaces READY while a session runs
+
     def set_state(self, state: str, hold_s: float = 0.0):
         self.state = state if state in STATE_COLORS else "idle"
         self.state_until = time.time() + hold_s if hold_s else 0.0
         col = STATE_COLORS[self.state]
-        self.c.itemconfigure(self.state_label, text=STATE_LABELS[self.state], fill=col)
+        label = STATE_LABELS[self.state]
+        if self.focus_text and self.state == "idle":
+            label, col = self.focus_text, Th.VIOLET
+        self.c.itemconfigure(self.state_label, text=label, fill=col)
         self.c.itemconfigure(self.state_dot, fill=col)
+
+    def set_focus(self, text: str | None):
+        self.focus_text = text
+        if self.state == "idle":
+            self.set_state("idle")
+
+    def game_hide(self, hide: bool):
+        """Gaming mode: out of the way while you play, back afterwards (if it was showing)."""
+        if hide and self.visible:
+            self._was_visible = True
+            self.toggle()
+        elif not hide and getattr(self, "_was_visible", False):
+            self._was_visible = False
+            if not self.visible:
+                self.toggle()
 
     def set_last(self, text: str):
         self.last_text, self.last_time = text, dt.datetime.now()

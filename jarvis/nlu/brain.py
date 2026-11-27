@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 RULES_FIRST = {"window", "desktop", "media", "brightness", "set_volume", "radio", "screenshot", "screen_record",
                "power", "training", "briefing", "maintenance", "directions",
-               "note", "find_notes", "delete_note", "workspace"}
+               "note", "find_notes", "delete_note", "workspace", "focus", "gaming"}
 # New values of an action the model already knows: rules handle them until the model learned that feature
 NEW_VALUES = {("training", "review"): "usage_review"}
 PLAY_WORDS = re.compile(r"\b(play|put on|stream|start playing|chalao|chala do|bajao|lagao|sunao|play karo)\b", re.I)

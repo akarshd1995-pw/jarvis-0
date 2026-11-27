@@ -133,6 +133,26 @@ def place(hwnd: int, rect: list[int], state: str = "normal") -> bool:
     return bool(u.SetWindowPlacement(hwnd, ctypes.byref(wp)))
 
 
+def foreground() -> Win | None:
+    """The window in front right now (None off Windows or for the desktop)."""
+    if not IS_WINDOWS:
+        return None
+    ctypes, wintypes, u, _, _, _ = _api()
+    hwnd = u.GetForegroundWindow()
+    if not hwnd:
+        return None
+    n = u.GetWindowTextLengthW(hwnd)
+    title = ctypes.create_unicode_buffer(n + 1)
+    u.GetWindowTextW(hwnd, title, n + 1)
+    return Win(int(hwnd), _exe_of(hwnd), title.value, [0, 0, 0, 0])
+
+
+def minimize(hwnd: int) -> None:
+    if IS_WINDOWS:
+        import ctypes
+        ctypes.windll.user32.ShowWindow(hwnd, 6)                            # SW_MINIMIZE
+
+
 def close(hwnd: int) -> None:
     """Ask the app to close this window, as clicking X does (it can still ask to save your work)."""
     if IS_WINDOWS:

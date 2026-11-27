@@ -122,6 +122,10 @@ class Executor:
             try:
                 if inverse.get("op") in ("note_forget", "note_restore"):          # phase 30: notes
                     self.store.set_note_deleted(inverse["id"], inverse["op"] == "note_forget")
+                elif inverse.get("op") == "focus_stop":                          # phase 32: end focus & blocking
+                    from . import focus as F
+                    if F.CURRENT is not None:
+                        F.CURRENT.stop("undone")
                 elif str(inverse.get("op", "")).startswith("workspace_"):        # phase 31: windows / layouts
                     from .actions.workspace import undo_op
                     undo_op(self.config, inverse)

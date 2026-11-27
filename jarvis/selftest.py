@@ -36,6 +36,7 @@ DRY = {
     "unsupported": 'unsupported(request="order a pizza")', "unknown": "unknown()",
     "mood": "mood(kind=happy)", "open_result": "open_result(n=1)",
     "workspace": 'workspace(action=start, name="coding")',
+    "focus": "focus(action=start, minutes=25, block=yes)", "gaming": "gaming(action=on)",
 }
 LIVE_ACTIONS = {"list_files", "move_files", "copy_files", "delete_files", "remind", "search_memory", "undo",
                 "open_result", "note", "find_notes", "delete_note"}
@@ -182,6 +183,13 @@ def run(log=print) -> list[Check]:
                 back = reply_ok("undo()")[0] and "call the bank" in j.handle('find_notes(query="bank")')
                 return all((ok1, ok2, found, gone, back)), r[:100]
             check("notes: save, find, delete, undo", notes)
+
+            def focus():                                    # phase 32: a session, its status, undo ends it
+                a = reply_ok("focus(action=start, minutes=30)")[0] and j.focus.session is not None
+                b = "left" in j.handle("focus(action=status)")
+                c = reply_ok("undo()")[0] and j.focus.session is None
+                return a and b and c, ""
+            check("focus: start, status, undo", focus)
             # 5. everything else as a preview
             from .actions.base import Ctx
             ctx = Ctx(cfg, j.store, "selftest")

@@ -112,6 +112,12 @@ class Config:
     pause_heavy_on_battery: bool = True
     workspace_apps: dict = field(default_factory=lambda: {        # what "coding mode" / "study mode" open
         "coding": ["cursor", "claude", "chrome", "terminal"], "study": ["chrome", "notepad"]})
+    focus_minutes: int = 25               # phase 32: a focus session without a length
+    focus_block: bool = False             # block distracting apps/sites during focus unless you say otherwise
+    focus_block_sites: list = field(default_factory=lambda: ["youtube", "instagram", "netflix", "reddit", "facebook",
+                                                             "twitter", "x.com", "hotstar", "twitch"])
+    focus_block_apps: list = field(default_factory=lambda: ["steam.exe", "epicgameslauncher.exe", "discord.exe"])
+    gaming_auto: bool = True              # turn gaming mode on when a full-screen game starts
     bar_pos: list | None = None           # where you dragged the command bar (None: centre of your monitor)
     bar_mini_pos: list | None = None      # where its minimized orb sits
     use_int8: bool = True                 # phase 41: the smaller, faster int8 model copies when they exist

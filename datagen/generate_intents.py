@@ -1023,7 +1023,7 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes", "workspaces"]
+           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes", "workspaces", "focus_gaming"]
 
 
 # ---------------------------------------------------------------- directions (routes, travel time)
@@ -1473,6 +1473,89 @@ def gen_workspace(c: Ctx):
     return "workspace(action=list)", rng.choice(WS_LIST), {}
 
 
+# ---------------------------------------------------------------- focus & gaming (phase 32)
+FOCUS_DUR = [(15, ["15 minutes", "15 mins", "fifteen minutes"]), (20, ["20 minutes", "20 min"]),
+             (25, ["25 minutes", "25 mins"]), (30, ["30 minutes", "half an hour", "30 mins", "aadha ghanta"]),
+             (40, ["40 minutes"]), (45, ["45 minutes", "45 mins", "forty five minutes"]), (50, ["50 minutes"]),
+             (60, ["an hour", "1 hour", "one hour", "60 minutes", "ek ghanta"]), (90, ["90 minutes", "1.5 hours", "an hour and a half"]),
+             (120, ["2 hours", "two hours", "do ghante"]), (180, ["3 hours"])]
+FOCUS_START = frames("FOCUS_START", [
+    "focus for {d}", "start a focus session for {d}", "i need to focus for {d}", "deep work for {d}",
+    "focus mode for {d}", "let me focus for {d}",
+    "lock in for {d}",                                             # 6 val_ood
+    "i want {d} of deep work",                                     # 7 test_ood
+    "help me focus for {d}", "start focusing for {d}", "focus session {d}", "{d} focus session", "{d} of focus",
+    "do not disturb for {d}",
+    "i'm locking in for {d}",                                      # val_ood
+    "give me {d} without distractions",                            # test_ood
+    "begin a {d} focus block", "time to focus for {d}", "i'll work for {d}, keep me focused", "start {d} of focus",
+    "lock in, {d}", "{d} of deep work", "no distractions for {d}", "give me {d} to focus",
+    "i want to focus for {d}", "i'm going to focus for {d}", "{d} with no distractions", "give me {d} of focus",
+    "{d} without any distractions", "start locking in for {d}", "no distractions please, {d}", "i'm working for {d}",
+    "please let me focus for {d}", "working for {d}, focus please",
+])
+FOCUS_PLAIN = ["focus mode", "focus mode on", "start focusing", "i need to focus", "start a focus session",
+               "deep work mode", "help me focus", "let me focus", "turn on focus mode", "focus time",
+               "focus karna hai", "focus mode chalu karo", "lock in"]
+POMO = ["start a pomodoro", "pomodoro", "start pomodoro", "pomodoro mode", "begin a pomodoro session",
+        "pomodoro timer please", "pomodoro chalu karo"]
+POMO_DUR = ["pomodoro with {d} rounds", "pomodoro for {d}", "{d} pomodoro", "start a {d} pomodoro"]
+BLOCK_YES = [" and block distractions", " and block youtube", ", strict mode", " and block social media",
+             ", no distractions", " and block my distracting apps"]
+BLOCK_NO = [" without blocking anything", " but don't block anything", ", no blocking"]
+TOTAL = [", no interruptions at all", ", not even reminders", ", completely quiet", ", koi disturb nahi"]
+FOCUS_HI = ["{d} focus karna hai", "{d} ke liye focus mode on karo", "{d} tak disturb mat karna", "{d} padhai karni hai, focus mode"]
+FOCUS_STOP = ["stop focus", "end focus mode", "focus mode off", "i'm done focusing", "stop the pomodoro", "end my focus session",
+              "cancel focus", "finish the focus session", "focus band karo", "pomodoro band karo", "stop deep work"]
+FOCUS_STATUS = ["how long is left", "how much time is left in my focus", "focus status", "how long have i been focusing",
+                "how much focus time is left", "time left in this session", "kitna time bacha hai", "focus kitna bacha hai"]
+GAME_ON = ["gaming mode on", "gaming mode", "start gaming mode", "i'm going to play", "game mode on", "i'm gonna game now",
+           "turn on gaming mode", "gaming mode chalu karo", "time to play some games"]
+GAME_OFF = ["gaming mode off", "done gaming", "stop gaming mode", "i'm done playing", "turn off gaming mode", "exit game mode",
+            "gaming mode band karo"]
+
+
+def gen_focus(c: Ctx):
+    rng = c.rng
+    r = rng.random()
+    if r < 0.55:
+        args: dict = {"action": "start"}
+        k = rng.random()
+        if k < 0.6:
+            mins, says = rng.choice(FOCUS_DUR)
+            d = rng.choice(says)
+            args["minutes"] = mins
+            text = (rng.choice(FOCUS_HI) if c.hing else c.T(FOCUS_START)).format(d=d)
+        elif k < 0.75:
+            text = rng.choice(FOCUS_PLAIN)
+        else:
+            args["mode"] = "pomodoro"
+            if rng.random() < 0.4:
+                mins, says = rng.choice(FOCUS_DUR[:7])
+                args["minutes"] = mins
+                text = rng.choice(POMO_DUR).format(d=rng.choice(says))
+            else:
+                text = rng.choice(POMO)
+        x = rng.random()
+        if not c.hing and x < 0.18:
+            args["block"] = "yes"
+            text += rng.choice(BLOCK_YES)
+        elif not c.hing and x < 0.25:
+            args["block"] = "no"
+            text += rng.choice(BLOCK_NO)
+        if not c.hing and rng.random() < 0.08:
+            args["quiet"] = "total"
+            text += rng.choice(TOTAL)
+        return dsl_call("focus", args), text, {}
+    if r < 0.7:
+        return "focus(action=stop)", rng.choice(FOCUS_STOP), {}
+    if r < 0.82:
+        return "focus(action=status)", rng.choice(FOCUS_STATUS), {}
+    if r < 0.93:
+        return "gaming(action=on)", rng.choice(GAME_ON), {}
+    return "gaming(action=off)", rng.choice(GAME_OFF), {}
+
+
 # ---------------------------------------------------------------- maintenance (phase 29)
 HEALTH = frames("HEALTH", [
     "run a health check", "health check", "check yourself", "are you working properly", "run diagnostics",
@@ -1558,7 +1641,7 @@ GENERATORS = [
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6), (gen_workspace, 5),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6), (gen_workspace, 5), (gen_focus, 5),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",

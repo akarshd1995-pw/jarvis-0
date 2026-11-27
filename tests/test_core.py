@@ -2742,3 +2742,150 @@ def test_workspace_names_normalise():
     from jarvis.workspaces import norm
     assert norm("Coding Mode") == "coding" == norm("my coding workspace") == norm("code")
     assert norm("video editing") == "video editing"
+
+
+# ---------------------------------------------------------------- phase 32: focus & gaming
+class _Clock:
+    def __init__(self):
+        self.t = 1_000_000.0
+
+    def __call__(self):
+        return self.t
+
+
+def test_focus_single_session_and_do_not_disturb():
+    from jarvis.focus import Engine
+    clk, logged = _Clock(), []
+    e = Engine(clock=clk, log=lambda k, d: logged.append((k, d)))
+    e.start(45)
+    assert e.countdown() == "FOCUS 45:00" and e.quiet("briefing") and not e.quiet("reminder")
+    assert e.hold("toast", "Model update: v003 is live") and not e.hold("reminder", "stand up")
+    clk.t += 20 * 60
+    assert e.tick() == [] and e.status()["focused_min"] == 20
+    clk.t += 25 * 60 + 1
+    (ev, summary), = e.tick()
+    assert ev == "done" and summary["minutes"] == 45 and summary["held"] == [("toast", "Model update: v003 is live")]
+    assert e.session is None and not e.quiet("briefing")
+    assert logged == [("focus_session", {"minutes": 45.0, "mode": "single"})]   # not "focus": that's app time
+
+
+def test_pomodoro_cycles_with_a_long_break_every_fourth():
+    from jarvis.focus import Engine
+    clk = _Clock()
+    e = Engine(clock=clk)
+    e.start(mode="pomodoro")
+    seen = []
+    for _ in range(8):
+        clk.t = e.session.phase_end + 1
+        for ev, d in e.tick():
+            seen.append((ev, d.get("minutes")))
+    assert seen == [("break", 5), ("work", 25), ("break", 5), ("work", 25), ("break", 5), ("work", 25),
+                    ("break", 15), ("work", 25)]
+    assert not e.quiet("toast") or e.session.phase == "work"
+    summary = e.stop()
+    assert summary["cycles"] == 5 and summary["minutes"] >= 100
+
+
+def test_gentle_blocking_matches_whole_words_only_while_focusing():
+    from jarvis.focus import Engine
+    e = Engine(clock=_Clock())
+    assert e.blocked("YouTube - Google Chrome", "C:/chrome.exe") is None          # not focusing
+    e.start(30, block=True)
+    assert e.blocked("lofi beats - YouTube - Google Chrome", "C:/Chrome/chrome.exe") == "Youtube"
+    assert e.blocked("Steam", "C:\\\\Steam\\\\steam.exe") == "Steam"
+    assert e.blocked("Netflixing the docs - Notion", "notion.exe") is None        # whole words only
+    assert e.blocked("jarvis - Cursor", "cursor.exe") is None
+    e.start(30, block=False)
+    assert e.blocked("YouTube - Chrome", "chrome.exe") is None
+
+
+def test_gaming_mode_holds_notices_and_summarises():
+    from jarvis.focus import Engine, held_summary
+    clk = _Clock()
+    e = Engine(clock=clk)
+    assert e.gaming_on(auto=True) and not e.gaming_on()
+    assert e.hold("briefing", "Good evening. 3 reminders today.") and not e.hold("reminder", "call mom")
+    clk.t += 40 * 60
+    s = e.gaming_off()
+    assert s["minutes"] == 40 and "1 briefing came in" in held_summary(s["held"])
+
+
+def test_focus_through_jarvis_ask_status_stop_undo(tmp_path):
+    j = _jarvis(tmp_path)
+    j.config.show_details = False
+    out = j.handle("focus for 45 minutes")
+    assert "Focusing for 45 minutes" in out and "reminders still come through" in out
+    assert "left" in j.handle("how long is left")
+    assert not j.notify_or_hold("briefing", "Good evening")                       # held during focus
+    out = j.handle("stop focus")
+    assert "Focus ended" in out and "Good evening" in out                         # ...and summarised after
+    asked = []
+    j.executor.confirm = lambda *a: asked.append(a) or True
+    out = j.handle("focus for an hour and block youtube")
+    assert asked and "youtube" in str(asked[0]).lower() and "pause" in out.lower()   # blocking asks first
+    j.handle("undo")
+    assert j.focus.session is None                                                # undo ends it
+    assert "gaming mode on" in j.handle("gaming mode on").lower()
+    assert "gaming mode off" in j.handle("gaming mode off").lower()
+
+
+def test_focus_ticker_minimizes_a_blocked_window(tmp_path, monkeypatch):
+    import jarvis.daemon as D
+    from jarvis import machine, winlayout
+    j = _jarvis(tmp_path)
+    j.focus.start(30, block=True)
+    fg = winlayout.Win(77, "C:/Chrome/chrome.exe", "Shorts - YouTube - Google Chrome", [0, 0, 1, 1])
+    monkeypatch.setattr(winlayout, "foreground", lambda: fg)
+    minimized, said = [], []
+    monkeypatch.setattr(winlayout, "minimize", minimized.append)
+    monkeypatch.setattr(machine, "fullscreen_busy", lambda: None)
+
+    class Stop(BaseException):
+        pass
+
+    def one_tick(s):
+        raise Stop()
+    monkeypatch.setattr(D.time, "sleep", one_tick)
+    import threading
+    errors = []
+    old = threading.excepthook
+    threading.excepthook = lambda a: errors.append(a.exc_type)
+    try:
+        j.start_focus_ticker(said.append).join(timeout=5)
+    finally:
+        threading.excepthook = old
+    assert minimized == [77] and "on pause until" in said[0]
+
+
+def test_evening_briefing_counts_focus_time_not_app_time(tmp_path):
+    from jarvis.briefing import gather
+    from jarvis.store import Store
+    import time as _t
+    s = Store(tmp_path / "j.db", encrypt=False)
+    s.log_event("focus", {"app": "chrome.exe"})                                   # app-focus tracking
+    s.log_event("focus_session", {"minutes": 50.0, "mode": "single"})
+    s.log_event("focus_session", {"minutes": 25.0, "mode": "pomodoro"})
+    f = gather("evening", s, None, {}, tmp_path / "none.txt", None, _t.time())
+    assert f.focus_min == 75.0
+
+
+def test_focus_rules_and_training_data():
+    import random
+    from datagen.generate_intents import TEACHES, gen_focus, Ctx
+    from jarvis.dsl.grammar import canonical
+    from jarvis.nlu.rule_parser import rule_parse
+    cases = {"focus for 45 minutes": "focus(action=start, minutes=45)",
+             "deep work for 1.5 hours": "focus(action=start, minutes=90)",
+             "start a pomodoro": "focus(action=start, mode=pomodoro)",
+             "focus for an hour and block youtube": "focus(action=start, block=yes, minutes=60)",
+             "aadha ghanta focus karna hai": "focus(action=start, minutes=30)",
+             "stop focus": "focus(action=stop)", "how long is left": "focus(action=status)",
+             "gaming mode on": "gaming(action=on)", "done gaming": "gaming(action=off)"}
+    for text, want in cases.items():
+        assert str(rule_parse(text)) == want, (text, rule_parse(text))
+    assert "workspace" not in str(rule_parse("focus mode")) and "workspace" not in str(rule_parse("gaming mode"))
+    assert "focus_gaming" in TEACHES
+    r = random.Random(3)
+    progs = [canonical(gen_focus(Ctx(r, "train"))[0]) for _ in range(1000)]
+    for bit in ("minutes=", "mode=pomodoro", "block=yes", "quiet=total", "action=stop", "action=status", "gaming(action=on)"):
+        assert any(bit in p for p in progs), bit

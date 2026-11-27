@@ -103,6 +103,8 @@ class Jarvis:
         F.CURRENT = self.focus
         from .vocab import Vocab                       # phase 43: your words
         self.vocab = Vocab.load(config.data_dir)
+        from . import vocab as _V
+        _V.CURRENT = self.vocab
         config.learned_places = self.vocab.places()
         REGISTRY["vocab"] = self._vocab_action
         REGISTRY["focus"] = self._focus_action

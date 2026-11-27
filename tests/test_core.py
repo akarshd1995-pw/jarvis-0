@@ -3096,3 +3096,13 @@ def test_personal_examples_reach_the_dataset(monkeypatch):
     r = random.Random(0)
     progs = [G.sample(r)["program"] for _ in range(4000)]
     assert any('"zorblax"' in p for p in progs)
+
+
+def test_nickname_undo_with_coarse_windows_timestamps(tmp_path, monkeypatch):
+    from jarvis.vocab import Vocab
+    monkeypatch.setattr(Vocab, "_stamp", staticmethod(lambda path: (1, 1)))    # quick writes look unchanged
+    j = _jarvis(tmp_path)
+    j.handle('vocab(action=teach, word="dl", means="downloads")')
+    assert j.read_as("dl kholo") == "downloads kholo"
+    j.handle("undo()")
+    assert j.read_as("dl kholo") == "dl kholo"

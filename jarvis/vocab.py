@@ -20,6 +20,7 @@ from collections import Counter
 from pathlib import Path
 
 REFRESH_S = 7 * 86400
+CURRENT: "Vocab | None" = None        # the running Jarvis's vocabulary: undo changes it directly
 SKIP_DIRS = {"appdata", "node_modules", ".venv", "venv", "__pycache__", ".git", ".cache", "site-packages", "$recycle.bin",
              "onedrive - personal", ".jarvis0", "anaconda3", "miniconda3", ".vscode", ".cursor", "go", ".npm"}
 
@@ -35,17 +36,23 @@ class Vocab:
         self.data = {"aliases": {}, "typos": {}, "apps": [], "projects": {}, "folders": {}, "refreshed": 0}
         self._read()
 
+    @staticmethod
+    def _stamp(path: Path):
+        st = path.stat()
+        return st.st_mtime_ns, st.st_size
+
     def _read(self) -> None:
         try:
             self.data.update(json.loads(self.path.read_text(encoding="utf-8")))
-            self._mtime = self.path.stat().st_mtime
+            self._mtime = self._stamp(self.path)
         except (OSError, ValueError):
             pass
 
     def reload_if_changed(self) -> None:
-        """Another part of Jarvis (undo) changed the file: read it again."""
+        """Something else changed the file (another Jarvis process, an edit): read it again. Windows timestamps
+        can stay the same for quick writes, so size counts too; undo inside Jarvis uses CURRENT instead."""
         try:
-            if self.path.stat().st_mtime != self._mtime:
+            if self._stamp(self.path) != self._mtime:
                 self._read()
         except OSError:
             pass
@@ -60,7 +67,7 @@ class Vocab:
         tmp.write_text(json.dumps(self.data, indent=1, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self.path)
         try:
-            self._mtime = self.path.stat().st_mtime
+            self._mtime = self._stamp(self.path)
         except OSError:
             pass
 

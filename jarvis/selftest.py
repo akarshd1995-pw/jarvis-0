@@ -202,10 +202,12 @@ def run(log=print) -> list[Check]:
             check("tasks: add, list, done, undo", tasks)
 
             def words():                                    # phase 43: a nickname works at once; Devanagari reads
-                a = reply_ok('vocab(action=teach, word="dl", means="downloads")')[0]
-                b = j.read_as("dl kholo") == "downloads kholo" and j.read_as("डाउनलोड्स खोलो") == "downloads kholo"
-                c = reply_ok("undo()")[0] and j.read_as("dl kholo") == "dl kholo"
-                return a and b and c, ""
+                steps = {"teach": reply_ok('vocab(action=teach, word="dl", means="downloads")')[0],
+                         "nickname used": j.read_as("dl kholo") == "downloads kholo",
+                         "Devanagari": j.read_as("डाउनलोड्स खोलो") == "downloads kholo",
+                         "undo": reply_ok("undo()")[0] and j.read_as("dl kholo") == "dl kholo"}
+                bad = [k for k, ok in steps.items() if not ok]
+                return not bad, "failed: " + ", ".join(bad) if bad else ""
             check("your words: nickname, Devanagari, undo", words)
             # 5. everything else as a preview
             from .actions.base import Ctx

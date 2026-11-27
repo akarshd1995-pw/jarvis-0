@@ -34,10 +34,12 @@ def _part_of_day(now: dt.datetime) -> str:
     return "morning" if 4 <= h < 12 else "afternoon" if h < 17 else "evening"
 
 
-def smalltalk(text: str, p: Persona, now: dt.datetime | None = None) -> str | None:
+def smalltalk(text: str, p: Persona, now: dt.datetime | None = None, only: tuple[str, ...] | None = None) -> str | None:
     t = text.lower().strip()
     now = now or dt.datetime.now()
     for intent, pat in _PATTERNS:
+        if only is not None and intent not in only:
+            continue
         if not pat.search(t):
             continue
         a = f", {p.address}" if p.address and p.tone == "butler" else ""

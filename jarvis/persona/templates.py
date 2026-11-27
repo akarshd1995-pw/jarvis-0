@@ -89,6 +89,8 @@ T: dict[str, dict[str, list[str]]] = {
         "well_limit_warn": ["About {left} minutes of {app} left for today{A}."],
         "well_limit_hit": ["That's your {minutes} minutes of {app} for today{A}."],
         "well_winddown": ["It's {now}{A}, later than you usually stop (around {usual}). Maybe start winding down?"],
+        "chat_web": ["I don't know that offline{A}. Shall I search the web?",
+                     "That's beyond what I know here{A}. Want me to search online?"],
         "care_disk": ["{Drives}.{A} Biggest folders: {big}.{hint}"],
         "care_cleaned": ["Cleared {size} ({count} {files}){A}.{skipped} They're in my trash: say \"undo\" to bring them back."],
         "care_clean_none": ["Nothing to clean up{A}: no old temp files, old installers or duplicate downloads."],
@@ -208,6 +210,7 @@ T: dict[str, dict[str, list[str]]] = {
         "well_eyes": ["Eye break! 20 feet, 20 seconds."], "well_stretch": ["{Minutes} min straight. Stretch break!"],
         "well_limit_warn": ["{Left} min of {app} left today."], "well_limit_hit": ["{App} time's up for today."],
         "well_winddown": ["It's {now}, past your usual {usual}. Wind down?"],
+        "chat_web": ["Not sure! Want me to search the web?"],
         "care_disk": ["{Drives}. Biggest: {big}.{hint}"], "care_cleaned": ["Freed {size}!{skipped} Undo brings them back."],
         "care_clean_none": ["All clean already!"], "care_trash_emptied": ["Trash emptied: {size}."],
         "care_trash_none": ["Trash is already tidy."], "care_temps": ["GPU peak {top}° ({when}). Highs: {highs}.{extra}{now}"],
@@ -249,6 +252,7 @@ T: dict[str, dict[str, list[str]]] = {
     },
     # ------------------------------------------------------------------------------ minimal
     "minimal": {
+        "chat_web": ["Search the web for it?"],
         "move": ["Moved {count} {files} to {dest}."], "copy": ["Copied {count} {files} to {dest}."],
         "delete": ["Deleted {count} {files} from {src}. Undo available."],
         "none": ["No {files_pl}{filt} in {src}."], "list": ["{Count} {files}{filt} in {src}: {items}."],

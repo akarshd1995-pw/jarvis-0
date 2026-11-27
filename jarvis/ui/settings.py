@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import re
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -9,6 +10,30 @@ from tkinter import messagebox, ttk
 from .. import autostart
 from ..config import Config
 from . import theme as T
+
+
+
+def lm_status(folder: Path | None = None) -> str:
+    """One line on Jarvis-LM's training, for the Settings page (phase 27)."""
+    folder = folder or Path(__file__).resolve().parents[2] / "checkpoints"
+    try:
+        meta = json.loads((folder / "lm_chat.json").read_text(encoding="utf-8"))
+        ev = meta.get("eval") or {}
+        if meta.get("ready"):
+            return f"Ready: our own {meta.get('params', 0) / 1e6:.0f}M-parameter chat model handles small talk."
+        return (f"Trained, but below the bar (handoff {ev.get('handoff', 0):.0%}, replies {ev.get('reply_rate', 0):.0%}); "
+                "using fixed lines. More pretraining usually fixes it.")
+    except (OSError, ValueError):
+        pass
+    try:
+        st = json.loads((folder / "lm_state.json").read_text(encoding="utf-8"))
+        if st.get("stage") == "pretraining" and st.get("tokens_planned"):
+            return f"Pretraining: {st.get('tokens', 0) / st['tokens_planned']:.0%} done. Run train_lm.bat at night to continue."
+        if st.get("stage") == "pretrained":
+            return "Pretrained; chat tuning runs next time you start train_lm.bat."
+    except (OSError, ValueError, ZeroDivisionError):
+        pass
+    return "Not trained yet: run train_lm.bat overnight (a few nights). Until then, fixed small-talk lines."
 
 
 class Toggle(tk.Canvas):
@@ -153,6 +178,7 @@ class SettingsWindow:
         self.p_addr = tk.StringVar(value=c.persona_address)
         self.p_tone = tk.StringVar(value=c.persona_tone)
         self.p_model = tk.BooleanVar(value=c.persona_model)
+        self.p_chat = tk.BooleanVar(value=c.chat_model)
         self.hud_on = tk.BooleanVar(value=c.hud_enabled)
         self.hud_corner = tk.StringVar(value=c.hud_corner)
         self.hud_alpha = tk.DoubleVar(value=c.hud_opacity)
@@ -230,6 +256,7 @@ class SettingsWindow:
             self._row(pg, "Tone", lambda p: self._combo(p, self.p_tone, ["butler", "friendly", "minimal"]))
             self._row(pg, "Use my trained reply model", tog(self.p_model),
                       "Fact-checked; falls back to templates when it's unsure.")
+            self._row(pg, "Chat with Jarvis-LM", tog(self.p_chat), lm_status())
         elif name == "HUD & alerts":
             self._title(pg, "HUD & alerts", "The overlay with the orb and gauges, and what it warns you about.")
             self._row(pg, "Show the HUD", tog(self.hud_on), "Toggle any time with Ctrl+Alt+H")
@@ -338,6 +365,7 @@ class SettingsWindow:
         c.persona_address, c.persona_tone = self.p_addr.get().strip(), self.p_tone.get()
         c.show_details = self.details.get()
         c.persona_model = self.p_model.get()
+        c.chat_model = self.p_chat.get()
         c.hud_enabled, c.hud_corner = self.hud_on.get(), self.hud_corner.get()
         c.hud_opacity, c.hud_click_through = round(self.hud_alpha.get(), 2), self.hud_ct.get()
         try:

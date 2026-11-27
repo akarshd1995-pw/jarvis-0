@@ -260,6 +260,15 @@ def run(log=print) -> list[Check]:
                 bad = [k for k, ok in steps.items() if not ok]
                 return not bad, "failed: " + ", ".join(bad) if bad else ""
             check("system care: temp cleanup, startup app, undo", system_care)
+
+            def chat_model():                               # phase 27: loads and answers within the rules, if trained
+                if not j.chat:
+                    return True, "not trained yet (fixed small-talk lines in use)"
+                from .nlg.chatfmt import problems
+                out = j.chat.reply("hello", [], name="Jarvis", address="sir", tone="butler", hour=10)
+                ok = out is None or out[0] in ("web", "cmd") or not problems(out[1])
+                return ok, f"{out} in {j.chat.stats['ms']:.0f} ms"
+            check("chat model (Jarvis-LM)", chat_model)
             # 5. everything else as a preview
             from .actions.base import Ctx
             ctx = Ctx(cfg, j.store, "selftest")

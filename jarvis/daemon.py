@@ -120,6 +120,11 @@ class Jarvis:
         dialog = Lazy(lambda: DialogModel.load(PROJECT_ROOT / "checkpoints"), "dialog model") \
             if config.dialog_model and (PROJECT_ROOT / "checkpoints" / "dialog_encoder.onnx").exists() else None
         self.conv = Conversation(dialog, clarify=config.clarify)
+        # phase 27: our own chat model for small talk (loads on first use; only if trained and above the bar)
+        self.chat = Lazy(self._load_chat_model, "chat model") if config.chat_model else None
+        self.chat_history: list[tuple[str, str]] = []
+        self._chat_at = 0.0
+        self._web_offer: str | None = None
         PERF.mark("jarvis ready")
         self.briefings = briefing.Scheduler(config.data_dir / "briefing_state.json", config.briefing_morning,
                                             config.briefing_evening, enabled=config.briefing_auto)
@@ -1035,8 +1040,50 @@ class Jarvis:
         self._hud(state, reply, hold=2)
         return self._with_details(reply, source, prog, report)
 
+    def _load_chat_model(self):
+        from .nlg.chat import ChatModel
+        return ChatModel.load(PROJECT_ROOT / "checkpoints")
+
+    def _chat(self, text: str) -> str | None:
+        """Jarvis-LM's reply to small talk, or None (not trained, below the bar, a command, nothing acceptable)."""
+        if self.chat is None or not self.config.chat_model or not self.chat:
+            return None
+        now = time.time()
+        if now - self._chat_at > 600:
+            self.chat_history = []                              # a new conversation after ten quiet minutes
+        try:
+            out = self.chat.reply(text, self.chat_history[-6:], name=self.config.persona_name,
+                                  address=self.config.persona_address, tone=self.config.persona_tone)
+        except Exception as e:                                   # a model problem must never break a reply
+            log.warning("chat model failed: %s", e)
+            return None
+        if out is None or out[0] == "cmd":
+            return None
+        if out[0] == "web":
+            self._web_offer = text
+            return self.persona.say("chat_web")
+        self.chat_history += [("U", text), ("J", out[1])]
+        self._chat_at = now
+        return out[1]
+
+    def _take_web_offer(self, text: str) -> str | None:
+        """After "I don't know that offline. Shall I search the web?", a yes runs the search."""
+        offer, self._web_offer = self._web_offer, None
+        if offer is None or not mood.YES.match(text.strip()):
+            return None
+        q = re.sub(r'["\\]', " ", offer).strip()
+        prog = parse(f'search_web(query="{q}")')
+        self.last_text, self.last_program = offer, str(prog)
+        report = self.executor.run(prog)
+        reply = self.persona.report(report)
+        self._hud("error" if report.failures else "success", reply, hold=2)
+        return reply
+
     def _handle(self, text: str) -> str:
         from .perf import PERF
+        searched = self._take_web_offer(text)
+        if searched is not None:
+            return searched
         followed = self._converse(text)
         if followed is not None:
             return followed
@@ -1059,7 +1106,12 @@ class Jarvis:
         self.store.log_event("command", {"text_len": len(text), "source": source,
                                          "program": str(prog) if prog else None})
         if prog is None or str(prog) == "unknown()":
-            reply = smalltalk(text, self.persona)
+            reply = smalltalk(text, self.persona, only=("time", "date"))     # exact facts stay with the rules
+            if reply is None:
+                with PERF.stage("chat"):
+                    reply = self._chat(text)
+            if reply is None:
+                reply = smalltalk(text, self.persona)
             if reply is not None:
                 source = "smalltalk"
             else:

@@ -8,6 +8,7 @@ tokens so times and durations ("18:30", "45m") compose predictably.
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 import re
 from collections import Counter, defaultdict
@@ -47,13 +48,27 @@ class BPETokenizer:
                 pair_counts[pair] += counts[wi]
                 where[pair].add(wi)
 
+        # Lazy max-heap of (count, pair): picks exactly what max(pair_counts) would (ties -> largest pair), but in
+        # O(log n) per merge instead of scanning every pair. Needed for the 16k-token chat vocabulary (phase 27).
+        heap = [(-c, -p[0], -p[1]) for p, c in pair_counts.items()]
+        heapq.heapify(heap)
+
+        def bump(pair):
+            c = pair_counts.get(pair)
+            if c:
+                heapq.heappush(heap, (-c, -pair[0], -pair[1]))
+
         merges = []
         n_merges = vocab_size - OFFSET - 256
         for m in range(n_merges):
-            if not pair_counts:
-                break
-            best, freq = max(pair_counts.items(), key=lambda kv: (kv[1], kv[0]))
-            if freq < 2:
+            best = None
+            while heap:
+                nc, na, nb = heapq.heappop(heap)
+                pair = (-na, -nb)
+                if pair_counts.get(pair) == -nc:
+                    best, freq = pair, -nc
+                    break
+            if best is None or freq < 2:
                 break
             new_id = OFFSET + 256 + m
             merges.append(best)
@@ -61,11 +76,13 @@ class BPETokenizer:
                 ids = words[wi]
                 c = counts[wi]
                 # remove old pair contributions for this word
+                touched = set()
                 for pair in zip(ids, ids[1:]):
                     pair_counts[pair] -= c
                     if pair_counts[pair] <= 0:
                         del pair_counts[pair]
                     where[pair].discard(wi)
+                    touched.add(pair)
                 # merge
                 out, i = [], 0
                 while i < len(ids):
@@ -79,6 +96,9 @@ class BPETokenizer:
                 for pair in zip(out, out[1:]):
                     pair_counts[pair] += c
                     where[pair].add(wi)
+                    touched.add(pair)
+                for pair in touched:
+                    bump(pair)
             where.pop(best, None)
             if verbose and (m + 1) % 250 == 0:
                 print(f"  merge {m + 1}/{n_merges}  freq={freq}")
@@ -95,6 +115,8 @@ class BPETokenizer:
             if rank == 1 << 30:
                 break
             ids = ids[:i] + [OFFSET + 256 + rank] + ids[i + 2:]
+        if len(self._cache) > 500_000:             # encoding a whole corpus: keep memory bounded
+            self._cache.clear()
         self._cache[w] = ids
         return ids
 

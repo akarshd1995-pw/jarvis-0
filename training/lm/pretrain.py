@@ -104,50 +104,55 @@ def main(argv=None) -> int:
 
     last_save, t_log, tok_log = time.time(), time.time(), tokens_seen
     model.train()
-    while step < total_steps:
-        if stop_at and time.time() >= stop_at:
-            save("morning")
-            log(f"stopping for the day: {tokens_seen / plan['tokens']:.0%} done. Run train_lm.bat again tonight.")
-            return 3
-        wait_if_paused()
-        lr = lr_at(step, total_steps, plan["lr"], plan["warmup"])
-        for g in opt.param_groups:
-            g["lr"] = lr
-        loss_sum = 0.0
-        for m in range(plan["accum"]):
-            x, y = train.batch(step * plan["accum"] + m, plan["micro"], plan["ctx"], seed=args.seed)
-            x = torch.from_numpy(x).to(device, non_blocking=True)
-            y = torch.from_numpy(y).to(device, non_blocking=True)
-            with torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
-                _, loss = run(x, y)
-            (loss / plan["accum"]).backward()
-            loss_sum += loss.item()
-        if not math.isfinite(loss_sum):
-            log("loss became NaN/inf: the next run goes back to the last save with half the learning rate")
-            if args.out.exists():
-                raw = torch.load(args.out, map_location="cpu", weights_only=False)
-                raw["plan"]["lr"] = raw["plan"]["lr"] * 0.5
-                torch.save(raw, args.out)
-            return 4
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        opt.step()
-        opt.zero_grad(set_to_none=True)
-        step += 1
-        tokens_seen += per_step
-        if step % 20 == 0:
-            rate = (tokens_seen - tok_log) / max(1e-6, time.time() - t_log)
-            left_min = int((plan["tokens"] - tokens_seen) / max(rate, 1e-6) / 60)
-            log(f"step {step}/{total_steps}  loss {loss_sum / plan['accum']:.3f}  lr {lr:.2e}  "
-                f"{rate / 1000:.1f}k tok/s  ~{left_min} min left ({eta(plan['tokens'] - tokens_seen, rate)})")
-            t_log, tok_log = time.time(), tokens_seen
-            state.update(tokens=tokens_seen, step=step, tok_per_s=round(rate))
-        if step % args.eval_every == 0:
-            v = val_loss(model, val, device, plan["micro"], plan["ctx"])
-            log(f"validation loss {v:.3f} (perplexity {math.exp(min(v, 20)):.1f})")
-            state.update(val_loss=round(v, 4))
-        if time.time() - last_save > args.save_every_min * 60:
-            save("regular")
-            last_save = time.time()
+    try:
+        while step < total_steps:
+            if stop_at and time.time() >= stop_at:
+                save("morning")
+                log(f"stopping for the day: {tokens_seen / plan['tokens']:.0%} done. Run train_lm.bat again tonight.")
+                return 3
+            wait_if_paused()
+            lr = lr_at(step, total_steps, plan["lr"], plan["warmup"])
+            for g in opt.param_groups:
+                g["lr"] = lr
+            loss_sum = 0.0
+            for m in range(plan["accum"]):
+                x, y = train.batch(step * plan["accum"] + m, plan["micro"], plan["ctx"], seed=args.seed)
+                x = torch.from_numpy(x).to(device, non_blocking=True)
+                y = torch.from_numpy(y).to(device, non_blocking=True)
+                with torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
+                    _, loss = run(x, y)
+                (loss / plan["accum"]).backward()
+                loss_sum += loss.item()
+            if not math.isfinite(loss_sum):
+                log("loss became NaN/inf: the next run goes back to the last save with half the learning rate")
+                if args.out.exists():
+                    raw = torch.load(args.out, map_location="cpu", weights_only=False)
+                    raw["plan"]["lr"] = raw["plan"]["lr"] * 0.5
+                    torch.save(raw, args.out)
+                return 4
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            opt.step()
+            opt.zero_grad(set_to_none=True)
+            step += 1
+            tokens_seen += per_step
+            if step % 20 == 0:
+                rate = (tokens_seen - tok_log) / max(1e-6, time.time() - t_log)
+                left_min = int((plan["tokens"] - tokens_seen) / max(rate, 1e-6) / 60)
+                log(f"step {step}/{total_steps}  loss {loss_sum / plan['accum']:.3f}  lr {lr:.2e}  "
+                    f"{rate / 1000:.1f}k tok/s  ~{left_min} min left ({eta(plan['tokens'] - tokens_seen, rate)})")
+                t_log, tok_log = time.time(), tokens_seen
+                state.update(tokens=tokens_seen, step=step, tok_per_s=round(rate))
+            if step % args.eval_every == 0:
+                v = val_loss(model, val, device, plan["micro"], plan["ctx"])
+                log(f"validation loss {v:.3f} (perplexity {math.exp(min(v, 20)):.1f})")
+                state.update(val_loss=round(v, 4))
+            if time.time() - last_save > args.save_every_min * 60:
+                save("regular")
+                last_save = time.time()
+    except KeyboardInterrupt:                           # Ctrl+C: keep everything trained so far
+        save("stopped by you")
+        log("stopped. Run train_lm.bat again whenever you like; it continues from here.")
+        return 3
     save("finished")
     v = val_loss(model, val, device, plan["micro"], plan["ctx"])
     state.update(stage="pretrained", val_loss=round(v, 4))

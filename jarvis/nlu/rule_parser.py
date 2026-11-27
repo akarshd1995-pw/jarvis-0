@@ -447,7 +447,40 @@ WELL_RULES: list[tuple[re.Pattern, callable]] = [
      lambda m, t: "breaks(action=status)"),
 ]
 
-RULES: list[tuple[re.Pattern, callable]] = WELL_RULES + VOCAB_RULES + FOCUS_RULES + TASK_RULES + NOTE_RULES + WORKSPACE_RULES + CONTEXT_RULES + [
+# ---- phase 37: system care
+_PC = r"(?: (?:my |the )?(?:pc|computer|laptop|system|disk|drive|c drive|c:))?"
+CARE_RULES: list[tuple[re.Pattern, callable]] = [
+    (re.compile(r"^(?:how much (?:free )?(?:disk )?space (?:do i have|is left|is there)(?: left)?|(?:check |show )?(?:my )?disk space"
+                r"|what(?:'s| is) (?:taking|using|eating) (?:up )?(?:all )?(?:my |the )?(?:disk )?space|why is my (?:c )?drive full"
+                r"|disk (?:usage|report)|storage (?:report|check)|disk (?:me|mein) kitni jagah hai|kitni jagah bachi hai)\??$", re.I),
+     lambda m, t: "care(action=disk)"),
+    (re.compile(r"^(?:clear|clean|delete|remove|empty|wipe) (?:(?:out|up) )?(?:the |my |all )?(?:old )?(?:temp|temporary)(?: files| folder)?$"
+                r"|^(?:temp|temporary) files (?:saaf karo|hata do|clear karo|delete karo)$", re.I),
+     lambda m, t: "care(action=cleanup, what=temp)"),
+    (re.compile(r"^(?:clear|clean up|delete|remove|get rid of) (?:the |my |all )?(?:old )?(?:installers|setup files|installer files)(?: (?:in|from) (?:my )?downloads)?$", re.I),
+     lambda m, t: "care(action=cleanup, what=installers)"),
+    (re.compile(r"^(?:clear|clean up|delete|remove|get rid of|find) (?:the |my |all )?duplicate(?:s| files| downloads)(?: (?:in|from) (?:my )?downloads)?$", re.I),
+     lambda m, t: "care(action=cleanup, what=duplicates)"),
+    (re.compile(rf"^(?:free up (?:some )?(?:disk )?space{_PC}|clean up{_PC}|clean{_PC} up|(?:pc|computer|laptop) saaf karo|jagah khali karo)$", re.I),
+     lambda m, t: "care(action=cleanup, what=all)"),
+    (re.compile(r"^(?:empty|clear) (?:your|jarvis(?:'s)?|the jarvis) trash$", re.I),
+     lambda m, t: "care(action=empty_trash)"),
+    (re.compile(r"^(?:(?:show |list )?(?:my )?startup (?:apps|programs|items)|what (?:apps |programs )?(?:start|open|run|launch)s? (?:with|when) (?:windows|my pc|i log in|the pc starts)"
+                r"|what (?:runs|starts) at startup)\??$", re.I),
+     lambda m, t: "care(action=startup_list)"),
+    (re.compile(r"^(?:turn off|disable|stop|remove) (.+?) (?:at|on|from) (?:startup|start ?up|boot|login)$"
+                r"|^(?:stop|don'?t let) (.+?) (?:from )?(?:starting|opening|launching) (?:with windows|at startup|when (?:my pc|windows|the pc) starts)$"
+                r"|^(?:don'?t|do not) (?:start|open|launch) (.+?) (?:with windows|at startup)$|^startup se (.+?) hata do$", re.I),
+     lambda m, t: f'care(action=startup_off, name="{_q(m.group(1) or m.group(2) or m.group(3) or m.group(4))}")'),
+    (re.compile(r"^(?:turn on|enable) (.+?) (?:at|on) (?:startup|start ?up|boot|login)$"
+                r"|^(?:start|open|launch) (.+?) (?:with windows|at startup|when (?:my pc|windows) starts)$", re.I),
+     lambda m, t: f'care(action=startup_on, name="{_q(m.group(1) or m.group(2))}")'),
+    (re.compile(r"^(?:(?:show )?(?:my )?gpu (?:temp|temperature)s?(?: history| this week| over the week)?|how hot (?:did|does|has) my (?:gpu|graphics card) (?:get|run|been)(?: this week| lately)?"
+                r"|what was my (?:highest|max) gpu (?:temp|temperature)|gpu kitna garam hua)\??$", re.I),
+     lambda m, t: "care(action=temps)"),
+]
+
+RULES: list[tuple[re.Pattern, callable]] = CARE_RULES + WELL_RULES + VOCAB_RULES + FOCUS_RULES + TASK_RULES + NOTE_RULES + WORKSPACE_RULES + CONTEXT_RULES + [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
     (re.compile(r"^(?!.*\btraining\b)(?:(?:hey )?jarvis,? )?(?:what(?:'s| is) the |show (?:me )?the |give me (?:the )?|get (?:me )?(?:the )?)?"
                 r"(?:(?:fastest|quickest|best|shortest) )?(?:route|way|directions?|road)(?: please)? (?:from .+ )?to .+$"

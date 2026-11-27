@@ -32,6 +32,7 @@ ACTION_TIERS: dict[str, Tier] = {
     "task": Tier.SAFE,
     "vocab": Tier.SAFE,
     "screen_time": Tier.SAFE,
+    "care": Tier.SAFE,
     "breaks": Tier.SAFE,                    # teaching a nickname; undo forgets it                     # deleting one asks first (below); everything can be undone
     "gaming": Tier.SAFE,                # start / save / list; close and delete ask first (below)      # always asks, showing which note; undo brings it back
     "unsupported": Tier.SAFE,
@@ -82,6 +83,8 @@ def needs_confirmation(action: str, confirm_actions: list[str] | None = None, ar
         return str((args or {}).get("action")) == "delete"
     if action == "focus":                      # blocking apps / sites: say which, and ask
         return str((args or {}).get("action")) == "start" and str((args or {}).get("block")) == "yes"
+    if action == "care":                       # clearing files is deleting, to you: always ask
+        return str((args or {}).get("action")) in ("cleanup", "empty_trash")
     if action == "workspace":                  # closing apps or deleting a saved layout: always ask
         return str((args or {}).get("action")) in ("close", "delete")
     if tier_of(action) >= Tier.DESTRUCTIVE:

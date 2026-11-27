@@ -1023,7 +1023,7 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes", "workspaces", "focus_gaming", "tasks", "your_words", "wellbeing"]
+           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes", "workspaces", "focus_gaming", "tasks", "your_words", "wellbeing", "system_care"]
 
 
 # ---------------------------------------------------------------- directions (routes, travel time)
@@ -1680,6 +1680,72 @@ def gen_vocab(c: Ctx):
     return "vocab(action=list)", rng.choice(VOCAB_LIST), {}
 
 
+# ---------------------------------------------------------------- system care (phase 37)
+STARTUP_APPS = ["spotify", "discord", "steam", "onedrive", "teams", "skype", "zoom", "epic games", "slack", "dropbox",
+                "google drive", "whatsapp", "telegram", "nvidia", "logitech", "razer synapse", "adobe", "utorrent"]
+CARE_DISK = frames("CARE_DISK", [
+    "how much disk space do i have", "check my disk space", "what's taking up space", "why is my c drive full",
+    "disk usage", "show storage",
+    "my drive is almost full, what's using it",                    # 6 val_ood
+    "which folders are the biggest",                               # 7 test_ood
+    "how much space is left", "storage report", "what is eating my disk space", "is my disk full",
+    "show me the biggest folders", "how full is my drive",
+    "where did all my space go",                                   # val_ood
+    "what's filling up my drive",                                  # test_ood
+    "where did my space go", "which folders are filling my disk", "where is it all going", "what are the big folders",
+    "did something fill my drive", "which folders take the most",
+    "disk space check",                                            # val_ood
+    "how much free space",                                         # test_ood
+    "space left on my pc", "check storage", "what's using all my space", "my drive is full", "it says my disk is full",
+    "what is filling my pc",
+    "biggest folders on my pc",                                    # val_ood
+    "show what's using my space",                                  # test_ood
+    "all my space is gone", "almost no free space left",
+])
+CARE_DISK_HI = ["disk mein kitni jagah hai", "kitni jagah bachi hai", "storage kitna bacha hai"]
+CARE_CLEAN = {
+    "temp": ["clear temp files", "delete temporary files", "clean the temp folder", "remove old temp files",
+             "wipe temp files", "temp files saaf karo", "get rid of temp files"],
+    "installers": ["delete old installers", "remove setup files from downloads", "clear old installer files",
+                   "get rid of installers in downloads", "purane installers hata do"],
+    "duplicates": ["remove duplicate downloads", "find duplicates in downloads", "delete duplicate files",
+                   "clean up duplicates", "duplicate files hata do"],
+    "all": ["free up space", "clean up my pc", "free up some disk space", "clean up the computer", "pc saaf karo",
+            "jagah khali karo", "clear junk files", "clean my laptop"],
+}
+CARE_STARTUP_LIST = ["startup apps", "what starts with windows", "show startup programs", "what runs at startup",
+                     "which apps open when my pc starts", "list startup items"]
+CARE_STARTUP_OFF = ["turn off {a} at startup", "stop {a} from starting with windows", "disable {a} on startup",
+                    "don't open {a} at startup", "remove {a} from startup", "startup se {a} hata do",
+                    "stop {a} launching when my pc starts"]
+CARE_STARTUP_ON = ["turn on {a} at startup", "start {a} with windows", "enable {a} on startup",
+                   "launch {a} when my pc starts", "{a} ko startup pe chalu karo"]
+CARE_TEMPS = ["gpu temperature history", "how hot did my gpu get this week", "gpu temps this week",
+              "what was my highest gpu temperature", "show gpu temperatures", "gpu kitna garam hua"]
+CARE_TRASH = ["empty your trash", "empty jarvis trash", "clear your trash"]
+
+
+def gen_care(c: Ctx):
+    rng = c.rng
+    r = rng.random()
+    if r < 0.2:
+        return "care(action=disk)", (rng.choice(CARE_DISK_HI) if c.hing else c.T(CARE_DISK)), {}
+    if r < 0.45:
+        what = rng.choice(list(CARE_CLEAN))
+        return f"care(action=cleanup, what={what})", rng.choice(CARE_CLEAN[what]), {}
+    if r < 0.55:
+        return "care(action=startup_list)", rng.choice(CARE_STARTUP_LIST), {}
+    if r < 0.85:
+        app = rng.choice(STARTUP_APPS) if rng.random() < 0.8 else LX.pseudo_word(rng).lower()
+        on = rng.random() < 0.3
+        tpl = rng.choice(CARE_STARTUP_ON if on else CARE_STARTUP_OFF)
+        return dsl_call("care", {"action": "startup_on" if on else "startup_off", "name": q(app)}), \
+            tpl.format(a=slot(app)), {}
+    if r < 0.95:
+        return "care(action=temps)", rng.choice(CARE_TEMPS), {}
+    return "care(action=empty_trash)", rng.choice(CARE_TRASH), {}
+
+
 # ---------------------------------------------------------------- wellbeing (phase 34)
 LIMIT_APPS = ["youtube", "instagram", "netflix", "reddit", "twitter", "facebook", "steam", "valorant", "discord",
               "hotstar", "prime video", "twitch", "whatsapp", "spotify", "chess.com", "linkedin"]
@@ -1837,7 +1903,7 @@ GENERATORS = [
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6), (gen_workspace, 5), (gen_focus, 5), (gen_tasks, 7), (gen_vocab, 2), (gen_wellbeing, 4),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6), (gen_workspace, 5), (gen_focus, 5), (gen_tasks, 7), (gen_vocab, 2), (gen_wellbeing, 4), (gen_care, 4),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 

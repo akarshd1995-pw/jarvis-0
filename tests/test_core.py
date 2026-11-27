@@ -3236,3 +3236,162 @@ def test_wellbeing_survives_windows_pre_1970_rule(tmp_path, monkeypatch):
     _run(w, clk, 40, title="YouTube", exe="chrome.exe")
     w.save()
     assert round(W.Wellbeing(tmp_path / "st.json", clock=clk).usage_today()["youtube"]) == 40
+
+
+# ---------------------------------------------------------------- phase 37: system care
+def _old(p, days, size=2048):
+    import os, time
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"a" * size)
+    t = time.time() - days * 86400
+    os.utime(p, (t, t))
+    return p
+
+
+def test_disk_scan_finds_the_folder_really_using_space(tmp_path):
+    from jarvis.care import biggest, human, scan_sizes
+    _old(tmp_path / "Videos" / "Trips" / "goa.mp4", 1, 900_000)
+    _old(tmp_path / "Videos" / "clip.mp4", 1, 10_000)
+    _old(tmp_path / "Docs" / "a.txt", 1, 50_000)
+    s = scan_sizes(tmp_path, max_depth=3)
+    assert s.complete and s.sizes[tmp_path] == 960_000
+    top = biggest(s, tmp_path)
+    assert top[0] == (tmp_path / "Videos" / "Trips", 900_000)     # not just "Videos": the folder inside it
+    assert top[1][0] == tmp_path / "Docs"
+    assert human(900_000) == "879 KB" and human(5 * 2**30) == "5.0 GB"
+
+
+def test_cleanup_candidates(tmp_path):
+    import time
+    from jarvis.care import duplicate_groups, installer_candidates, temp_candidates
+    now = time.time()
+    temp = tmp_path / "Temp"
+    old = _old(temp / "x" / "old.log", 5)
+    _old(temp / "fresh.log", 0)
+    assert [p for p, _ in temp_candidates(temp, now)] == [old]
+    dl = tmp_path / "Downloads"
+    setup = _old(dl / "VSCodeSetup-x64.exe", 30, 5000)
+    _old(dl / "new_installer.msi", 2)                              # downloaded this week: leave it
+    _old(dl / "report.pdf", 60, 3000)
+    assert [p for p, _ in installer_candidates(dl, now)] == [setup]
+    a = _old(dl / "photo.jpg", 10, 70_000)
+    b = dl / "photo (1).jpg"
+    b.write_bytes(a.read_bytes())
+    c = dl / "photo copy.jpg"
+    c.write_bytes(a.read_bytes()[:-1] + b"b")                      # same size, different bytes: not a duplicate
+    groups = duplicate_groups(dl)
+    assert len(groups) == 1 and groups[0][0] == a and groups[0][1] == [b]
+
+
+def test_startup_apps_switch_like_task_manager():
+    from jarvis.care import ENABLED, RUN, find_startup, set_startup, startup_items
+    from jarvis.selftest import FakeRegistry
+    reg = FakeRegistry({("HKCU", RUN): {"Spotify": r'"C:\Users\a\Spotify.exe" /minimized', "Discord": r"C:\d\Update.exe"},
+                        ("HKLM", RUN): {"SecurityHealth": r"C:\Windows\SecurityHealthSystray.exe"}})
+    items = startup_items(reg, {})
+    assert {i.label for i in items} == {"Spotify", "Discord", "SecurityHealth"} and all(i.enabled for i in items)
+    spot = find_startup(items, "spotify")[0]
+    assert find_startup(items, "discord app") == [] or find_startup(items, "disc")[0].name == "Discord"
+    before = set_startup(reg, spot, False, now=1_700_000_000)
+    assert before is None and not [i for i in startup_items(reg, {}) if i.name == "Spotify"][0].enabled
+    assert reg.data[("HKCU", RUN)]["Spotify"].startswith('"C:')      # the entry itself is never touched
+    set_startup(reg, spot, True)
+    assert reg.values(*spot.approved)["Spotify"] == ENABLED
+
+
+def test_gpu_temperature_history():
+    from datetime import datetime
+    from jarvis.care import temp_history
+    base = datetime(2026, 11, 26, 20, 0).timestamp()
+    ev = [(base + i * 60, "metrics", {"gpu_temp": 60 + (25 if 10 <= i < 15 else 0)}) for i in range(30)]
+    ev += [(base - 86400, "metrics", {"gpu_temp": 55}), (base, "focus", {})]
+    h = temp_history(ev, base + 30 * 60)
+    assert [r["max"] for r in h["days"]] == [55, 85] and h["days"][1]["hot_min"] == 5
+    assert h["hottest"][1] == 85 and h["now"] == 60 and h["samples"] == 31
+
+
+def test_system_care_through_jarvis(tmp_path):
+    from jarvis.actions import care as CA
+    from jarvis.selftest import FakeRegistry
+    j = _jarvis(tmp_path)
+    j.config.show_details = False
+    temp = tmp_path / "faketemp"
+    old = _old(temp / "cache" / "a.tmp", 5, 3 * 2**20)
+    _old(temp / "jarvis-update-123" / "keep.txt", 9)               # Jarvis's own temp work is never touched
+    j.config.care_temp_dir = str(temp)
+    asked = []
+    j.executor.confirm = lambda tier, q, items: asked.append(q) or True
+    out = j.handle("clear temp files")
+    assert asked and "3.0 MB" in asked[0] and "undo" in asked[0]           # it asked first, with the size
+    assert not old.exists() and (temp / "jarvis-update-123" / "keep.txt").exists()
+    assert "Cleared 3.0 MB" in out
+    j.handle("undo")
+    assert old.exists()
+    assert "Nothing to clean up" in j.handle("care(action=cleanup, what=installers)")
+    reg = FakeRegistry({("HKCU", CA.C.RUN): {"Spotify": r"C:\s\Spotify.exe"}})
+    saved = CA.REG, CA.FOLDERS
+    CA.REG, CA.FOLDERS = reg, {}
+    try:
+        assert "Spotify" in j.handle("startup apps")
+        assert "won't start with Windows" in j.handle("turn off spotify at startup")
+        assert "already off" in j.handle("turn off spotify at startup")
+        j.handle("undo")
+        assert CA.C.startup_items(reg, {})[0].enabled and "Spotify" not in reg.values(*CA.C.StartupItem(
+            "Spotify", "", "user_run", True).approved)                        # back exactly as it was
+        assert "couldn't find zoom" in j.handle("turn off zoom at startup")
+    finally:
+        CA.REG, CA.FOLDERS = saved
+
+
+def test_empty_jarvis_trash_only_old_batches(tmp_path):
+    import os, time
+    j = _jarvis(tmp_path)
+    j.config.show_details = False
+    oldb = j.config.trash_dir / "b-old"
+    f = _old(oldb / "x.bin", 40, 2**20)
+    os.utime(oldb, (time.time() - 40 * 86400,) * 2)
+    newb = _old(j.config.trash_dir / "b-new" / "y.bin", 1).parent
+    j.store.record("b-old", "delete", {"op": "move", "src": str(f), "dest": str(tmp_path / "x.bin")})
+    assert "for good" in j.handle("empty your trash")
+    assert not oldb.exists() and newb.exists()
+    assert j.store.last_batch() is None                                   # nothing left that undo could break on
+
+
+def test_care_rules_and_training_data():
+    import random
+    from datagen.generate_intents import TEACHES, Ctx, gen_care
+    from jarvis.dsl.grammar import canonical
+    from jarvis.nlu.rule_parser import rule_parse
+    from jarvis.safety import needs_confirmation
+    cases = {"how much disk space do i have": "care(action=disk)", "clear temp files": "care(action=cleanup, what=temp)",
+             "free up space": "care(action=cleanup, what=all)", "startup apps": "care(action=startup_list)",
+             "turn off spotify at startup": 'care(action=startup_off, name="spotify")',
+             "startup se teams hata do": 'care(action=startup_off, name="teams")',
+             "how hot did my gpu get this week": "care(action=temps)",
+             "delete old files in downloads": "delete_files(src=Downloads)"}
+    for text, want in cases.items():
+        assert str(rule_parse(text)) == want, (text, rule_parse(text))
+    assert needs_confirmation("care", None, {"action": "cleanup"}) and needs_confirmation("care", None, {"action": "empty_trash"})
+    assert not needs_confirmation("care", None, {"action": "startup_off"})
+    assert "system_care" in TEACHES
+    r = random.Random(3)
+    progs = [canonical(gen_care(Ctx(r, "train"))[0]) for _ in range(800)]
+    for bit in ("care(action=disk)", "what=temp", "what=all", "action=startup_off", "action=startup_on", "action=temps"):
+        assert any(bit in p for p in progs), bit
+
+
+def test_care_handles_read_only_and_links(tmp_path):
+    import os, stat
+    from jarvis.care import rmtree, scan_sizes
+    d = tmp_path / "batch"
+    f = _old(d / "ro.bin", 1)
+    os.chmod(f, stat.S_IREAD)
+    rmtree(d)
+    assert not d.exists()
+    real = tmp_path / "home" / "AppData"
+    _old(real / "big.bin", 1, 10_000)
+    try:
+        os.symlink(real, tmp_path / "home" / "Application Data", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        return
+    assert scan_sizes(tmp_path / "home").sizes[tmp_path / "home"] == 10_000     # counted once, not twice

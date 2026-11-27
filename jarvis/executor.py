@@ -6,7 +6,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .actions import control, files, system, training, maps, notes, workspace, tasks
+from .actions import care, control, files, system, training, maps, notes, workspace, tasks
 from .actions.base import ActionResult, Ctx
 from .config import Config
 from .dsl.grammar import Program
@@ -23,6 +23,7 @@ REGISTRY: dict[str, Handler] = {
     "find_notes": notes.find_notes,
     "delete_note": notes.delete_note,
     "workspace": workspace.workspace,
+    "care": care.care,
     "task": tasks.task,
     "open_folder": system.open_folder,
     "remind": system.remind,
@@ -138,6 +139,8 @@ class Executor:
                     live = V.CURRENT if V.CURRENT is not None and \
                         V.CURRENT.path == self.config.data_dir / "vocab.json" else None
                     (live or V.Vocab.load(self.config.data_dir)).set_alias(inverse["word"], inverse["means"])
+                elif inverse.get("op") == "startup_set":                         # phase 37: startup apps
+                    care.undo_op(inverse)
                 elif inverse.get("op") == "task_set":                            # phase 33: tasks
                     self.store.update_task(inverse["id"], **inverse["fields"])
                 elif inverse.get("op") == "focus_stop":                          # phase 32: end focus & blocking

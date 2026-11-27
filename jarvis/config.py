@@ -113,6 +113,7 @@ class Config:
     pause_heavy_on_battery: bool = True
     workspace_apps: dict = field(default_factory=lambda: {        # what "coding mode" / "study mode" open
         "coding": ["cursor", "claude", "chrome", "terminal"], "study": ["chrome", "notepad"]})
+    care_temp_dir: str = ""                 # phase 37: empty = Windows' own temp folder
     wellbeing_eyes: bool = True           # phase 34: 20-20-20 eye breaks
     wellbeing_stretch: bool = True        # stand up after an hour without a break
     wellbeing_winddown: bool = True       # one nudge on nights you're up well past your usual hour

@@ -12,7 +12,7 @@ from functools import lru_cache
 from ..persona.templates import SITE_NAMES
 from .bank import variants
 
-FIELD_ORDER = ["count", "files", "files_pl", "filt", "src", "dest", "name", "query", "site", "text", "when",
+FIELD_ORDER = ["drives", "big", "hint", "size", "skipped", "top", "highs", "extra", "on", "off", "kinds", "count", "files", "files_pl", "filt", "src", "dest", "name", "query", "site", "text", "when",
                "request", "items", "action_phrase", "error", "opverb", "target", "level", "device", "delay",
                "pct", "eta", "best", "temp", "free_gb", "minutes", "metric", "value", "typical", "channel", "title", "closest", "place", "age", "more", "version", "time", "km", "via", "what", "thing", "about", "changes", "done", "miss", "tip", "known", "apps", "until", "quiet", "blocking",
                "extra", "left", "focused", "cycle", "due", "every", "prio",

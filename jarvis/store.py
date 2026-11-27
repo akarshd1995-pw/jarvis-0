@@ -135,6 +135,12 @@ class Store:
                 "ORDER BY id DESC", (row[0],)).fetchall()
         return row[0], [(i, op, json.loads(inv)) for i, op, inv in rows]
 
+    def forget_batch(self, batch_id: str) -> None:
+        """Its files are gone for good (Jarvis trash emptied): nothing left to undo."""
+        with self._lock:
+            self._db.execute("UPDATE journal SET undone = 1 WHERE batch_id = ?", (batch_id,))
+            self._db.commit()
+
     def mark_undone(self, ids: list[int]) -> None:
         with self._lock:
             self._db.executemany("UPDATE journal SET undone = 1 WHERE id = ?", [(i,) for i in ids])

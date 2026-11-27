@@ -117,6 +117,9 @@ SCHEMA: dict[str, dict] = {
     "find_notes":    {"args": {"query": "str|ref", "kind": "ident", "when": "ident"}, "required": [],
                       "enum": {"kind": ["note", "journal"], "when": ["today", "yesterday", "week", "month"]}},
     "delete_note":   {"args": {"query": "str"}, "required": ["query"]},
+    "care":          {"args": {"action": "ident", "what": "ident", "name": "str"}, "required": ["action"],   # phase 37
+                      "enum": {"action": ["disk", "cleanup", "empty_trash", "temps", "startup_list", "startup_off",
+                                          "startup_on"], "what": ["temp", "installers", "duplicates", "all"]}},
     "screen_time":   {"args": {"action": "ident", "app": "str", "minutes": "int"}, "required": ["action"],   # phase 34
                       "enum": {"action": ["report", "limit", "unlimit"]}},
     "breaks":        {"args": {"action": "ident", "kind": "ident", "minutes": "int"}, "required": ["action"],

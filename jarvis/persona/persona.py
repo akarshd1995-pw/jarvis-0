@@ -64,6 +64,19 @@ def folder_name(v: str | None) -> str:
     return v
 
 
+CARE_KIND = {"temp": "temp files", "installers": "old installers", "duplicates": "duplicate downloads"}
+
+
+def _size(n: float) -> str:
+    from ..care import human
+    return human(n)
+
+
+def _weekday(day: str) -> str:
+    from datetime import datetime
+    return datetime.strptime(day, "%Y-%m-%d").strftime("%a")
+
+
 @dataclass
 class Persona:
     name: str = "Jarvis"
@@ -195,6 +208,8 @@ class Persona:
             return self._plan_screen_time(d)
         if k == "breaks":
             return self._plan_breaks(d)
+        if k == "care":
+            return self._plan_care(d)
         if k == "tasks":
             return self._plan_tasks(d)
         if k == "gaming":
@@ -227,6 +242,14 @@ class Persona:
             return f"confirm_window_{d['action']}", {"target": app_name(d["app"]) if d.get("app") else "the window"}
         if preview.kind == "radio":
             return f"confirm_radio_{d['state']}", {"device": "Wi-Fi" if d["kind"] == "wifi" else "Bluetooth"}
+        if preview.kind == "care" and d.get("op") == "cleanup":
+            kinds = ", ".join(f"{n} {CARE_KIND[k]}" for k, n in d.get("kinds", {}).items() if n)
+            return "confirm_care_cleanup", {"count": self._num(d["count"], False), "size": _size(d["bytes"]),
+                                            "kinds": kinds or "nothing"}
+        if preview.kind == "care" and d.get("op") == "empty_trash":
+            return "confirm_care_trash", {"size": _size(d["bytes"])}
+        if preview.kind == "care" and d.get("op") == "startup_set":
+            return "", {"summary": preview.summary}
         if preview.kind == "power":
             return f"confirm_power_{d['action']}", {"delay": self.delay(d.get("seconds", 30))}
         return "", {"summary": preview.summary}
@@ -361,6 +384,53 @@ class Persona:
     def _mins(m: float) -> str:
         from ..focus import fmt_left
         return fmt_left(int(m * 60))
+
+    def _plan_care(self, d: dict) -> tuple[str, dict]:
+        op = d["op"]
+        if op == "disk":
+            drv = "; ".join(f"{name} {_size(free)} free of {_size(total)}" for name, total, free in d["drives"][:3])
+            big = ", ".join(f"{p} ({_size(s)})" for p, s in d["biggest"][:4]) or "nothing big"
+            if not d.get("complete"):
+                big += " (still counting when I stopped, so roughly)"
+            can = [f"{CARE_KIND[k]} {_size(d['sizes'][k])}" for k in ("temp", "installers", "duplicates")
+                   if d["sizes"].get(k, 0) >= 1 << 20]
+            if d.get("trash_old", 0) >= 1 << 20:
+                can.append(f"my trash older than a month {_size(d['trash_old'])}")
+            if d.get("recycle", 0) >= 1 << 20:
+                can.append(f"the Recycle Bin {_size(d['recycle'])} (empty it from the desktop)")
+            hint = (" I can clear: " + "; ".join(can) + ". Say \"clean up\" to see the list first.") if can else \
+                " Nothing worth clearing right now."
+            return "care_disk", {"drives": drv or "your drive", "big": big, "hint": hint}
+        if op == "cleanup":
+            if not d.get("count"):
+                return "care_clean_none", {}
+            skipped = f" {self._num(d['in_use'], False)} were in use, so I left them." if d.get("in_use") else ""
+            return "care_cleaned", {"size": _size(d["bytes"]), "count": self._num(d["count"], False),
+                                    "files": "file" if d["count"] == 1 else "files", "skipped": skipped}
+        if op == "empty_trash":
+            return ("care_trash_emptied" if d.get("count") else "care_trash_none"), {"size": _size(d["bytes"])}
+        if op == "temps":
+            if not d.get("days"):
+                return "care_temps_none", {}
+            highs = ", ".join(f"{_weekday(r['day'])} {r['max']}°" for r in d["days"])
+            hot = sum(r["hot_min"] for r in d["days"])
+            when, top = d["hottest"]
+            extra = (f" It spent about {self._mins(hot)} at 80° or more." if hot else " It never reached 80°.")
+            now = f" Right now: {d['now']}°." if d.get("now") is not None else ""
+            return "care_temps", {"top": top, "when": when, "highs": highs, "extra": extra, "now": now}
+        if op == "startup_list":
+            on = ", ".join(d["on"]) or "nothing"
+            off = f" Switched off: {', '.join(d['off'])}." if d["off"] else ""
+            return "care_startup_list", {"count": self._num(len(d["on"]), False), "on": on, "off": off}
+        if op == "startup_set":
+            if d.get("admin") and not d.get("changed"):
+                return "care_startup_admin", {"name": d["name"]}
+            return ("care_startup_on" if d["on"] else "care_startup_off"), {"name": d["name"]}
+        if op == "startup_already":
+            return "care_startup_already", {"name": d["name"], "state": "on" if d["on"] else "off"}
+        if op == "startup_missing":
+            return "care_startup_missing", {"name": d["name"], "on": ", ".join(d["on"][:8]) or "nothing"}
+        return "care_startup_na", {}
 
     def _plan_screen_time(self, d: dict) -> tuple[str, dict]:
         act = d["action"]

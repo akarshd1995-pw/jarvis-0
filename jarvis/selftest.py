@@ -40,9 +40,27 @@ DRY = {
     "task": 'task(action=add, text="selftest", due="friday")',
     "vocab": "vocab(action=list)",
     "screen_time": "screen_time(action=report)", "breaks": "breaks(action=status)",
+    "care": "care(action=temps)",
 }
 LIVE_ACTIONS = {"list_files", "move_files", "copy_files", "delete_files", "remind", "search_memory", "undo",
                 "open_result", "note", "find_notes", "delete_note"}
+
+
+class FakeRegistry:
+    """Stands in for the Windows registry so the self-test never changes your real startup apps."""
+
+    def __init__(self, data: dict):
+        self.data = {k: dict(v) for k, v in data.items()}
+
+    def values(self, hive, key):
+        return dict(self.data.get((hive, key), {}))
+
+    def set_binary(self, hive, key, name, value):
+        d = self.data.setdefault((hive, key), {})
+        if value is None:
+            d.pop(name, None)
+        else:
+            d[name] = value
 
 
 @dataclass
@@ -219,6 +237,29 @@ def run(log=print) -> list[Check]:
                 bad = [k for k, ok in steps.items() if not ok]
                 return not bad, "failed: " + ", ".join(bad) if bad else ""
             check("wellbeing: screen-time limit, report, undo", wellbeing)
+
+            def system_care():                              # phase 37: clear an old temp file, undo; a startup app
+                from .actions import care as CA
+                temp = root / "fake-temp"
+                (temp / "cache").mkdir(parents=True)
+                old = temp / "cache" / "old.tmp"
+                old.write_bytes(b"x" * 4096)
+                os.utime(old, (time.time() - 5 * 86400,) * 2)
+                cfg.care_temp_dir = str(temp)
+                reg, saved = FakeRegistry({("HKCU", CA.C.RUN): {"SelftestApp": r"C:\\x\\selftest.exe"}}), (CA.REG, CA.FOLDERS)
+                CA.REG, CA.FOLDERS = reg, {}
+                try:
+                    steps = {"cleanup": reply_ok("care(action=cleanup, what=temp)")[0] and not old.exists(),
+                             "undo cleanup": reply_ok("undo()")[0] and old.exists(),
+                             "startup off": reply_ok('care(action=startup_off, name="selftestapp")')[0]
+                             and not CA.C.startup_items(reg, {})[0].enabled,
+                             "undo startup": reply_ok("undo()")[0] and CA.C.startup_items(reg, {})[0].enabled}
+                finally:
+                    CA.REG, CA.FOLDERS = saved
+                    cfg.care_temp_dir = ""
+                bad = [k for k, ok in steps.items() if not ok]
+                return not bad, "failed: " + ", ".join(bad) if bad else ""
+            check("system care: temp cleanup, startup app, undo", system_care)
             # 5. everything else as a preview
             from .actions.base import Ctx
             ctx = Ctx(cfg, j.store, "selftest")

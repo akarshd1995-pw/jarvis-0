@@ -75,8 +75,10 @@ def verified(src: Path, target: Path, size: int, kind: str) -> bool:
     return ok
 
 
-def transfer(store, batch_id: str, files: list[Path], dest: Path, kind: str, unique) -> tuple[list, list]:
-    """kind: move | copy | trash. Returns (done [(src, target)], failed [(name, reason)])."""
+def transfer(store, batch_id: str, files: list[Path], dest: Path, kind: str, unique,
+             attempts: int = 3) -> tuple[list, list]:
+    """kind: move | copy | trash. Returns (done [(src, target)], failed [(name, reason)]).
+    attempts=1 for bulk cleanups, where a file in use should just be skipped, not waited for."""
     done, failed = [], []
     if not files:
         return done, failed
@@ -100,9 +102,9 @@ def transfer(store, batch_id: str, files: list[Path], dest: Path, kind: str, uni
                           {"kind": kind, "src": str(f), "target": str(target), "size": size})
         try:
             if kind == "copy":
-                _retry(lambda: shutil.copy2(f, target))
+                _retry(lambda: shutil.copy2(f, target), attempts)
             else:
-                _retry(lambda: shutil.move(str(f), str(target)))
+                _retry(lambda: shutil.move(str(f), str(target)), attempts)
             if not verified(f, target, size, kind):
                 _cleanup_partial(f, target, size, kind)
                 raise OSError("it didn't arrive intact, so I left the original where it was")

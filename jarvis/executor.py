@@ -6,7 +6,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .actions import control, files, system, training, maps, notes, workspace
+from .actions import control, files, system, training, maps, notes, workspace, tasks
 from .actions.base import ActionResult, Ctx
 from .config import Config
 from .dsl.grammar import Program
@@ -23,6 +23,7 @@ REGISTRY: dict[str, Handler] = {
     "find_notes": notes.find_notes,
     "delete_note": notes.delete_note,
     "workspace": workspace.workspace,
+    "task": tasks.task,
     "open_folder": system.open_folder,
     "remind": system.remind,
     "system": system.system,
@@ -122,6 +123,8 @@ class Executor:
             try:
                 if inverse.get("op") in ("note_forget", "note_restore"):          # phase 30: notes
                     self.store.set_note_deleted(inverse["id"], inverse["op"] == "note_forget")
+                elif inverse.get("op") == "task_set":                            # phase 33: tasks
+                    self.store.update_task(inverse["id"], **inverse["fields"])
                 elif inverse.get("op") == "focus_stop":                          # phase 32: end focus & blocking
                     from . import focus as F
                     if F.CURRENT is not None:

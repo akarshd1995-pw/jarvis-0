@@ -187,6 +187,10 @@ class Persona:
             return self._plan_workspace(d)
         if k == "focus":
             return self._plan_focus(d)
+        if k == "task":
+            return self._plan_task(d)
+        if k == "tasks":
+            return self._plan_tasks(d)
         if k == "gaming":
             if d["action"] == "on":
                 return "gaming_on", {}
@@ -233,6 +237,8 @@ class Persona:
             name = msg.replace("no open window for ", "") if msg.startswith("no open window for ") else ""
             if name:
                 return "err_no_window", {"name": name}
+        if type(e).__name__ == "TaskNotFound":
+            return "task_missing", {"query": e.query}
         if type(e).__name__ == "AppNotFound":
             sug = getattr(e, "suggestions", [])
             return ("err_no_app_suggest", {"name": e.name, "suggestions": " or ".join(sug)}) if sug else \
@@ -344,6 +350,40 @@ class Persona:
     def _and(items: list[str]) -> str:
         items = list(dict.fromkeys(items))
         return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1] if items else ""
+
+    def _plan_task(self, d: dict) -> tuple[str, dict]:
+        act, text = d["action"], _short(d["text"], 90)
+        if act == "add":
+            due = f", due {d['due']}" if d.get("due") else ""
+            every = {"daily": " every day", "weekdays": " every weekday", "weekly": " every week",
+                     "monthly": " every month"}.get(d.get("every") or "", "")
+            prio = " (high priority)" if d.get("priority") == "high" else ""
+            if d.get("bad_due"):
+                return "task_added_bad_due", {"text": text, "said": d["due_said"]}
+            return "task_added", {"text": text, "due": due, "every": every, "prio": prio}
+        if act == "done":
+            if d.get("next"):
+                return "task_done_next", {"text": text, "next": d["next"]}
+            left = d.get("left_today", 0)
+            rest = " That's everything due today." if left == 0 else \
+                f" {self._num(left, True)} more due today."
+            return "task_done", {"text": text, "rest": rest}
+        if act == "move":
+            return "task_moved", {"text": text, "due": d["due"]}
+        return "task_deleted", {"text": text}
+
+    def _plan_tasks(self, d: dict) -> tuple[str, dict]:
+        when = {"today": " due today", "week": " due this week", "overdue": " overdue", "done": " done this week"}.get(
+            d.get("when") or "", "")
+        rows = d.get("results") or []
+        if not rows:
+            return ("tasks_none_done" if d.get("when") == "done" else "tasks_none"), {"when": when}
+        items = "; ".join(_short(r["text"], 60) + (f" ({'overdue, ' if r['overdue'] else ''}{r['due']})" if r["due"] else "")
+                          for r in rows[:5])
+        more = len(rows) - 5
+        return "tasks_found", {"count": self._num(len(rows), False), "Count": self._num(len(rows), True),
+                               "s": "s" if len(rows) != 1 else "", "when": when,
+                               "items": items + (f"; and {more} more" if more > 0 else "")}
 
     def _plan_focus(self, d: dict) -> tuple[str, dict]:
         from ..focus import fmt_left, held_summary

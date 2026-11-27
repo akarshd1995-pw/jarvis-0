@@ -1023,7 +1023,7 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes", "workspaces", "focus_gaming"]
+           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes", "workspaces", "focus_gaming", "tasks"]
 
 
 # ---------------------------------------------------------------- directions (routes, travel time)
@@ -1556,6 +1556,105 @@ def gen_focus(c: Ctx):
     return "gaming(action=off)", rng.choice(GAME_OFF), {}
 
 
+# ---------------------------------------------------------------- tasks & deadlines (phase 33)
+TASK_VERBS = ["finish", "submit", "send", "review", "call", "pay", "renew", "book", "fix", "write", "prepare", "update",
+              "clean", "return", "buy", "file", "reply to", "schedule", "print", "back up"]
+TASK_OBJS = ["the report", "the assignment", "the invoice", "the presentation", "rent", "the electricity bill",
+             "my passport", "flight tickets", "the PRs", "the {w} bug", "the {w} deck", "the resume", "my taxes",
+             "the {w} proposal", "the car insurance", "the library books", "groceries", "{n}'s email", "the {w} doc"]
+DUE_SAID = [("friday", ["by friday", "on friday", "before friday", "friday"]), ("monday", ["by monday", "on monday"]),
+            ("tomorrow", ["tomorrow", "by tomorrow"]), ("tomorrow 5 pm", ["tomorrow 5 pm", "by tomorrow 5 pm"]),
+            ("today evening", ["today evening", "by today evening"]), ("tonight", ["tonight"]),
+            ("5th december", ["by 5th december", "on 5th december"]), ("december 15", ["by december 15", "on december 15"]),
+            ("next week", ["next week", "by next week"]), ("in 3 days", ["in 3 days"]), ("end of month", ["by end of month"]),
+            ("31/12", ["by 31/12"]), ("this weekend", ["this weekend"]), ("next friday", ["by next friday", "next friday"]),
+            ("wednesday 11 am", ["by wednesday 11 am", "on wednesday at 11 am"]), ("the 1st", ["on the 1st"])]
+DUE_HI = [("friday", "friday"), ("kal", "kal"), ("parso", "parso"), ("kal shaam", "kal shaam"), ("monday", "monday"),
+          ("5 baje", "5 baje")]
+EVERY_SAID = {"daily": [" every day", " daily"], "weekdays": [" every weekday", " on weekdays"],
+              "weekly": [" every week", " weekly"], "monthly": [" every month", " monthly"]}
+TASK_ADD = frames("TASK_ADD", [
+    "add task {t}{dp}", "add a task: {t}{dp}", "new task {t}{dp}", "to-do: {t}{dp}", "add {t} to my to-do list",
+    "i need to {t}{dp}",
+    "put {t} on my task list{dp}",                                 # 6 val_ood
+    "can you track {t}{dp}",                                       # 7 test_ood
+    "task: {t}{dp}", "make a task to {t}{dp}", "add to my list: {t}{dp}", "remember i have to {t}{dp}",
+    "add a to-do to {t}{dp}", "new to-do: {t}{dp}",
+    "please track {t}{dp}",                                        # val_ood
+    "i have to {t}{dp}, add it",                                   # test_ood
+    "add a task to {t}{dp}", "create a task: {t}{dp}", "put {t} on my list{dp}", "can you add {t} to my tasks",
+    "track this task: {t}{dp}", "i have to {t}{dp}", "please add {t} to my to-do{dp}", "add it: {t}{dp}",
+    "please add a task: {t}{dp}", "add it to my tasks: {t}{dp}", "please put {t} on my list{dp}",
+])
+TASK_ADD_HI = ["{t} karna hai {d} tak", "{t} {d} tak karna hai", "task add karo: {t}", "{t} ko list me daal do",
+               "{d} tak {t} karna hai"]
+TASK_DONE = ["done with {q}", "mark {q} as done", "{q} is done", "i finished {q}", "tick off {q}", "completed {q}",
+             "i'm done with {q}", "check off {q}", "{q} ho gaya", "finished {q}"]
+TASK_MOVE = ["move {q} to {d}", "postpone {q} to {d}", "push {q} to {d}", "reschedule {q} for {d}", "shift {q} to {d}",
+             "{q} ko {d} pe shift karo"]
+TASK_DEL = ["delete the task {q}", "remove {q} from my list", "{q} wala task hata do", "cancel the {q} task",
+            "delete my {q} task"]
+TASK_LIST = {"today": ["what's due today", "what do i have to do today", "today's tasks", "show my tasks for today",
+                       "aaj kya karna hai", "what's on my list today"],
+             "week": ["what's due this week", "show my tasks for this week", "this week's tasks", "is hafte kya karna hai"],
+             "overdue": ["what's overdue", "show overdue tasks", "anything overdue", "which tasks are late"],
+             "done": ["what did i finish this week", "show completed tasks", "what have i done this week"],
+             None: ["show my tasks", "my to-do list", "show my to-do list", "list my tasks", "what's on my list",
+                    "mere tasks dikhao"]}
+
+
+def task_text(rng) -> str:
+    obj = rng.choice(TASK_OBJS).format(w=LX.pseudo_word(rng).lower(), n=rng.choice(LX.NAMES))
+    return f"{rng.choice(TASK_VERBS)} {obj}"           # never a date inside the task text: that's the due slot
+
+
+def gen_tasks(c: Ctx):
+    rng = c.rng
+    r = rng.random()
+    if r < 0.45:
+        t = task_text(rng)
+        args: dict = {"action": "add", "text": q(t)}
+        if c.hing:
+            due, said = rng.choice(DUE_HI)
+            args["due"] = q(due)
+            tpl = rng.choice(TASK_ADD_HI)
+            if "{d}" not in tpl:
+                args.pop("due")
+            return dsl_call("task", args), tpl.format(t=slot(t), d=slot(said)), {}
+        dp = ""
+        if rng.random() < 0.7:
+            due, says = rng.choice(DUE_SAID)
+            args["due"] = q(due)
+            phrase = rng.choice(says)
+            dp = " " + phrase.replace(due, slot(due))
+        if rng.random() < 0.12:
+            every = rng.choice(list(EVERY_SAID))
+            args["every"] = every
+            dp = rng.choice(EVERY_SAID[every]) + dp
+        if rng.random() < 0.1:
+            args["priority"] = "high"
+            dp += rng.choice([", it's urgent", ", it's important", ", high priority", " asap"])
+        tpl = c.T(TASK_ADD)
+        if "{dp}" not in tpl:
+            args.pop("due", None), args.pop("every", None), args.pop("priority", None)
+        return dsl_call("task", args), tpl.format(t=slot(t), dp=dp), {}
+    t = task_text(rng)
+    words = t.split()
+    query = " ".join(words[1:]) if len(words) > 1 and rng.random() < 0.6 else t
+    query = query[4:] if query.startswith("the ") else query
+    if r < 0.65:
+        return dsl_call("task", {"action": "done", "text": q(query)}), rng.choice(TASK_DONE).format(q=slot(query)), {}
+    if r < 0.75:
+        due, says = rng.choice(DUE_SAID)
+        return dsl_call("task", {"action": "move", "text": q(query), "due": q(due)}), \
+            rng.choice(TASK_MOVE).format(q=slot(query), d=slot(due)), {}
+    if r < 0.82:
+        return dsl_call("task", {"action": "delete", "text": q(query)}), rng.choice(TASK_DEL).format(q=slot(query)), {}
+    when = rng.choice(list(TASK_LIST))
+    prog = "task(action=list" + (f", when={when})" if when else ")")
+    return prog, rng.choice(TASK_LIST[when]), {}
+
+
 # ---------------------------------------------------------------- maintenance (phase 29)
 HEALTH = frames("HEALTH", [
     "run a health check", "health check", "check yourself", "are you working properly", "run diagnostics",
@@ -1641,7 +1740,7 @@ GENERATORS = [
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6), (gen_workspace, 5), (gen_focus, 5),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6), (gen_workspace, 5), (gen_focus, 5), (gen_tasks, 7),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",

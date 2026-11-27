@@ -316,7 +316,75 @@ FOCUS_RULES: list[tuple[re.Pattern, callable]] = [
      lambda m, t: _focus(t)),
 ]
 
-RULES: list[tuple[re.Pattern, callable]] = FOCUS_RULES + NOTE_RULES + WORKSPACE_RULES + CONTEXT_RULES + [
+# ---- phase 33: tasks
+_EVERY = [(r"\bevery ?day\b|\bdaily\b|\broz\b", "daily"), (r"\bevery weekday\b|\bon weekdays\b|\bweekdays\b", "weekdays"),
+          (r"\bevery week\b|\bweekly\b", "weekly"), (r"\bevery month\b|\bmonthly\b|\bhar mahine\b", "monthly")]
+_DUE_TAIL = (r"(?:\s+(?:by|on|before|due|till|until|for)\s+(.+)|\s+(.+?)\s+tak"
+             r"|\s+((?:day after )?tomorrow(?: \w+)?|today(?: \w+)?|tonight|kal(?: \w+)?|parso|next week|this weekend"
+             r"|(?:next |this )?(?:mon|tues|wednes|thurs|fri|satur|sun)day(?: \w+)?|at \d.*|in \d+ (?:days?|weeks?)))$")
+
+
+def _task_add(body: str) -> str:
+    text, args = body.strip(), []
+    for pat, every in _EVERY:
+        if re.search(pat, text, re.I):
+            text = re.sub(pat, " ", text, flags=re.I)
+            args.append(f"every={every}")
+            break
+    if re.search(r"\b(?:important|urgent|high priority|asap|zaroori)\b", text, re.I):
+        text = re.sub(r",?\s*\b(?:it'?s |its )?(?:important|urgent|high priority|asap|zaroori)\b", " ", text, flags=re.I)
+        args.append("priority=high")
+    text = re.sub(r"\s+", " ", text).strip(" ,.")
+    m = re.search(_DUE_TAIL, text, re.I)
+    due = None
+    if m:
+        due = next(g for g in m.groups() if g)
+        text = text[: m.start()].strip(" ,.")
+    esc = lambda s: s.replace("\\", "\\\\").replace('"', '\\"')        # noqa: E731
+    return "task(" + ", ".join(["action=add", f'text="{esc(text)}"'] + ([f'due="{esc(due.strip())}"'] if due else []) + args) + ")"
+
+
+def _task_move(what: str, when: str) -> str | None:
+    """Only a real date makes it a reschedule: "move these to archive" is a file move."""
+    from ..dates import parse_due
+    if parse_due(when) is None:
+        return None
+    return f'task(action=move, text="{_task_ref(what)}", due="{when.strip()}")'
+
+
+def _task_ref(text: str) -> str:
+    return re.sub(r"^(?:the|my|that|this)\s+", "", re.sub(r"\s+(?:task|item|to-?do)$", "", text.strip(" ?.!"), flags=re.I),
+                  flags=re.I)
+
+
+TASK_RULES: list[tuple[re.Pattern, callable]] = [
+    (re.compile(r"^what'?s (?:due )?today\??$|^what(?:'s| is) due today\??$|^what do i (?:have to|need to) do today\??$"
+                r"|^(?:show|list) (?:my )?tasks? (?:for |due )?today$|^today'?s tasks$|^aaj kya karna hai\??$", re.I),
+     lambda m, t: "task(action=list, when=today)"),
+    (re.compile(r"^(?:what'?s|what is|show(?: me)?|list) (?:my )?(?:overdue(?: tasks)?)\??$|^what(?:'s| is) overdue\??$", re.I),
+     lambda m, t: "task(action=list, when=overdue)"),
+    (re.compile(r"^(?:show|list) (?:my )?tasks? (?:for |due )?this week$|^what'?s due this week\??$|^this week'?s tasks$", re.I),
+     lambda m, t: "task(action=list, when=week)"),
+    (re.compile(r"^what did i (?:finish|complete|get done) this week\??$|^(?:show )?(?:my )?(?:completed|finished) tasks$", re.I),
+     lambda m, t: "task(action=list, when=done)"),
+    (re.compile(r"^(?:show|list|read|open)(?: me)? (?:all )?my (?:tasks|to-?dos?|to-?do list|task list)$|^my (?:tasks|to-?do list)$"
+                r"|^(?:mere )?tasks dikhao$", re.I),
+     lambda m, t: "task(action=list)"),
+    (re.compile(r"^(?:(?:i'?m |i am )?done with|(?:i )?finished|completed?|tick off|check off|mark) (.+?)(?: as (?:done|complete|finished))?$"
+                r"|^(.+?) (?:is|are) (?:done|finished|complete)$|^(.+?) ho gaya$", re.I),
+     lambda m, t: f'task(action=done, text="{_task_ref(m.group(1) or m.group(2) or m.group(3))}")'),
+    (re.compile(r"^(?:move|postpone|push|reschedule|shift) (.+?) to (.+)$|^(.+?) ko (.+?) (?:pe|par) shift karo$", re.I),
+     lambda m, t: _task_move(m.group(1) or m.group(3), m.group(2) or m.group(4))),
+    (re.compile(r"^(?:delete|remove|cancel) (?:the )?(?:task|to-?do) (.+)$|^remove (.+?) from my (?:to-?do |task )?list$"
+                r"|^(.+?) wala task hata do$", re.I),
+     lambda m, t: f'task(action=delete, text="{_task_ref(m.group(1) or m.group(2) or m.group(3))}")'),
+    (re.compile(r"^(?:add (?:a |the )?(?:task|to-?do)|new task|to-?do|add to my (?:to-?do |task )?list|put on my (?:to-?do )?list"
+                r"|task)[:,]?\s+(.+)$|^add (.+?) to my (?:to-?do |task )?list$|^(.+?) karna hai(?: .+ tak)?$", re.I),
+     lambda m, t: _task_add(m.group(1) or m.group(2) or (m.group(3) + (" " + re.search(r"karna hai (.+) tak$", t).group(1)
+                                                                          + " tak" if re.search(r"karna hai (.+) tak$", t) else "")))),
+]
+
+RULES: list[tuple[re.Pattern, callable]] = FOCUS_RULES + TASK_RULES + NOTE_RULES + WORKSPACE_RULES + CONTEXT_RULES + [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
     (re.compile(r"^(?!.*\btraining\b)(?:(?:hey )?jarvis,? )?(?:what(?:'s| is) the |show (?:me )?the |give me (?:the )?|get (?:me )?(?:the )?)?"
                 r"(?:(?:fastest|quickest|best|shortest) )?(?:route|way|directions?|road)(?: please)? (?:from .+ )?to .+$"

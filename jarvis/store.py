@@ -41,6 +41,19 @@ CREATE TABLE IF NOT EXISTS notes (          -- phase 30: notes and journal entri
 );
 CREATE INDEX IF NOT EXISTS idx_notes_ts ON notes(ts);
 
+CREATE TABLE IF NOT EXISTS tasks (          -- phase 33: to-dos with deadlines (text encrypted)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created REAL NOT NULL,
+    text TEXT NOT NULL,
+    due REAL,                    -- NULL: no deadline
+    has_time INTEGER NOT NULL DEFAULT 0,
+    every TEXT,                  -- daily | weekdays | weekly | monthly
+    priority TEXT NOT NULL DEFAULT 'normal',
+    done REAL,                   -- when it was ticked off
+    deleted INTEGER NOT NULL DEFAULT 0,
+    nudged REAL                  -- when Jarvis last said it was overdue
+);
+
 CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     due REAL NOT NULL,
@@ -156,6 +169,41 @@ class Store:
     def set_note_deleted(self, note_id: int, deleted: bool) -> None:
         with self._lock:
             self._db.execute("UPDATE notes SET deleted = ? WHERE id = ?", (1 if deleted else 0, note_id))
+            self._db.commit()
+
+    # ------------------------------------------------------------ tasks (phase 33)
+    TASK_FIELDS = ("text", "due", "has_time", "every", "priority", "done", "deleted", "nudged")
+
+    def add_task(self, text: str, due: float | None = None, has_time: bool = False, every: str | None = None,
+                 priority: str = "normal") -> int:
+        with self._lock:
+            cur = self._db.execute(
+                "INSERT INTO tasks(created, text, due, has_time, every, priority) VALUES (?,?,?,?,?,?)",
+                (time.time(), protect(text, self.encrypt), due, int(has_time), every, priority))
+            self._db.commit()
+            return cur.lastrowid
+
+    def tasks(self, include_done: bool = False) -> list[dict]:
+        q = "SELECT id, created, text, due, has_time, every, priority, done, nudged FROM tasks WHERE deleted = 0"
+        if not include_done:
+            q += " AND done IS NULL"
+        with self._lock:
+            rows = self._db.execute(q + " ORDER BY due IS NULL, due, created").fetchall()
+        return [{"id": i, "created": c, "text": unprotect(t), "due": d, "has_time": bool(h), "every": e,
+                 "priority": p, "done": dn, "nudged": n} for i, c, t, d, h, e, p, dn, n in rows]
+
+    def get_task(self, task_id: int) -> dict | None:
+        return next((t for t in self.tasks(include_done=True) if t["id"] == task_id), None)
+
+    def update_task(self, task_id: int, **fields) -> None:
+        sets, args = [], []
+        for k, v in fields.items():
+            if k not in self.TASK_FIELDS:
+                raise ValueError(k)
+            sets.append(f"{k} = ?")
+            args.append(protect(v, self.encrypt) if k == "text" else int(v) if isinstance(v, bool) else v)
+        with self._lock:
+            self._db.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", (*args, task_id))
             self._db.commit()
 
     def add_reminder(self, due: float, text: str) -> int:

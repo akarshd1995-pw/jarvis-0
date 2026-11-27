@@ -812,7 +812,7 @@ class Jarvis:
         if not 1 <= n <= len(rows):
             raise ContextError(f"I only showed {len(rows)} result{'s' * (len(rows) != 1)}")
         row = rows[n - 1]
-        if row.get("source") == "note":                # "open the second one" after a notes list: read it out
+        if row.get("source") in ("note", "task"):      # "open the second one" after a list: read it out
             return ActionResult(row.get("text", row["title"]), kind="note_read", data={"text": row.get("text", "")})
         if not dry_run:
             if row.get("source") == "web":
@@ -831,7 +831,7 @@ class Jarvis:
             report = self.executor.run(prog)
         for r in report.results:                    # search / file list: rows the command bar can show and open
             rows = None
-            if r.kind in ("memory", "notes") and r.data.get("results"):
+            if r.kind in ("memory", "notes", "tasks") and r.data.get("results"):
                 rows = r.data["results"]
             elif r.kind == "list" and r.data.get("paths"):
                 rows = [self._file_row(p) for p in r.data["paths"]]
@@ -1078,7 +1078,33 @@ class Jarvis:
         while True:
             for _id, text in self.store.due_reminders(time.time()):
                 on_reminder(self.persona.reminder_due(text))
+            try:
+                self.nudge_overdue(on_reminder)
+            except Exception as e:
+                log.warning("task nudge failed: %s", e)
             time.sleep(10)
+
+    def nudge_overdue(self, say, now: float | None = None) -> int:
+        """Phase 33: a task with a time just went past its deadline: say so once."""
+        from . import dates as D
+        from .actions.tasks import overdue_to_nudge
+        now = time.time() if now is None else now
+        due = overdue_to_nudge(self.store, now)
+        for t in due:
+            self.store.update_task(t["id"], nudged=now)
+            short = " ".join(t["text"].split()[:3])
+            say(self.persona.say("task_overdue", text=t["text"], due=D.nice(t["due"], True, now), short=short))
+        return len(due)
+
+    def hud_items(self, now: float | None = None) -> list[tuple]:
+        """Reminders, then tasks due today or overdue, for the HUD's list."""
+        from .actions.tasks import select
+        now = time.time() if now is None else now
+        items: list[tuple] = list(self.store.upcoming_reminders(now))
+        for t in select(self.store, "today", now)[:3]:
+            label = "overdue" if t["due"] < now else ("today" if not t["has_time"] else None)
+            items.append((t["due"], "\u2610 " + t["text"], label))
+        return items
 
 
 def _cli_confirm(tier: Tier, summary: str, items: list[str]) -> bool:
@@ -1229,7 +1255,7 @@ def main() -> None:
         from .hud.view import HUD
         try:
             hud = HUD(bar.root, sampler, name=config.persona_name,
-                      reminders=lambda: jarvis.store.upcoming_reminders(time.time()),
+                      reminders=jarvis.hud_items,
                       corner=config.hud_corner, opacity=config.hud_opacity,
                       click_through=config.hud_click_through)
 

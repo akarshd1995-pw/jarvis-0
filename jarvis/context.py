@@ -33,7 +33,7 @@ RESULTS_TTL = 600                      # "these" can mean the results Jarvis sho
 
 FILE_ACTIONS = ("move_files", "copy_files", "delete_files", "list_files")
 TEXT_ARGS = {"search_web": "query", "play_media": "query", "search_memory": "query", "open_url": "url",
-             "remind": "text", "directions": "destination", "note": "text", "find_notes": "query"}
+             "remind": "text", "directions": "destination", "note": "text", "find_notes": "query", "task": "text"}
 
 
 class ContextError(Exception):

@@ -62,6 +62,7 @@ class Facts:
     learning: list[str] = field(default_factory=list)   # phase 39: weekly review nudge, drift alert
     notes: list[tuple[str, str]] = field(default_factory=list)   # phase 30: today's (kind, text), oldest first
     focus_min: float = 0.0                                        # phase 32: minutes of focus sessions today
+    tasks: list[str] = field(default_factory=list)                # phase 33: due today / overdue / still open
     active_min: int = 0
     commands: int = 0
     alerts: int = 0
@@ -183,6 +184,9 @@ def gather(kind: str, store, snapshot, logs: dict[str, Path], eval_report: Path 
         f.clutter = folder_clutter(downloads, now, today_start=day_start)
     if kind == "evening" and hasattr(store, "notes"):
         f.notes = [(k, t) for _, _, k, t in reversed(store.notes(since=day_start))]
+    if hasattr(store, "tasks"):
+        from .actions.tasks import briefing_lines
+        f.tasks = briefing_lines(store, kind, now)
     events = store.events_since(day_start)
     if kind == "evening":
         f.focus_min = sum(float(p.get("minutes", 0)) for _, k, p in events if k == "focus_session")
@@ -324,6 +328,7 @@ def render(f: Facts, name: str = "Jarvis", address: str = "sir", tone: str = "bu
     if f.improve:
         lines.append(f.improve)
     lines.extend(f.learning)
+    lines.extend(f.tasks)
     lines.extend(notes_lines(f.notes))
     if f.focus_min >= 5:
         from .focus import fmt_left

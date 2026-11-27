@@ -37,6 +37,7 @@ DRY = {
     "mood": "mood(kind=happy)", "open_result": "open_result(n=1)",
     "workspace": 'workspace(action=start, name="coding")',
     "focus": "focus(action=start, minutes=25, block=yes)", "gaming": "gaming(action=on)",
+    "task": 'task(action=add, text="selftest", due="friday")',
 }
 LIVE_ACTIONS = {"list_files", "move_files", "copy_files", "delete_files", "remind", "search_memory", "undo",
                 "open_result", "note", "find_notes", "delete_note"}
@@ -190,6 +191,14 @@ def run(log=print) -> list[Check]:
                 c = reply_ok("undo()")[0] and j.focus.session is None
                 return a and b and c, ""
             check("focus: start, status, undo", focus)
+
+            def tasks():                                    # phase 33: add with a deadline, list, tick off, undo
+                a = reply_ok('task(action=add, text="send the selftest report", due="tomorrow 5 pm")')[0]
+                b = "send the selftest report" in j.handle("task(action=list)")
+                c = reply_ok('task(action=done, text="selftest report")')[0] and not j.store.tasks()
+                d = reply_ok("undo()")[0] and len(j.store.tasks()) == 1
+                return a and b and c and d, ""
+            check("tasks: add, list, done, undo", tasks)
             # 5. everything else as a preview
             from .actions.base import Ctx
             ctx = Ctx(cfg, j.store, "selftest")

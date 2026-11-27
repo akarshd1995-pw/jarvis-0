@@ -269,11 +269,14 @@ class HUD:
             self.rem_items.append(self.c.create_text(PAD + 8, 386, text="No reminders", anchor="w", fill=FAINT,
                                                      font=self.F(9)))
             return
-        for k, (due, text) in enumerate(items):
+        for k, item in enumerate(items):
+            due, text = item[0], item[1]
+            label = item[2] if len(item) > 2 else None          # tasks: "today" / "overdue"
             d = dt.datetime.fromtimestamp(due)
-            when = d.strftime("%H:%M") if d.date() == dt.date.today() else d.strftime("%a %H:%M")
+            when = label or (d.strftime("%H:%M") if d.date() == dt.date.today() else d.strftime("%a %H:%M"))
             y = 372 + k * 15
-            self.rem_items.append(self.c.create_text(PAD + 8, y, text=when, anchor="w", fill=STATE_COLORS["idle"],
+            self.rem_items.append(self.c.create_text(PAD + 8, y, text=when, anchor="w",
+                                                     fill=STATE_COLORS["alert"] if label == "overdue" else STATE_COLORS["idle"],
                                                      font=self.F(9, kind="mono")))
             self.rem_items.append(self.c.create_text(PAD + 84, y, text=textwrap.shorten(text, 32, placeholder="…"),
                                                      anchor="w", fill=TEXT, font=self.F(9)))

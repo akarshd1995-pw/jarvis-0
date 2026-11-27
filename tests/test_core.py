@@ -2889,3 +2889,106 @@ def test_focus_rules_and_training_data():
     progs = [canonical(gen_focus(Ctx(r, "train"))[0]) for _ in range(1000)]
     for bit in ("minutes=", "mode=pomodoro", "block=yes", "quiet=total", "action=stop", "action=status", "gaming(action=on)"):
         assert any(bit in p for p in progs), bit
+
+
+# ---------------------------------------------------------------- phase 33: tasks & deadlines
+def test_deadlines_in_plain_words():
+    from datetime import datetime
+    from jarvis.dates import next_occurrence, nice, parse_due
+    now = datetime(2026, 11, 27, 9, 50)                        # a Friday
+    def d(t):
+        r = parse_due(t, now)
+        return (datetime.fromtimestamp(r[0]).strftime("%a %d %b %H:%M"), r[1]) if r else None
+    assert d("friday") == ("Fri 27 Nov 23:59", False) and d("by monday") == ("Mon 30 Nov 23:59", False)
+    assert d("next monday") == ("Mon 30 Nov 23:59", False) and d("next friday") == ("Fri 04 Dec 23:59", False)
+    assert d("tomorrow 5 pm") == ("Sat 28 Nov 17:00", True) and d("kal shaam") == ("Sat 28 Nov 18:00", True)
+    assert d("5th december") == d("december 5") == d("5/12") == ("Sat 05 Dec 23:59", False)
+    assert d("the 1st") == ("Tue 01 Dec 23:59", False) and d("end of month") == ("Mon 30 Nov 23:59", False)
+    assert d("at 8 am") == ("Sat 28 Nov 08:00", True)           # already past today: tomorrow
+    assert d("5 baje") == ("Fri 27 Nov 17:00", True) and d("garbage") is None
+    assert nice(parse_due("tomorrow 5 pm", now)[0], True, now.timestamp()) == "tomorrow 5 pm"
+    assert datetime.fromtimestamp(next_occurrence(datetime(2026, 11, 27, 18).timestamp(), "weekdays")).day == 30
+    assert datetime.fromtimestamp(next_occurrence(datetime(2026, 1, 31, 18).timestamp(), "monthly")).day == 28
+
+
+def test_tasks_end_to_end_with_undo(tmp_path):
+    j = _jarvis(tmp_path)
+    j.config.show_details = False
+    out = j.handle("add task finish the report by friday")
+    assert "finish the report" in out and "due" in out
+    j.handle("add task pay rent every month on the 1st")
+    j.handle("add task renew passport, it's important")
+    out = j.handle("show my tasks")
+    assert "finish the report" in out and "pay rent" in out and "renew passport" in out
+    rows = j.take_results()
+    assert rows and {r["source"] for r in rows} == {"task"}       # clickable rows in the command bar
+    out = j.handle("done with the report")
+    assert "Done" in out and "finish the report" not in j.handle("show my tasks")
+    j.handle("undo")
+    assert "finish the report" in j.handle("show my tasks")       # undo un-ticks it
+    out = j.handle("mark rent as done")
+    assert "next one is due" in out.lower()                       # a recurring task moves on instead
+    assert "pay rent" in j.handle("show my tasks")
+    out = j.handle("move the report to monday")
+    assert "Moved" in out and ("Monday" in out or "tomorrow" in out or "today" in out)   # whatever day it is
+    asked = []
+    j.executor.confirm = lambda *a: asked.append(a) or True
+    j.handle("delete the task passport")
+    assert asked and "renew passport" not in j.handle("show my tasks")
+    j.handle("undo")
+    assert "renew passport" in j.handle("show my tasks")
+    assert "can't find an open task" in j.handle("done with the moon landing")
+
+
+def test_overdue_nudge_once_and_on_the_hud(tmp_path):
+    import time as _t
+    j = _jarvis(tmp_path)
+    now = _t.time()
+    j.store.add_task("send the invoice", due=now - 60, has_time=True)
+    j.store.add_task("buy milk", due=now + 3600, has_time=True)
+    said = []
+    assert j.nudge_overdue(said.append, now) == 1 and "send the invoice" in said[0] and "send the" in said[0]
+    assert j.nudge_overdue(said.append, now + 30) == 0              # only once
+    items = j.hud_items(now)
+    assert any(len(i) == 3 and i[2] == "overdue" and "send the invoice" in i[1] for i in items)
+
+
+def test_tasks_in_the_briefings(tmp_path):
+    import time as _t
+    from datetime import datetime
+    from jarvis.actions.tasks import briefing_lines
+    from jarvis.store import Store
+    s = Store(tmp_path / "j.db", encrypt=False)
+    noon = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0).timestamp()
+    s.add_task("submit the assignment", due=noon + 11 * 3600, has_time=False)
+    s.add_task("call the bank", due=noon - 2 * 86400)
+    morning = briefing_lines(s, "morning", noon)
+    assert any("Due today: submit the assignment" in l for l in morning)
+    assert any("Overdue: call the bank" in l for l in morning)
+    evening = briefing_lines(s, "evening", noon)
+    assert any("Still open from today" in l for l in evening)
+
+
+def test_task_rules_dont_steal_file_moves():
+    import random
+    from datagen.generate_intents import TEACHES, gen_tasks, Ctx
+    from jarvis.dsl.grammar import canonical
+    from jarvis.nlu.rule_parser import rule_parse
+    cases = {"add task finish the report by friday": 'task(action=add, due="friday", text="finish the report")',
+             "add task pay rent every month on the 1st": 'task(action=add, due="the 1st", every=monthly, text="pay rent")',
+             "report karna hai friday tak": 'task(action=add, due="friday", text="report")',
+             "aaj kya karna hai": "task(action=list, when=today)",
+             "done with the report": 'task(action=done, text="report")',
+             "move the report to monday": 'task(action=move, due="monday", text="report")',
+             "what's overdue": "task(action=list, when=overdue)",
+             "move these to archive": "move_files(dest=Archive, src=this)",
+             "move the pdfs in downloads to documents": "move_files(dest=Documents, ext=pdf, src=Downloads)",
+             "i'm done focusing": "focus(action=stop)",
+             "remind me to call mom in 10 minutes": 'remind(after=10m, text="call mom")'}
+    for text, want in cases.items():
+        assert str(rule_parse(text)) == want, (text, rule_parse(text))
+    assert "tasks" in TEACHES
+    r = random.Random(6)
+    progs = [canonical(gen_tasks(Ctx(r, "train"))[0]) for _ in range(1500)]
+    for bit in ("action=add", "due=", "every=", "priority=high", "action=done", "action=move", "action=delete", "when=today"):
+        assert any(bit in p for p in progs), bit

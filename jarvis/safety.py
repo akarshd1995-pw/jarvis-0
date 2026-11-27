@@ -29,6 +29,7 @@ ACTION_TIERS: dict[str, Tier] = {
     "delete_note": Tier.DESTRUCTIVE,
     "workspace": Tier.SAFE,
     "focus": Tier.SAFE,                    # with blocking it asks first (below)
+    "task": Tier.SAFE,                     # deleting one asks first (below); everything can be undone
     "gaming": Tier.SAFE,                # start / save / list; close and delete ask first (below)      # always asks, showing which note; undo brings it back
     "unsupported": Tier.SAFE,
     "search_web": Tier.SAFE,
@@ -74,6 +75,8 @@ def confirm_name(action: str, args: dict | None = None) -> str:
 def needs_confirmation(action: str, confirm_actions: list[str] | None = None, args: dict | None = None) -> bool:
     if action == "power" and str((args or {}).get("action")) == "cancel":
         return False
+    if action == "task":
+        return str((args or {}).get("action")) == "delete"
     if action == "focus":                      # blocking apps / sites: say which, and ask
         return str((args or {}).get("action")) == "start" and str((args or {}).get("block")) == "yes"
     if action == "workspace":                  # closing apps or deleting a saved layout: always ask

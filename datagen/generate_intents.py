@@ -1023,7 +1023,7 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes", "workspaces", "focus_gaming", "tasks"]
+           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes", "workspaces", "focus_gaming", "tasks", "your_words"]
 
 
 # ---------------------------------------------------------------- directions (routes, travel time)
@@ -1655,6 +1655,31 @@ def gen_tasks(c: Ctx):
     return prog, rng.choice(TASK_LIST[when]), {}
 
 
+# ---------------------------------------------------------------- your words (phase 43)
+NICKS = [("dl", "downloads"), ("docs", "documents"), ("vs", "cursor"), ("yt", "youtube"), ("ammu", "amrutha"),
+         ("proj", "prototypes"), ("pics", "pictures"), ("bro", "rahul"), ("insta", "instagram"), ("wa", "whatsapp")]
+VOCAB_TEACH = ["when i say {w} i mean {m}", "{w} means {m}", "learn that {w} means {m}", "remember that {w} means {m}",
+               "when i say '{w}', i mean '{m}'", "from now on {w} means {m}", "jab main {w} bolun to {m} samajhna",
+               "{w} matlab {m}"]
+VOCAB_FORGET = ["forget {w}", "forget the nickname {w}", "unlearn {w}", "stop using {w} as a nickname",
+                "{w} isn't a nickname", "{w} bhool jao"]
+VOCAB_LIST = ["show my nicknames", "what nicknames do you know", "list my words", "show my shortcuts",
+              "my vocabulary", "mere nicknames dikhao"]
+
+
+def gen_vocab(c: Ctx):
+    rng = c.rng
+    w, m = rng.choice(NICKS) if rng.random() < 0.5 else (LX.pseudo_word(rng).lower()[:6], rng.choice(
+        ["downloads", "documents", "cursor", "chrome", "spotify", rng.choice(LX.NAMES).lower(), "prototypes"]))
+    r = rng.random()
+    if r < 0.6:
+        return dsl_call("vocab", {"action": "teach", "word": q(w), "means": q(m)}), \
+            rng.choice(VOCAB_TEACH).format(w=slot(w), m=slot(m)), {}
+    if r < 0.85:
+        return dsl_call("vocab", {"action": "forget", "word": q(w)}), rng.choice(VOCAB_FORGET).format(w=slot(w)), {}
+    return "vocab(action=list)", rng.choice(VOCAB_LIST), {}
+
+
 # ---------------------------------------------------------------- maintenance (phase 29)
 HEALTH = frames("HEALTH", [
     "run a health check", "health check", "check yourself", "are you working properly", "run diagnostics",
@@ -1740,9 +1765,21 @@ GENERATORS = [
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6), (gen_workspace, 5), (gen_focus, 5), (gen_tasks, 7),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6), (gen_workspace, 5), (gen_focus, 5), (gen_tasks, 7), (gen_vocab, 2),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
+
+
+def use_personal(vocab: dict) -> int:
+    """Phase 43: mix in examples made from your own apps, projects, folders and typos. Returns how many kinds."""
+    global _FNS, _WEIGHTS
+    from .personal import personal_generators
+    extra = personal_generators(vocab, list(GENERATORS))
+    if extra:
+        _FNS, _WEIGHTS = zip(*(list(GENERATORS) + extra))
+    return len(extra)
+
+
 CONNECTORS = [" and ", " and then ", " then ", ", then ", ". also ", ", ", " after that ", " & ", "; ",
               " aur ", " aur phir ", " phir ", ", uske baad "]
 PRE = ["", "", "", "", "hey jarvis ", "jarvis ", "jarvis, ", "please ", "can you ", "could you ", "yo ",
@@ -1891,7 +1928,14 @@ def main():
     ap.add_argument("--extra", type=Path, default=Path("data/user_corrections.jsonl"),
                     help="your own (text, program) corrections; oversampled")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--vocab", type=Path, default=None, help="your vocab.json (default: Jarvis's data folder)")
+    ap.add_argument("--no-personal", action="store_true", help="leave out examples made from your own words")
     args = ap.parse_args()
+    if not args.no_personal:
+        from .personal import load_vocab
+        kinds = use_personal(load_vocab(args.vocab))
+        if kinds:
+            print(f"Adding personal examples from your words ({kinds} kinds: apps / projects & folders / typos)")
     bad = unseen_frame_words()
     if bad:
         raise SystemExit(f"held-out frames use words training never shows: {bad}")

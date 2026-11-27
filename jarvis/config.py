@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -205,6 +206,12 @@ class Config:
         for alias, p in self.folders.items():
             if alias.lower() == str(name_or_path).lower():
                 return Path(p).expanduser()
+        learned = getattr(self, "learned_places", None)          # phase 43: your projects and folders by name
+        if learned:
+            key = re.sub(r"[\s_\-.]+", " ", str(name_or_path).lower()).strip()
+            key = re.sub(r"\s+(?:project|folder|repo)$", "", key)
+            if key in learned:
+                return Path(learned[key])
         return Path(str(name_or_path)).expanduser()
 
     @classmethod

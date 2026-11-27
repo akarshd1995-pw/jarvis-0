@@ -2992,3 +2992,107 @@ def test_task_rules_dont_steal_file_moves():
     progs = [canonical(gen_tasks(Ctx(r, "train"))[0]) for _ in range(1500)]
     for bit in ("action=add", "due=", "every=", "priority=high", "action=done", "action=move", "action=delete", "when=today"):
         assert any(bit in p for p in progs), bit
+
+
+# ---------------------------------------------------------------- phase 43: your words
+def test_indian_scripts_read_as_hinglish():
+    from jarvis.indic import has_indic, to_latin
+    assert to_latin("डाउनलोड्स खोलो") == "downloads kholo"
+    assert to_latin("आज क्या करना है") == "aaj kya karna hai"
+    assert to_latin("कमरा") == "kamra" and to_latin("चलाओ") == "chalao" and to_latin("वाला") == "wala"
+    assert to_latin("अरिजीत सिंह का गाना बजाओ") == "arijit singh ka gana bajao"
+    assert to_latin("१० मिनट") == "10 minute"
+    assert to_latin("open डाउनलोड्स please") == "open downloads please"
+    assert to_latin("ಡೌನ್ಲೋಡ್ಸ್") == "daunlods" and has_indic("ಡೌನ್")       # Kannada via the shared layout
+    assert to_latin("plain english") == "plain english"
+
+
+def test_nicknames_teach_use_and_undo(tmp_path):
+    j = _jarvis(tmp_path)
+    j.config.show_details = False
+    out = j.handle("when I say dl I mean downloads")
+    assert "dl" in out and "downloads" in out
+    assert j.read_as("show pdfs in dl") == "show pdfs in downloads"
+    assert j.read_as("handle the dl-folder") == "handle the dl-folder"      # whole words only
+    assert "dl" in j.handle("show my nicknames")
+    j.handle("undo")
+    assert j.read_as("show pdfs in dl") == "show pdfs in dl"
+    j.handle("dl means downloads")
+    j.handle("forget dl")
+    assert j.read_as("dl") == "dl"
+    assert j.read_as("डाउनलोड्स खोलो") == "downloads kholo"
+
+
+def test_typos_are_learned_from_your_commands():
+    from jarvis.vocab import learn_typos
+    known = {"downloads", "open", "folder", "music", "spotify", "move", "pdfs", "documents"}
+    texts = ["opne donwloads", "move pdfs to documnets", "opne music", "donwloads folder", "pavazha malli",
+             "pavazha malli", "documnets please", "spotfy"]
+    assert learn_typos(texts, known) == {"documnets": "documents", "donwloads": "downloads", "opne": "open"}  # twice+
+    assert "pavazha" not in learn_typos(texts, known)                     # not close to anything: not a typo
+
+
+def test_vocab_refresh_finds_projects_and_folders(tmp_path):
+    from jarvis.config import Config
+    from jarvis.vocab import Vocab
+    home = tmp_path / "home"
+    for p in ("prototypes/everway/.git", "prototypes/jarvis-0/.git", "prototypes/jarvis-0/sub/.git",
+              "AppData/Local/thing/.git", "Documents/Tax 2026", "Documents/Resumes"):
+        (home / p).mkdir(parents=True)
+    cfg = Config(data_dir=tmp_path / "data", folders={"Documents": str(home / "Documents")})
+    cfg.data_dir.mkdir(parents=True)
+    v = Vocab.load(cfg.data_dir)
+    stats = v.refresh(cfg, home=home)
+    assert set(v.data["projects"]) == {"everway", "jarvis-0"}              # not AppData, not a project's subfolder
+    assert {"Tax 2026", "Resumes"} <= set(v.data["folders"]) and stats["projects"] == 2
+    cfg.learned_places = v.places()
+    assert cfg.resolve_folder("everway") == home / "prototypes" / "everway"
+    assert cfg.resolve_folder("Everway project") == home / "prototypes" / "everway"
+    assert cfg.resolve_folder("tax 2026") == home / "Documents" / "Tax 2026"
+
+
+def test_personal_training_examples(tmp_path):
+    import random
+    from datagen.generate_intents import GENERATORS, Ctx
+    from datagen.personal import personal_generators
+    from jarvis.dsl.grammar import canonical
+    vocab = {"apps": ["Obsidian", "Spotify", "WhatsApp Beta"], "projects": {"everway": "C:/p/everway"},
+             "folders": {"Tax 2026": "C:/d/Tax 2026"}, "typos": {"donwloads": "downloads"}}
+    gens = personal_generators(vocab, list(GENERATORS))
+    assert len(gens) == 3
+    r = random.Random(1)
+    seen = []
+    for fn, _ in gens:
+        for _ in range(60):
+            prog, text, _ = fn(Ctx(r, "train"))
+            canonical(prog)
+            seen.append((text.replace("\x01", "").replace("\x02", ""), prog))
+    progs = " ".join(p for _, p in seen)
+    assert 'open_app(name="obsidian")' in progs and 'name="spotify"' not in progs     # known apps keep their label
+    assert 'open_folder(path="everway")' in progs and 'dest="tax 2026"' in progs
+    assert any("donwloads" in t for t, _ in seen)
+    assert personal_generators({}, list(GENERATORS)) == []
+
+
+def test_vocab_rules():
+    from jarvis.nlu.rule_parser import rule_parse
+    cases = {"when I say dl I mean downloads": 'vocab(action=teach, means="downloads", word="dl")',
+             "learn that ammu means amrutha": 'vocab(action=teach, means="amrutha", word="ammu")',
+             "jab main dl bolun to downloads samajhna": 'vocab(action=teach, means="downloads", word="dl")',
+             "forget dl": 'vocab(action=forget, word="dl")', "show my nicknames": "vocab(action=list)",
+             "open my everway project": 'open_folder(path="everway")',
+             "forget the note about the bank": 'delete_note(query="bank")'}
+    for text, want in cases.items():
+        assert str(rule_parse(text)) == want, (text, rule_parse(text))
+    assert rule_parse("this means nothing") is None
+
+
+def test_personal_examples_reach_the_dataset(monkeypatch):
+    import random
+    import datagen.generate_intents as G
+    monkeypatch.setattr(G, "_FNS", G._FNS)
+    monkeypatch.setattr(G, "_WEIGHTS", G._WEIGHTS)
+    assert G.use_personal({"projects": {"zorblax": "C:/p/zorblax"}}) == 1
+    r = random.Random(0)
+    progs = [G.sample(r)["program"] for _ in range(4000)]
+    assert any('"zorblax"' in p for p in progs)

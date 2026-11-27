@@ -189,6 +189,8 @@ class Persona:
             return self._plan_focus(d)
         if k == "task":
             return self._plan_task(d)
+        if k == "vocab":
+            return self._plan_vocab(d)
         if k == "tasks":
             return self._plan_tasks(d)
         if k == "gaming":
@@ -350,6 +352,20 @@ class Persona:
     def _and(items: list[str]) -> str:
         items = list(dict.fromkeys(items))
         return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1] if items else ""
+
+    def _plan_vocab(self, d: dict) -> tuple[str, dict]:
+        act = d["action"]
+        if act == "teach":
+            return ("vocab_changed" if d.get("replaced") else "vocab_taught"), {"word": d["word"], "means": d["means"],
+                                                                                "old": d.get("replaced") or ""}
+        if act == "forget":
+            return ("vocab_forgot" if d.get("known") else "vocab_unknown"), {"word": d["word"]}
+        al = d.get("aliases") or {}
+        nick = "; ".join(f"\"{w}\" = {m}" for w, m in list(al.items())[:8]) or "none yet"
+        typos = ", ".join(f"{t} \u2192 {w}" for t, w in list((d.get("typos") or {}).items())[:6])
+        projects = self._and(d.get("projects") or []) or "none found"
+        return "vocab_list", {"nick": nick, "typos": f" Typos I've learned: {typos}." if typos else "",
+                              "apps": str(d.get("apps", 0)), "projects": projects, "folders": str(d.get("folders", 0))}
 
     def _plan_task(self, d: dict) -> tuple[str, dict]:
         act, text = d["action"], _short(d["text"], 90)

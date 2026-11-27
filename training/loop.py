@@ -165,6 +165,21 @@ def score_both(live_ckpt: Path, cand_ckpt: Path, data: Path, tokenizer: Path, li
     return out
 
 
+# ------------------------------------------------------------------ your words (phase 43)
+def refresh_vocab() -> None:
+    """Before training: look again at your apps, projects, folders, and the typos in your past commands."""
+    try:
+        from jarvis.config import Config
+        from jarvis.vocab import Vocab, known_words
+        cfg = Config.load()
+        v = Vocab.load(cfg.data_dir)
+        texts = [r["text"] for r in real_commands(3000)]
+        s = v.refresh(cfg, known_words(15000), texts)
+        log(f"your words: {s['apps']} apps, {s['projects']} projects, {s['folders']} folders, {s['typos']} typos")
+    except Exception as e:                                   # never block training on this
+        log(f"(couldn't refresh your words: {e})")
+
+
 # ------------------------------------------------------------------ report card on your real commands (phase 39)
 def real_commands(limit: int = 3000) -> list[dict]:
     """Your recent real commands from Jarvis's private usage log (empty if learning is off or nothing yet)."""
@@ -299,7 +314,8 @@ def run(args) -> dict:
     report = {"started": dt.datetime.now().isoformat(timespec="seconds"), "reasons": args.reasons,
               "corrections": count_lines(CORRECTIONS)}
     seed = int(time.time()) % 100000
-    log(f"generating {args.n:,} examples (old + new skills, plus your corrections)...")
+    refresh_vocab()
+    log(f"generating {args.n:,} examples (old + new skills, your words, plus your corrections)...")
     subprocess.run([py, "-u", "-m", "datagen.generate_intents", "--n", str(args.n), "--n-eval", str(args.n_eval),
                     "--out", str(data), "--seed", str(seed), "--extra", str(CORRECTIONS)], cwd=ROOT, check=True)
     log(f"fine-tuning from the live model for up to {args.steps:,} steps...")

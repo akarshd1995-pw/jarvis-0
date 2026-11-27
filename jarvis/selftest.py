@@ -38,6 +38,7 @@ DRY = {
     "workspace": 'workspace(action=start, name="coding")',
     "focus": "focus(action=start, minutes=25, block=yes)", "gaming": "gaming(action=on)",
     "task": 'task(action=add, text="selftest", due="friday")',
+    "vocab": "vocab(action=list)",
 }
 LIVE_ACTIONS = {"list_files", "move_files", "copy_files", "delete_files", "remind", "search_memory", "undo",
                 "open_result", "note", "find_notes", "delete_note"}
@@ -199,6 +200,13 @@ def run(log=print) -> list[Check]:
                 d = reply_ok("undo()")[0] and len(j.store.tasks()) == 1
                 return a and b and c and d, ""
             check("tasks: add, list, done, undo", tasks)
+
+            def words():                                    # phase 43: a nickname works at once; Devanagari reads
+                a = reply_ok('vocab(action=teach, word="dl", means="downloads")')[0]
+                b = j.read_as("dl kholo") == "downloads kholo" and j.read_as("डाउनलोड्स खोलो") == "downloads kholo"
+                c = reply_ok("undo()")[0] and j.read_as("dl kholo") == "dl kholo"
+                return a and b and c, ""
+            check("your words: nickname, Devanagari, undo", words)
             # 5. everything else as a preview
             from .actions.base import Ctx
             ctx = Ctx(cfg, j.store, "selftest")

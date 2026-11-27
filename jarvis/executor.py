@@ -123,6 +123,9 @@ class Executor:
             try:
                 if inverse.get("op") in ("note_forget", "note_restore"):          # phase 30: notes
                     self.store.set_note_deleted(inverse["id"], inverse["op"] == "note_forget")
+                elif inverse.get("op") == "vocab_set":                           # phase 43: a nickname
+                    from .vocab import Vocab
+                    Vocab.load(self.config.data_dir).set_alias(inverse["word"], inverse["means"])
                 elif inverse.get("op") == "task_set":                            # phase 33: tasks
                     self.store.update_task(inverse["id"], **inverse["fields"])
                 elif inverse.get("op") == "focus_stop":                          # phase 32: end focus & blocking

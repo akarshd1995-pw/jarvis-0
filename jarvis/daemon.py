@@ -1,6 +1,7 @@
 """Jarvis-0 daemon: wires collectors, brain, executor, reminders and the UI together."""
 from __future__ import annotations
 
+import re
 import argparse
 import sys
 import os
@@ -32,6 +33,7 @@ HELP = """Commands:
   /improve        fine-tune on your corrections now (switches only if better)
   /doctor         health check: tests every part of Jarvis and repairs what it can
   /perf           where the time and memory go: start-up, each step of a command, models in memory
+  /words          your nicknames, typos, projects and folders I know; /words refresh looks again
   /setup          what I found on this PC: folders (OneDrive, moved), apps, browser, monitors, battery
   /review         go through the commands I wasn't sure about (also: "review my commands")
   /usage          how sure I've been this week; /usage forget wipes the saved commands
@@ -99,6 +101,10 @@ class Jarvis:
         self.focus = F.Engine(log=lambda kind, data: self.store.log_event(kind, data),
                               sites=list(config.focus_block_sites), apps=list(config.focus_block_apps))
         F.CURRENT = self.focus
+        from .vocab import Vocab                       # phase 43: your words
+        self.vocab = Vocab.load(config.data_dir)
+        config.learned_places = self.vocab.places()
+        REGISTRY["vocab"] = self._vocab_action
         REGISTRY["focus"] = self._focus_action
         REGISTRY["gaming"] = self._gaming_action
         from .dialog import Conversation, DialogModel  # phase 6: follow-ups and asking back
@@ -220,6 +226,46 @@ class Jarvis:
         t = threading.Thread(target=loop, daemon=True, name="yield")
         t.start()
         return t
+
+    # ------------------------------------------------------------ phase 43: your words
+    def _vocab_action(self, args, ctx, dry_run: bool):
+        act = str(args["action"])
+        v = self.vocab
+        if act == "list":
+            d = v.data
+            return ActionResult("your words", kind="vocab", data={
+                "action": "list", "aliases": dict(d.get("aliases") or {}), "typos": dict(d.get("typos") or {}),
+                "apps": len(d.get("apps") or []), "projects": sorted((d.get("projects") or {}))[:12],
+                "folders": len(d.get("folders") or {})})
+        word = str(args.get("word", ""))
+        if act == "teach":
+            means = str(args.get("means", ""))
+            if dry_run:
+                return ActionResult(f"{word} = {means}", kind="vocab", data={"action": "teach", "word": word,
+                                                                            "means": means, "dry": True})
+            w, m, before = v.teach(word, means)
+            ctx.store.record(ctx.batch_id, "vocab", {"op": "vocab_set", "word": w, "means": before})
+            return ActionResult(f"{w} = {m}", kind="vocab", data={"action": "teach", "word": w, "means": m,
+                                                                 "replaced": before})
+        before = None if dry_run else v.forget(word)
+        if before is not None:
+            ctx.store.record(ctx.batch_id, "vocab", {"op": "vocab_set", "word": word.lower().strip(), "means": before})
+        return ActionResult(f"forgot {word}", kind="vocab", data={"action": "forget", "word": word,
+                                                                 "known": before is not None})
+
+    def refresh_vocab(self, typos: bool = True) -> dict:
+        """Look again at your apps, projects and folders (and typos in your past commands)."""
+        known, texts = None, None
+        if typos:
+            try:
+                from .vocab import known_words
+                known = known_words(8000)
+                texts = [r["text"] for r in self.usage.real_texts(days=120)]
+            except Exception as e:
+                log.info("typo learning skipped: %s", e)
+        stats = self.vocab.refresh(self.config, known, texts)
+        self.config.learned_places = self.vocab.places()
+        return stats
 
     # ------------------------------------------------------------ phase 32: focus & gaming
     def _focus_action(self, args, ctx, dry_run: bool):
@@ -583,6 +629,14 @@ class Jarvis:
         if cmd == "/selftest":
             from . import selftest
             return selftest.summary(selftest.run(log=lambda s: None))
+        if cmd == "/words":
+            if arg.strip() == "refresh":
+                s = self.refresh_vocab()
+                return (f"Looked again: {s['apps']} apps, {s['projects']} projects, {s['folders']} folders, "
+                        f"{s['typos']} typos of yours.")
+            from .actions.base import Ctx as _Ctx
+            res = self._vocab_action({"action": "list"}, _Ctx(self.config, self.store, "words"), True)
+            return self.persona.result(res)
         if cmd == "/perf":
             from .perf import PERF
             from . import onnxutil
@@ -691,9 +745,20 @@ class Jarvis:
         if last and "last" in self.hooks:
             self.hooks["last"](last)
 
+    def read_as(self, text: str) -> str:
+        """Phase 43: Indian scripts in Hinglish lettering, then your nicknames, before anything reads the command."""
+        from .indic import to_latin
+        self.vocab.reload_if_changed()
+        text = to_latin(text)
+        if re.match(r"^(?:forget|unlearn|stop using|when i say|learn that|remember that|jab main)\b|^\S+ means\b|.* isn'?t a nickname$",
+                    text.strip(), re.I):
+            return text                     # a command about a word: read it literally, not as its nickname
+        return self.vocab.expand(text)
+
     def handle(self, text: str) -> str:
         if text.strip().startswith("/"):
             return self._meta(text.strip())
+        text = self.read_as(text)
         from .perf import PERF
         self._hud("thinking")
         PERF.begin()
@@ -1343,6 +1408,11 @@ def main() -> None:
         bar.post("message", jarvis.recovery_message())
 
     def first_run():                                   # phase 44: a new PC (or Jarvis moved to one): look around
+        try:
+            if jarvis.vocab.stale():                   # phase 43: your apps, projects, folders, typos (weekly)
+                log.info("your words: %s", jarvis.refresh_vocab())
+        except Exception as e:
+            log.warning("vocab refresh failed: %s", e)
         try:
             text = jarvis.setup_check()
         except Exception as e:

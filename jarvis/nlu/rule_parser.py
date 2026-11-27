@@ -384,7 +384,31 @@ TASK_RULES: list[tuple[re.Pattern, callable]] = [
                                                                           + " tak" if re.search(r"karna hai (.+) tak$", t) else "")))),
 ]
 
-RULES: list[tuple[re.Pattern, callable]] = FOCUS_RULES + TASK_RULES + NOTE_RULES + WORKSPACE_RULES + CONTEXT_RULES + [
+# ---- phase 43: your words
+def _q(s: str) -> str:
+    return s.strip().strip("\"'").replace("\\", "\\\\").replace('"', '\\"')
+
+
+VOCAB_RULES: list[tuple[re.Pattern, callable]] = [
+    (re.compile(r"^open (?:my |the )?(.+?) (?:project|repo|repository)$|^(.+?) project kholo$", re.I),
+     lambda m, t: f'open_folder(path="{_q(m.group(1) or m.group(2))}")'),
+    (re.compile(r"^when i say ['\"]?(.+?)['\"]?,? i mean ['\"]?(.+?)['\"]?$"
+                r"|^(?:remember|learn) that ['\"]?(.+?)['\"]? (?:means|is) ['\"]?(.+?)['\"]?$"
+                r"|^['\"](.+?)['\"] means ['\"]?(.+?)['\"]?(?: from now on)?$"
+                r"|^(?!(?:this|that|it|what|which|who|he|she|they|there|here|everything|nothing|life|love|that's)\b)"
+                r"([a-z0-9][a-z0-9_-]{1,15}) means (.+?)(?: from now on)?$"
+                r"|^jab main ['\"]?(.+?)['\"]? bolun(?: to)? (?:uska matlab )?['\"]?(.+?)['\"]?(?: hai| samajhna)?$", re.I),
+     lambda m, t: (lambda g: f'vocab(action=teach, word="{_q(g[0])}", means="{_q(g[1])}")')(
+         [x for x in m.groups() if x is not None][:2])),
+    (re.compile(r"^(?:forget|unlearn|stop using) (?:the (?:word|nickname) )?['\"]?(.+?)['\"]?(?: as a nickname)?$"
+                r"|^['\"]?(.+?)['\"]? (?:is not|isn't) a nickname$", re.I),
+     lambda m, t: None if re.search(r"\bnote|\btask|\blayout|\bworkspace", t, re.I)
+     else f'vocab(action=forget, word="{_q(m.group(1) or m.group(2))}")'),
+    (re.compile(r"^(?:show|list) (?:me )?my (?:words|nicknames|vocabulary|shortcuts)$|^what (?:words|nicknames) do you know\??$", re.I),
+     lambda m, t: "vocab(action=list)"),
+]
+
+RULES: list[tuple[re.Pattern, callable]] = VOCAB_RULES + FOCUS_RULES + TASK_RULES + NOTE_RULES + WORKSPACE_RULES + CONTEXT_RULES + [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
     (re.compile(r"^(?!.*\btraining\b)(?:(?:hey )?jarvis,? )?(?:what(?:'s| is) the |show (?:me )?the |give me (?:the )?|get (?:me )?(?:the )?)?"
                 r"(?:(?:fastest|quickest|best|shortest) )?(?:route|way|directions?|road)(?: please)? (?:from .+ )?to .+$"

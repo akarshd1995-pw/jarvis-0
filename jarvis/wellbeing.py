@@ -28,8 +28,13 @@ CURRENT: "tuple | None" = None           # (engine, config) of the running Jarvi
 DAY_START_HOUR = 5                      # a "day" for screen time runs 5 am to 5 am: 1 am still counts as tonight
 
 
+def _local(ts: float) -> datetime:
+    """fromtimestamp that never raises: Windows rejects timestamps before 1970 (OSError)."""
+    return datetime(1970, 1, 1) + timedelta(seconds=ts) if ts < 86400 * 2 else datetime.fromtimestamp(ts)
+
+
 def day_key(ts: float) -> str:
-    d = datetime.fromtimestamp(ts)
+    d = _local(ts)
     if d.hour < DAY_START_HOUR:
         d -= timedelta(days=1)
     return d.strftime("%Y-%m-%d")
@@ -72,7 +77,7 @@ class Wellbeing:
 
     def save(self):
         today = day_key(self.clock())
-        keep = {k: v for k, v in self.used.items() if k >= day_key(self.clock() - 14 * 86400)}
+        keep = {k: v for k, v in self.used.items() if k >= (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=14)).strftime("%Y-%m-%d")}
         data = {"used": keep, "warned": {today: self.warned.get(today, {})}, "wound_down": self.wound_down}
         try:
             Path(self.path).write_text(json.dumps(data), encoding="utf-8")
@@ -127,7 +132,7 @@ class Wellbeing:
             late = minutes_after_midnight_ish(now)
             if late >= usual_end + 45 and late >= 22 * 60 + 30:
                 self.wound_down = today
-                out.append(("winddown", {"now": datetime.fromtimestamp(now).strftime("%H:%M").lstrip("0"),
+                out.append(("winddown", {"now": _local(now).strftime("%H:%M").lstrip("0"),
                                          "usual": fmt_clock(usual_end)}))
         return out
 
@@ -140,7 +145,7 @@ class Wellbeing:
 
 def minutes_after_midnight_ish(ts: float) -> float:
     """Minutes since midnight, with the early hours counted as the previous evening (1:30 am -> 25:30)."""
-    d = datetime.fromtimestamp(ts)
+    d = _local(ts)
     m = d.hour * 60 + d.minute
     return m + 24 * 60 if d.hour < DAY_START_HOUR else m
 

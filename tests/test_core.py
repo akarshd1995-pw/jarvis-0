@@ -2747,7 +2747,7 @@ def test_workspace_names_normalise():
 # ---------------------------------------------------------------- phase 32: focus & gaming
 class _Clock:
     def __init__(self):
-        self.t = 1_000_000.0
+        self.t = 1_000_000.0          # Jan 1970 on purpose: date code must not go below 0 (Windows raises)
 
     def __call__(self):
         return self.t
@@ -3218,3 +3218,21 @@ def test_evening_briefing_mentions_screen_limits(tmp_path):
                         {"youtube": 75 * 60, "instagram": 10 * 60}}
     text = j.briefing_text("evening")
     assert "Over your limit: youtube (1 hour 15 minutes of 1 hour)" in text or "Over your limit: youtube" in text, text
+
+
+def test_wellbeing_survives_windows_pre_1970_rule(tmp_path, monkeypatch):
+    """Windows raises OSError for datetime.fromtimestamp(<0); Linux doesn't. Copy that strictness here."""
+    import jarvis.wellbeing as W
+    real = W.datetime
+
+    class Strict(real):
+        @classmethod
+        def fromtimestamp(cls, ts, *a, **k):
+            if ts < 0:
+                raise OSError(22, "Invalid argument")
+            return real.fromtimestamp(ts, *a, **k)
+    monkeypatch.setattr(W, "datetime", Strict)
+    w, clk = _well(tmp_path, limits={"youtube": 30})
+    _run(w, clk, 40, title="YouTube", exe="chrome.exe")
+    w.save()
+    assert round(W.Wellbeing(tmp_path / "st.json", clock=clk).usage_today()["youtube"]) == 40

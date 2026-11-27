@@ -113,6 +113,11 @@ class Config:
     pause_heavy_on_battery: bool = True
     workspace_apps: dict = field(default_factory=lambda: {        # what "coding mode" / "study mode" open
         "coding": ["cursor", "claude", "chrome", "terminal"], "study": ["chrome", "notepad"]})
+    wellbeing_eyes: bool = True           # phase 34: 20-20-20 eye breaks
+    wellbeing_stretch: bool = True        # stand up after an hour without a break
+    wellbeing_winddown: bool = True       # one nudge on nights you're up well past your usual hour
+    screen_limits: dict = field(default_factory=dict)   # app -> minutes a day ("youtube": 60)
+    screen_limits_enforce: bool = False   # minimize an app once its time for the day is used up
     focus_minutes: int = 25               # phase 32: a focus session without a length
     focus_block: bool = False             # block distracting apps/sites during focus unless you say otherwise
     focus_block_sites: list = field(default_factory=lambda: ["youtube", "instagram", "netflix", "reddit", "facebook",

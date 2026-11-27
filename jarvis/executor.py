@@ -123,6 +123,16 @@ class Executor:
             try:
                 if inverse.get("op") in ("note_forget", "note_restore"):          # phase 30: notes
                     self.store.set_note_deleted(inverse["id"], inverse["op"] == "note_forget")
+                elif inverse.get("op") == "limit_set":                           # phase 34: a screen-time limit
+                    from . import wellbeing as W
+                    if W.CURRENT is not None:
+                        eng, cfg = W.CURRENT
+                        if inverse["minutes"] is None:
+                            cfg.screen_limits.pop(inverse["app"], None)
+                        else:
+                            cfg.screen_limits[inverse["app"]] = inverse["minutes"]
+                        eng.limits = cfg.screen_limits
+                        cfg.save()
                 elif inverse.get("op") == "vocab_set":                           # phase 43: a nickname
                     from . import vocab as V
                     live = V.CURRENT if V.CURRENT is not None and \

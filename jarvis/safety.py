@@ -30,7 +30,9 @@ ACTION_TIERS: dict[str, Tier] = {
     "workspace": Tier.SAFE,
     "focus": Tier.SAFE,                    # with blocking it asks first (below)
     "task": Tier.SAFE,
-    "vocab": Tier.SAFE,                    # teaching a nickname; undo forgets it                     # deleting one asks first (below); everything can be undone
+    "vocab": Tier.SAFE,
+    "screen_time": Tier.SAFE,
+    "breaks": Tier.SAFE,                    # teaching a nickname; undo forgets it                     # deleting one asks first (below); everything can be undone
     "gaming": Tier.SAFE,                # start / save / list; close and delete ask first (below)      # always asks, showing which note; undo brings it back
     "unsupported": Tier.SAFE,
     "search_web": Tier.SAFE,

@@ -63,6 +63,7 @@ class Facts:
     notes: list[tuple[str, str]] = field(default_factory=list)   # phase 30: today's (kind, text), oldest first
     focus_min: float = 0.0                                        # phase 32: minutes of focus sessions today
     tasks: list[str] = field(default_factory=list)                # phase 33: due today / overdue / still open
+    limits: list[tuple[str, int, int]] = field(default_factory=list)  # phase 34: (app, minutes used, daily limit)
     active_min: int = 0
     commands: int = 0
     alerts: int = 0
@@ -281,6 +282,12 @@ def render(f: Facts, name: str = "Jarvis", address: str = "sir", tone: str = "bu
             bits.append(f"raised {f.alerts} alert{'s' * (f.alerts != 1)}")
         if bits and not minimal:
             lines.append("I " + _list(bits) + ".")
+        over = [(a, u, m) for a, u, m in f.limits if u >= m]
+        under = [(a, u, m) for a, u, m in f.limits if 0 < u < m]
+        if over:
+            lines.append("Over your limit: " + _list([f"{a} ({_dur(u)} of {_dur(m)})" for a, u, m in over]) + ".")
+        elif under and not minimal:
+            lines.append("Inside your limits today: " + _list([f"{a} {_dur(u)} of {_dur(m)}" for a, u, m in under]) + ".")
 
     # reminders
     if f.reminders:

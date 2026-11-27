@@ -39,6 +39,7 @@ DRY = {
     "focus": "focus(action=start, minutes=25, block=yes)", "gaming": "gaming(action=on)",
     "task": 'task(action=add, text="selftest", due="friday")',
     "vocab": "vocab(action=list)",
+    "screen_time": "screen_time(action=report)", "breaks": "breaks(action=status)",
 }
 LIVE_ACTIONS = {"list_files", "move_files", "copy_files", "delete_files", "remind", "search_memory", "undo",
                 "open_result", "note", "find_notes", "delete_note"}
@@ -209,6 +210,15 @@ def run(log=print) -> list[Check]:
                 bad = [k for k, ok in steps.items() if not ok]
                 return not bad, "failed: " + ", ".join(bad) if bad else ""
             check("your words: nickname, Devanagari, undo", words)
+
+            def wellbeing():                                # phase 34: a limit, the report, undo removes it
+                steps = {"limit": reply_ok('screen_time(action=limit, app="youtube", minutes=60)')[0]
+                         and cfg.screen_limits.get("youtube") == 60,
+                         "report": "youtube" in j.handle("screen_time(action=report)").lower(),
+                         "undo": reply_ok("undo()")[0] and "youtube" not in cfg.screen_limits}
+                bad = [k for k, ok in steps.items() if not ok]
+                return not bad, "failed: " + ", ".join(bad) if bad else ""
+            check("wellbeing: screen-time limit, report, undo", wellbeing)
             # 5. everything else as a preview
             from .actions.base import Ctx
             ctx = Ctx(cfg, j.store, "selftest")

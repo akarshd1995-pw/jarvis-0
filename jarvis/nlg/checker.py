@@ -17,7 +17,8 @@ FIELD_ORDER = ["count", "files", "files_pl", "filt", "src", "dest", "name", "que
                "pct", "eta", "best", "temp", "free_gb", "minutes", "metric", "value", "typical", "channel", "title", "closest", "place", "age", "more", "version", "time", "km", "via", "what", "thing", "about", "changes", "done", "miss", "tip", "known", "apps", "until", "quiet", "blocking",
                "extra", "left", "focused", "cycle", "due", "every", "prio",
                "said", "rest", "next", "query", "s", "short", "word", "means", "old",
-               "nick", "typos", "projects", "folders", "msg"]
+               "nick", "typos", "projects", "folders", "app", "limit", "used", "how",
+               "time", "total", "top", "limits", "which", "state", "active", "now", "usual", "msg"]
 KNOWN_FOLDERS = ["Downloads", "Documents", "Desktop", "Pictures", "Music", "Videos", "Archive"]
 NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
                 "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",

@@ -1023,7 +1023,7 @@ def gen_mood(c: Ctx):
 # What a model trained on this data has learned beyond plain actions. Jarvis reads this from the model
 # files and only uses its hand-written rules/repairs for what the model has NOT learned.
 TEACHES = ["play_modes", "copy_names", "mood", "briefing", "file_categories", "new_folder", "system_control",
-           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes", "workspaces", "focus_gaming", "tasks", "your_words"]
+           "training_control", "song_suffix", "self_improve", "memory_filters", "maintenance", "directions", "usage_review", "context_refs", "notes", "workspaces", "focus_gaming", "tasks", "your_words", "wellbeing"]
 
 
 # ---------------------------------------------------------------- directions (routes, travel time)
@@ -1680,6 +1680,78 @@ def gen_vocab(c: Ctx):
     return "vocab(action=list)", rng.choice(VOCAB_LIST), {}
 
 
+# ---------------------------------------------------------------- wellbeing (phase 34)
+LIMIT_APPS = ["youtube", "instagram", "netflix", "reddit", "twitter", "facebook", "steam", "valorant", "discord",
+              "hotstar", "prime video", "twitch", "whatsapp", "spotify", "chess.com", "linkedin"]
+LIMIT_DUR = [(15, ["15 minutes"]), (20, ["20 minutes"]), (30, ["30 minutes", "half an hour"]), (45, ["45 minutes"]),
+             (60, ["an hour", "1 hour", "one hour", "60 minutes"]), (90, ["90 minutes", "1.5 hours"]),
+             (120, ["2 hours", "two hours"]), (180, ["3 hours"])]
+LIMIT_SET = frames("LIMIT_SET", [
+    "limit {a} to {d} a day", "limit {a} to {d} per day", "only {d} of {a} a day", "set a {d} limit on {a}",
+    "{a} limit {d}", "cap {a} at {d} a day",
+    "don't let me use {a} more than {d} a day",                   # 6 val_ood
+    "i only want {d} of {a} each day",                            # 7 test_ood
+    "keep {a} under {d} a day", "max {d} of {a} daily", "give me {d} of {a} per day", "set my {a} limit to {d}",
+    "restrict {a} to {d} a day", "{a} only {d} a day",
+    "no more than {d} of {a} every day",                          # val_ood
+    "allow just {d} of {a} each day",                             # test_ood
+    "i want to use {a} for only {d} a day", "limit my {a} time to {d}", "cap my {a} usage at {d}",
+    "only allow {d} of {a} a day", "each day {d} of {a} max", "just {d} of {a} every day",
+    "don't let me spend more than {d} on {a}", "no more than {d} of {a}", "let me use {a} for {d} a day",
+    "{d} of {a} is enough, limit it", "it's too much {a}, limit it to {d}", "don't let me go over {d} of {a}",
+    "no more {a} than {d} a day", "i spend too long on {a}, cap it at {d}", "never more than {d} of {a} a day",
+    "spend at most {d} on {a}",
+    "never let {a} go past {d} a day", "at most {d} of {a}",
+])
+LIMIT_HI = ["{a} sirf {d} roz", "{a} ka limit {d} kar do", "roz {d} se zyada {a} nahi"]
+UNLIMIT = ["remove the {a} limit", "no limit on {a}", "unlimit {a}", "delete my {a} limit", "{a} ka limit hata do",
+           "stop limiting {a}"]
+APP_TIME = ["how much {a} today", "how long have i spent on {a} today", "how much time on {a} today",
+            "{a} screen time today", "aaj kitna {a} dekha"]
+SCREEN_REPORT = ["screen time today", "my screen time", "how much screen time today", "show my screen time",
+                 "what did i spend my time on today", "how long have i been on the computer today",
+                 "aaj kitna screen time hua", "screen time report"]
+BREAKS_OFF = [("all", ["stop break reminders", "turn off break reminders", "no more breaks", "disable break reminders",
+                       "break reminders band karo"]),
+              ("eyes", ["turn off eye break reminders", "stop the eye breaks", "no more 20-20-20 reminders"]),
+              ("stretch", ["stop stretch reminders", "no more stretch reminders", "turn off stretch reminders"])]
+BREAKS_ON = [("all", ["turn on break reminders", "start break reminders again", "enable break reminders",
+                      "break reminders chalu karo"]),
+             ("eyes", ["turn on eye break reminders", "remind me to rest my eyes"]),
+             ("stretch", ["turn on stretch reminders", "remind me to stretch"])]
+SNOOZE = ["snooze breaks for {d}", "pause break reminders for {d}", "no breaks for {d}", "hold the break reminders for {d}",
+          "{d} tak break reminders mat do"]
+BREAK_STATUS = ["when was my last break", "break reminder status", "how long have i been at the screen",
+                "how long since my last break"]
+
+
+def gen_wellbeing(c: Ctx):
+    rng = c.rng
+    r = rng.random()
+    app = rng.choice(LIMIT_APPS) if rng.random() < 0.8 else LX.pseudo_word(rng).lower()
+    if r < 0.35:
+        mins, says = rng.choice(LIMIT_DUR)
+        tpl = rng.choice(LIMIT_HI) if c.hing else c.T(LIMIT_SET)
+        return dsl_call("screen_time", {"action": "limit", "app": q(app), "minutes": mins}), \
+            tpl.format(a=slot(app), d=rng.choice(says)), {}
+    if r < 0.45:
+        return dsl_call("screen_time", {"action": "unlimit", "app": q(app)}), rng.choice(UNLIMIT).format(a=slot(app)), {}
+    if r < 0.58:
+        return dsl_call("screen_time", {"action": "report", "app": q(app)}), rng.choice(APP_TIME).format(a=slot(app)), {}
+    if r < 0.7:
+        return "screen_time(action=report)", rng.choice(SCREEN_REPORT), {}
+    if r < 0.8:
+        kind, says = rng.choice(BREAKS_OFF)
+        return "breaks(action=off" + (f", kind={kind})" if kind != "all" else ")"), rng.choice(says), {}
+    if r < 0.88:
+        kind, says = rng.choice(BREAKS_ON)
+        return "breaks(action=on" + (f", kind={kind})" if kind != "all" else ")"), rng.choice(says), {}
+    if r < 0.95:
+        mins, says = rng.choice(LIMIT_DUR[:6])
+        return f"breaks(action=snooze, minutes={mins})", rng.choice(SNOOZE).format(d=rng.choice(says)), {}
+    return "breaks(action=status)", rng.choice(BREAK_STATUS), {}
+
+
 # ---------------------------------------------------------------- maintenance (phase 29)
 HEALTH = frames("HEALTH", [
     "run a health check", "health check", "check yourself", "are you working properly", "run diagnostics",
@@ -1765,7 +1837,7 @@ GENERATORS = [
     (gen_remind, 15), (gen_open_app, 10), (gen_open_url, 8), (gen_open_folder, 5),
     (gen_system, 7), (gen_search, 6), (gen_search_web, 8), (gen_play, 12),
     (gen_window, 6), (gen_desktop, 3), (gen_media, 5), (gen_brightness, 3), (gen_set_volume, 3), (gen_radio, 3),
-    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6), (gen_workspace, 5), (gen_focus, 5), (gen_tasks, 7), (gen_vocab, 2),
+    (gen_screenshot, 3), (gen_record, 2.5), (gen_power, 3), (gen_training, 3), (gen_briefing, 3), (gen_maintenance, 2), (gen_directions, 4), (gen_context, 6), (gen_notes, 6), (gen_workspace, 5), (gen_focus, 5), (gen_tasks, 7), (gen_vocab, 2), (gen_wellbeing, 4),
 ]
 _FNS, _WEIGHTS = zip(*GENERATORS)
 

@@ -179,6 +179,26 @@ def fullscreen_busy() -> str | None:
         return None
 
 
+def idle_seconds() -> float | None:
+    """Seconds since you last touched the keyboard or mouse (None off Windows)."""
+    if not IS_WINDOWS:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class LII(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+        lii = LII()
+        lii.cbSize = ctypes.sizeof(LII)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+            return None
+        tick = ctypes.windll.kernel32.GetTickCount() & 0xFFFFFFFF
+        return ((tick - lii.dwTime) & 0xFFFFFFFF) / 1000.0
+    except Exception:
+        return None
+
+
 # ------------------------------------------------------------------ browser
 BROWSERS = {   # ProgId prefix -> (name, app alias)
     "ChromeHTML": ("Google Chrome", "chrome"), "MSEdgeHTM": ("Microsoft Edge", "edge"),

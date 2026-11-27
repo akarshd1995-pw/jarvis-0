@@ -107,6 +107,13 @@ class Jarvis:
         _V.CURRENT = self.vocab
         config.learned_places = self.vocab.places()
         REGISTRY["vocab"] = self._vocab_action
+        from . import wellbeing as W                   # phase 34: breaks, screen time, wind-down
+        self.wellbeing = W.Wellbeing(config.data_dir / "screentime.json", limits=config.screen_limits,
+                                     eyes=config.wellbeing_eyes, stretch=config.wellbeing_stretch,
+                                     winddown=config.wellbeing_winddown, enforce=config.screen_limits_enforce)
+        W.CURRENT = (self.wellbeing, config)
+        REGISTRY["screen_time"] = self._screen_time_action
+        REGISTRY["breaks"] = self._breaks_action
         REGISTRY["focus"] = self._focus_action
         REGISTRY["gaming"] = self._gaming_action
         from .dialog import Conversation, DialogModel  # phase 6: follow-ups and asking back
@@ -228,6 +235,116 @@ class Jarvis:
         t = threading.Thread(target=loop, daemon=True, name="yield")
         t.start()
         return t
+
+    # ------------------------------------------------------------ phase 34: wellbeing
+    def _screen_time_action(self, args, ctx, dry_run: bool):
+        from .briefing import focus_minutes
+        from .wellbeing import day_key
+        act = str(args["action"])
+        w, cfg = self.wellbeing, self.config
+        if act == "report":
+            now = time.time()
+            start = datetime_day_start(now)
+            per_app = focus_minutes(self.store.events_since(start), now)
+            total = sum(per_app.values()) / 60
+            top = sorted(per_app.items(), key=lambda x: -x[1])[:4]
+            used = w.usage_today()
+            limits = {a: {"limit": m, "used": round(used.get(a, 0))} for a, m in cfg.screen_limits.items()}
+            app = str(args.get("app", "")).strip().lower()
+            return ActionResult("screen time", kind="screen_time", data={
+                "action": "report", "total_min": round(total), "top": [(a, round(s / 60)) for a, s in top],
+                "limits": limits, "app": app, "app_used": round(used.get(app, 0)) if app else None,
+                "app_minutes": round(per_app.get(app, 0) / 60) if app else None})
+        app = str(args.get("app", "")).strip().lower()
+        if not app:
+            raise ValueError("which app? e.g. \"limit youtube to an hour a day\"")
+        before = cfg.screen_limits.get(app)
+        if act == "limit":
+            minutes = int(args.get("minutes") or 60)
+            if not dry_run:
+                cfg.screen_limits[app] = minutes
+                w.limits = cfg.screen_limits
+                cfg.save()
+                ctx.store.record(ctx.batch_id, "limit", {"op": "limit_set", "app": app, "minutes": before})
+            return ActionResult(f"limit {app} {minutes}", kind="screen_time",
+                                data={"action": "limit", "app": app, "minutes": minutes, "before": before,
+                                      "used": round(w.usage_today().get(app, 0)), "enforce": cfg.screen_limits_enforce})
+        if not dry_run and before is not None:
+            cfg.screen_limits.pop(app, None)
+            w.limits = cfg.screen_limits
+            cfg.save()
+            ctx.store.record(ctx.batch_id, "limit", {"op": "limit_set", "app": app, "minutes": before})
+        return ActionResult(f"unlimit {app}", kind="screen_time", data={"action": "unlimit", "app": app,
+                                                                        "had": before is not None})
+
+    def _breaks_action(self, args, ctx, dry_run: bool):
+        act = str(args["action"])
+        kind = str(args.get("kind", "all"))
+        w, cfg = self.wellbeing, self.config
+        if act == "snooze":
+            minutes = int(args.get("minutes") or 60)
+            if not dry_run:
+                w.snooze(minutes)
+            return ActionResult("breaks snoozed", kind="breaks", data={"action": "snooze", "minutes": minutes})
+        if act in ("on", "off") and not dry_run:
+            on = act == "on"
+            if kind in ("eyes", "all"):
+                w.eyes = cfg.wellbeing_eyes = on
+            if kind in ("stretch", "all"):
+                w.stretch = cfg.wellbeing_stretch = on
+            cfg.save()
+        return ActionResult("breaks", kind="breaks", data={"action": act, "kind": kind, "eyes": w.eyes,
+                                                           "stretch": w.stretch,
+                                                           "active_min": round(w.active_s / 60)})
+
+    def start_wellbeing(self, say, every_s: float = 5.0) -> threading.Thread:
+        """Every few seconds: how long you've been at the screen, what's in front, and your usual hours."""
+        from . import machine, winlayout
+        from .wellbeing import usual_end
+        cache = {"usual": None, "at": 0.0, "saved": time.time()}
+
+        def loop():
+            while True:
+                try:
+                    now = time.time()
+                    if now - cache["at"] > 3600:
+                        ts = [t for t, _, _ in self.store.events_since(now - 15 * 86400)]
+                        cache["usual"], cache["at"] = usual_end(ts, now), now
+                    w, c = self.wellbeing, self.config                   # Settings changes apply right away
+                    w.limits, w.enforce = c.screen_limits, c.screen_limits_enforce
+                    w.eyes, w.stretch, w.winddown = c.wellbeing_eyes, c.wellbeing_stretch, c.wellbeing_winddown
+                    fg = winlayout.foreground()
+                    quiet = (self.focus.session is not None and self.focus.session.phase == "work") or \
+                        self.focus.gaming is not None
+                    events = self.wellbeing.tick(machine.idle_seconds(), fg.title if fg else "", fg.exe if fg else "",
+                                                 quiet=quiet, usual_end=cache["usual"])
+                    for ev, d in events:
+                        if ev == "minimize" and fg is not None:
+                            winlayout.minimize(fg.hwnd)
+                            continue
+                        say(ev, self.persona.say(*self._wellbeing_words(ev, d)))
+                    if now - cache["saved"] > 60:
+                        self.wellbeing.save()
+                        cache["saved"] = now
+                except Exception as e:
+                    log.warning("wellbeing: %s", e)
+                time.sleep(every_s)
+
+        t = threading.Thread(target=loop, daemon=True, name="wellbeing")
+        t.start()
+        return t
+
+    @staticmethod
+    def _wellbeing_words(ev: str, d: dict) -> tuple[str, dict]:
+        if ev == "eyes":
+            return "well_eyes", {}
+        if ev == "stretch":
+            return "well_stretch", {"minutes": d["minutes"]}
+        if ev == "limit_warn":
+            return "well_limit_warn", {"app": d["app"].title(), "left": d["left"]}
+        if ev == "limit_hit":
+            return "well_limit_hit", {"app": d["app"].title(), "minutes": d["minutes"]}
+        return "well_winddown", {"now": d["now"], "usual": d["usual"]}
 
     # ------------------------------------------------------------ phase 43: your words
     def _vocab_action(self, args, ctx, dry_run: bool):
@@ -524,6 +641,9 @@ class Jarvis:
         facts = briefing.gather(kind, self.store, self.sampler.snapshot if self.sampler else None, self.job_logs,
                                 PROJECT_ROOT / "checkpoints" / "eval_report.txt", downloads, now)
         facts.learning = self.learning_lines(now)
+        if kind == "evening" and getattr(self, "wellbeing", None) is not None:
+            used = self.wellbeing.usage_today()
+            facts.limits = [(a, int(used.get(a, 0)), int(m)) for a, m in (self.config.screen_limits or {}).items()]
         return briefing.render(facts, self.config.persona_name, self.config.persona_address, self.config.persona_tone)
 
     def _briefing_action(self, args, ctx, dry_run: bool):
@@ -1174,6 +1294,16 @@ class Jarvis:
         return items
 
 
+def datetime_day_start(now: float) -> float:
+    """5 am today (or yesterday, before 5 am): where a screen-time day begins."""
+    from datetime import datetime, timedelta
+    d = datetime.fromtimestamp(now)
+    start = d.replace(hour=5, minute=0, second=0, microsecond=0)
+    if d < start:
+        start -= timedelta(days=1)
+    return start.timestamp()
+
+
 def _cli_confirm(tier: Tier, summary: str, items: list[str]) -> bool:
     print(summary)
     for i in items[:15]:
@@ -1376,6 +1506,15 @@ def main() -> None:
         watchdog.register("backups", jarvis.start_maintenance(), jarvis.start_maintenance)
         yield_msg = lambda text: toast("Training paused", text, 8)  # noqa: E731
         focus_say = lambda text: bar.post("message", text)  # noqa: E731
+
+        def well_say(ev, text):                        # phase 34: a small, short notice; never the full bar
+            if not jarvis.notify_or_hold("toast", text):
+                return
+            title = {"eyes": "Eye break", "stretch": "Stretch", "winddown": "Late night"}.get(ev, "Screen time")
+            bar.post("call", lambda: Toast(bar.root, title, text, seconds=12))
+            if hud is not None:
+                bar.post("call", lambda: hud.set_last(text))
+        watchdog.register("wellbeing", jarvis.start_wellbeing(well_say), lambda: jarvis.start_wellbeing(well_say))
         watchdog.register("focus", jarvis.start_focus_ticker(focus_say), lambda: jarvis.start_focus_ticker(focus_say))
         watchdog.register("yield", jarvis.start_yield(yield_msg), lambda: jarvis.start_yield(yield_msg))
     watchdog.start()

@@ -408,7 +408,46 @@ VOCAB_RULES: list[tuple[re.Pattern, callable]] = [
      lambda m, t: "vocab(action=list)"),
 ]
 
-RULES: list[tuple[re.Pattern, callable]] = VOCAB_RULES + FOCUS_RULES + TASK_RULES + NOTE_RULES + WORKSPACE_RULES + CONTEXT_RULES + [
+# ---- phase 34: wellbeing
+def _limit(app: str, text: str) -> str:
+    from ..wellbeing import parse_app_minutes
+    mins = parse_app_minutes(text) or 60
+    return f'screen_time(action=limit, app="{_q(app)}", minutes={mins})'
+
+
+def _breaks(text: str) -> str:
+    t = text.lower()
+    kind = "eyes" if re.search(r"\beye", t) else "stretch" if "stretch" in t else "all"
+    if re.search(r"snooze|pause|hold|mute", t):
+        from ..wellbeing import parse_app_minutes
+        return f"breaks(action=snooze, minutes={parse_app_minutes(t) or 60})"
+    on = not re.search(r"\b(?:off|stop|disable|no more|don'?t|band|no)\b", t)
+    return f"breaks(action={'on' if on else 'off'}" + (f", kind={kind}" if kind != "all" else "") + ")"
+
+
+WELL_RULES: list[tuple[re.Pattern, callable]] = [
+    (re.compile(r"^(?:limit|cap) (.+?) to (.+?)(?: a| per| every)? ?day$|^(?:only|just) (.+?) of (.+?) (?:a|per) day$"
+                r"|^set an? (.+?) (?:daily )?limit (?:on|for) (.+)$|^(.+?) (?:daily )?limit (\d+.*)$", re.I),
+     lambda m, t: _limit(m.group(1), m.group(2)) if m.group(1) else _limit(m.group(4), m.group(3)) if m.group(3)
+     else _limit(m.group(6), m.group(5)) if m.group(5) else _limit(m.group(7), m.group(8))),
+    (re.compile(r"^(?:remove|delete|clear|drop) the (.+?) limit$|^(?:no|remove the) limit (?:on|for) (.+)$"
+                r"|^unlimit (.+)$", re.I),
+     lambda m, t: f'screen_time(action=unlimit, app="{_q(m.group(1) or m.group(2) or m.group(3))}")'),
+    (re.compile(r"^how (?:much|long) (?:time )?(?:have i (?:spent|been) on |did i spend on |of )?(.+?) (?:have i done |did i watch )?today\??$", re.I),
+     lambda m, t: "screen_time(action=report)" if re.fullmatch(r"(?:screen ?time|time|screen)", m.group(1), re.I)
+     else f'screen_time(action=report, app="{_q(m.group(1))}")'),
+    (re.compile(r"^(?:(?:show )?(?:my )?screen ?time(?: today)?|how much screen ?time (?:today|did i have today)|aaj kitna screen ?time hua)\??$", re.I),
+     lambda m, t: "screen_time(action=report)"),
+    (re.compile(r"^(?:turn|switch) (?:on|off) (?:the )?(?:eye[- ]?)?(?:break|stretch)(?: reminders?)?$"
+                r"|^(?:stop|disable|enable|start|no more|resume) (?:the )?(?:eye[- ]?)?(?:break|stretch)(?:e?s)?(?: reminders?)?$"
+                r"|^(?:snooze|pause|mute|hold) (?:the )?(?:eye[- ]?)?(?:break|stretch)(?:e?s)?(?: reminders?)?(?: for .+)?$"
+                r"|^(?:break|stretch) reminders? (?:on|off|band karo|chalu karo)$|^no (?:eye )?break reminders$", re.I),
+     lambda m, t: _breaks(t)),
+    (re.compile(r"^(?:when was my last break|break (?:reminders? )?status|how long have i been at the screen)\??$", re.I),
+     lambda m, t: "breaks(action=status)"),
+]
+
+RULES: list[tuple[re.Pattern, callable]] = WELL_RULES + VOCAB_RULES + FOCUS_RULES + TASK_RULES + NOTE_RULES + WORKSPACE_RULES + CONTEXT_RULES + [
     (re.compile(r"^undo\b", re.I), lambda m, t: "undo()"),
     (re.compile(r"^(?!.*\btraining\b)(?:(?:hey )?jarvis,? )?(?:what(?:'s| is) the |show (?:me )?the |give me (?:the )?|get (?:me )?(?:the )?)?"
                 r"(?:(?:fastest|quickest|best|shortest) )?(?:route|way|directions?|road)(?: please)? (?:from .+ )?to .+$"

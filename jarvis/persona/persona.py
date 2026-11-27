@@ -191,6 +191,10 @@ class Persona:
             return self._plan_task(d)
         if k == "vocab":
             return self._plan_vocab(d)
+        if k == "screen_time":
+            return self._plan_screen_time(d)
+        if k == "breaks":
+            return self._plan_breaks(d)
         if k == "tasks":
             return self._plan_tasks(d)
         if k == "gaming":
@@ -352,6 +356,43 @@ class Persona:
     def _and(items: list[str]) -> str:
         items = list(dict.fromkeys(items))
         return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1] if items else ""
+
+    @staticmethod
+    def _mins(m: float) -> str:
+        from ..focus import fmt_left
+        return fmt_left(int(m * 60))
+
+    def _plan_screen_time(self, d: dict) -> tuple[str, dict]:
+        act = d["action"]
+        if act == "limit":
+            used = f" You've used {self._mins(d['used'])} of it today." if d.get("used") else ""
+            how = " When it's up, I'll minimize it." if d.get("enforce") else \
+                " I'll tell you when you're close and when it's up."
+            return "well_limit_set", {"app": d["app"].title(), "limit": self._mins(d["minutes"]), "used": used, "how": how}
+        if act == "unlimit":
+            return ("well_unlimited" if d.get("had") else "well_no_limit"), {"app": d["app"].title()}
+        if d.get("app"):
+            lim = d["limits"].get(d["app"])
+            m = max(d.get("app_used") or 0, d.get("app_minutes") or 0)
+            extra = f" Your limit is {self._mins(lim['limit'])}." if lim else ""
+            return "well_app_time", {"app": d["app"].title(), "time": self._mins(m), "extra": extra}
+        top = ", ".join(f"{a} {self._mins(m)}" for a, m in d["top"] if m >= 1) or "nothing much yet"
+        lims = "; ".join(f"{a.title()} {self._mins(v['used'])} of {self._mins(v['limit'])}"
+                         for a, v in d["limits"].items())
+        return "well_report", {"total": self._mins(d["total_min"]), "top": top,
+                               "limits": f" Limits: {lims}." if lims else ""}
+
+    def _plan_breaks(self, d: dict) -> tuple[str, dict]:
+        act = d["action"]
+        if act == "snooze":
+            return "well_snoozed", {"time": self._mins(d["minutes"])}
+        which = {"eyes": "Eye-break", "stretch": "Stretch", "all": "Break"}[d.get("kind", "all")]
+        if act in ("on", "off"):
+            return ("well_breaks_on" if act == "on" else "well_breaks_off"), {"which": which}
+        state = []
+        state.append("eye breaks every 20 minutes" if d["eyes"] else "no eye breaks")
+        state.append("a stretch after an hour" if d["stretch"] else "no stretch reminders")
+        return "well_breaks_status", {"state": " and ".join(state), "active": self._mins(d["active_min"])}
 
     def _plan_vocab(self, d: dict) -> tuple[str, dict]:
         act = d["action"]

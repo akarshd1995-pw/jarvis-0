@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -28,8 +29,8 @@ class Toggle(tk.Canvas):
 
 
 class SettingsWindow:
-    PAGES = ["General", "Persona", "HUD & alerts", "Briefings", "Focus & gaming", "Places & maps", "Folders & apps",
-             "Privacy"]
+    PAGES = ["General", "Persona", "HUD & alerts", "Briefings", "Focus & gaming", "Wellbeing", "Places & maps",
+             "Folders & apps", "Privacy"]
 
     def __init__(self, parent: tk.Misc, config: Config):
         self.config = config
@@ -173,6 +174,11 @@ class SettingsWindow:
         self.maps_osm = tk.BooleanVar(value=c.maps_osm)
         self.learn = tk.BooleanVar(value=c.learn_from_usage)
         self.focus_min = tk.StringVar(value=str(c.focus_minutes))
+        self.w_eyes = tk.BooleanVar(value=c.wellbeing_eyes)
+        self.w_stretch = tk.BooleanVar(value=c.wellbeing_stretch)
+        self.w_wind = tk.BooleanVar(value=c.wellbeing_winddown)
+        self.w_enforce = tk.BooleanVar(value=c.screen_limits_enforce)
+        self.w_limits = tk.StringVar(value=", ".join(f"{a} {m}" for a, m in (c.screen_limits or {}).items()))
         self.focus_block = tk.BooleanVar(value=c.focus_block)
         self.block_sites = tk.StringVar(value=", ".join(c.focus_block_sites))
         self.block_apps = tk.StringVar(value=", ".join(c.focus_block_apps))
@@ -254,6 +260,18 @@ class SettingsWindow:
                       "Program files, comma separated: steam.exe, discord.exe ...")
             self._row(pg, "Gaming mode by itself", tog(self.gaming_auto),
                       "When a full-screen game starts: quiet, HUD hidden, training paused; a summary afterwards.")
+        elif name == "Wellbeing":
+            self._title(pg, "Wellbeing", "Small nudges. Never during a focus session or a game.")
+            self._row(pg, "Eye breaks (20-20-20)", tog(self.w_eyes),
+                      "Every 20 minutes at the screen: look 20 feet away for 20 seconds.")
+            self._row(pg, "Stretch reminders", tog(self.w_stretch),
+                      "After an hour without a break. Five minutes away from the keyboard counts as one.")
+            self._row(pg, "Late-night nudge", tog(self.w_wind),
+                      "Once, on nights you're well past the time you usually stop (learned from your activity).")
+            self._row(pg, "Daily limits", lambda p: self._entry(p, self.w_limits, 34),
+                      "App and minutes a day, comma separated: youtube 60, instagram 30, steam.exe 120")
+            self._row(pg, "Minimize apps over their limit", tog(self.w_enforce),
+                      "Off: just tell me. On: also minimize the app when it comes to the front.")
         elif name == "Places & maps":
             self._title(pg, "Places & maps", "\"how long to get home\", \"fastest route to the airport\".")
             self._row(pg, "Home", lambda p: self._entry(p, self.home_addr, 34), "An address or area, e.g. HSR Layout, Bengaluru")
@@ -340,6 +358,14 @@ class SettingsWindow:
         c.maps_api_key = protect(key) if key else ""        # encrypted to your Windows account
         c.maps_osm = self.maps_osm.get()
         c.learn_from_usage = self.learn.get()
+        c.wellbeing_eyes, c.wellbeing_stretch = self.w_eyes.get(), self.w_stretch.get()
+        c.wellbeing_winddown, c.screen_limits_enforce = self.w_wind.get(), self.w_enforce.get()
+        limits = {}
+        for part in self.w_limits.get().split(","):
+            m = re.match(r"^\s*(.+?)\s+(\d+)\s*(?:m|min|mins|minutes)?\s*$", part)
+            if m:
+                limits[m.group(1).strip().lower()] = int(m.group(2))
+        c.screen_limits = limits
         try:
             c.focus_minutes = max(1, min(600, int(self.focus_min.get().strip())))
         except ValueError:

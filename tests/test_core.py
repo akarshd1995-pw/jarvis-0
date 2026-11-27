@@ -3106,3 +3106,115 @@ def test_nickname_undo_with_coarse_windows_timestamps(tmp_path, monkeypatch):
     assert j.read_as("dl kholo") == "downloads kholo"
     j.handle("undo()")
     assert j.read_as("dl kholo") == "dl kholo"
+
+
+# ---------------------------------------------------------------- phase 34: wellbeing
+def _well(tmp_path, **kw):
+    from jarvis.wellbeing import Wellbeing
+    clk = _Clock()
+    return Wellbeing(tmp_path / "st.json", clock=clk, **kw), clk
+
+
+def _run(w, clk, minutes, idle=5, title="Code", exe="code.exe", quiet=False, usual=None, step=5):
+    out = []
+    for _ in range(int(minutes * 60 / step)):
+        clk.t += step
+        out += w.tick(idle, title, exe, quiet=quiet, usual_end=usual)
+    return out
+
+
+def test_eye_and_stretch_breaks(tmp_path):
+    w, clk = _well(tmp_path)
+    w.tick(5, "Code", "code.exe")
+    evs = [e for e, _ in _run(w, clk, 61)]
+    assert evs == ["eyes", "eyes", "stretch"]                  # 20, 40 min: eyes; 60 min: stretch instead
+    _run(w, clk, 10, idle=600)                                 # ten minutes away: a real break
+    assert w.active_s == 0 and [e for e, _ in _run(w, clk, 19)] == []
+    assert [e for e, _ in _run(w, clk, 30, quiet=True)] == []  # focus / gaming: no break nudges
+    w.snooze(30)
+    assert [e for e, _ in _run(w, clk, 25)] == []
+
+
+def test_screen_time_limits_warn_once_and_enforce(tmp_path):
+    w, clk = _well(tmp_path, limits={"youtube": 30}, eyes=False, stretch=False)
+    w.tick(5, "", "")
+    evs = _run(w, clk, 40, title="lofi - YouTube - Google Chrome", exe="chrome.exe")
+    kinds = [e for e, _ in evs]
+    assert kinds == ["limit_warn", "limit_hit"]                # at 80% and at 100%, once each
+    assert evs[0][1]["left"] == 6 and round(w.usage_today()["youtube"]) == 40
+    _run(w, clk, 30, title="Docs - Chrome", exe="chrome.exe")  # other tabs don't count
+    assert round(w.usage_today()["youtube"]) == 40
+    w.enforce = True
+    assert ("minimize", {"app": "youtube"}) in _run(w, clk, 1, title="YouTube", exe="chrome.exe")
+    w.save()
+    from jarvis.wellbeing import Wellbeing
+    again = Wellbeing(tmp_path / "st.json", limits={"youtube": 30}, clock=clk)
+    assert round(again.usage_today()["youtube"]) == 41         # survives a restart
+    from jarvis.wellbeing import matches
+    assert matches("steam", "Steam", "C:/Steam/steam.exe") and not matches("tube", "YouTube", "chrome.exe")
+
+
+def test_wind_down_learns_your_hours(tmp_path):
+    from datetime import datetime, timedelta
+    from jarvis.wellbeing import fmt_clock, usual_end
+    base = datetime(2026, 11, 27, 9, 0)
+    ev = []
+    for d in range(1, 11):                                     # most nights you stop around 23:30
+        day = base - timedelta(days=d)
+        ev += [day.replace(hour=10).timestamp(), day.replace(hour=23, minute=30).timestamp()]
+    u = usual_end(ev, base.timestamp())
+    assert u == 23 * 60 + 30 and fmt_clock(u) == "11:30 pm"
+    assert usual_end(ev[:4], base.timestamp()) is None         # not enough history yet
+    w, clk = _well(tmp_path, eyes=False, stretch=False)
+    clk.t = base.replace(hour=23, minute=50).timestamp()
+    assert [e for e, _ in _run(w, clk, 5, usual=u)] == []      # a bit late: fine
+    clk.t = (base + timedelta(days=1)).replace(hour=0, minute=30).timestamp()
+    evs = _run(w, clk, 30, usual=u)
+    assert [e for e, _ in evs] == ["winddown"] and evs[0][1]["usual"] == "11:30 pm"   # once a night
+
+
+def test_screen_time_and_breaks_through_jarvis(tmp_path):
+    j = _jarvis(tmp_path)
+    j.config.show_details = False
+    out = j.handle("limit youtube to an hour a day")
+    assert "Youtube: 1 hour a day" in out and j.config.screen_limits == {"youtube": 60}
+    j.handle("undo")
+    assert j.config.screen_limits == {}
+    j.handle("limit instagram to 30 minutes a day")
+    assert "Instagram" in j.handle("screen time today")
+    assert "Removed the limit" in j.handle("remove the instagram limit")
+    assert "off" in j.handle("turn off eye break reminders") and not j.wellbeing.eyes and j.wellbeing.stretch
+    assert "30 minutes" in j.handle("snooze breaks for 30 minutes")
+    assert "since your last break" in j.handle("when was my last break")
+
+
+def test_wellbeing_rules_and_training_data():
+    import random
+    from datagen.generate_intents import TEACHES, gen_wellbeing, Ctx
+    from jarvis.dsl.grammar import canonical
+    from jarvis.nlu.rule_parser import rule_parse
+    cases = {"limit youtube to an hour a day": 'screen_time(action=limit, app="youtube", minutes=60)',
+             "only 2 hours of steam a day": 'screen_time(action=limit, app="steam", minutes=120)',
+             "remove the youtube limit": 'screen_time(action=unlimit, app="youtube")',
+             "how much youtube today": 'screen_time(action=report, app="youtube")',
+             "aaj kitna screen time hua": "screen_time(action=report)",
+             "turn off eye break reminders": "breaks(action=off, kind=eyes)",
+             "snooze breaks for 30 minutes": "breaks(action=snooze, minutes=30)",
+             "how long is left": "focus(action=status)"}
+    for text, want in cases.items():
+        assert str(rule_parse(text)) == want, (text, rule_parse(text))
+    assert "wellbeing" in TEACHES
+    r = random.Random(4)
+    progs = [canonical(gen_wellbeing(Ctx(r, "train"))[0]) for _ in range(1000)]
+    for bit in ("action=limit", "action=unlimit", "screen_time(action=report)", "breaks(action=off", "action=snooze",
+                "breaks(action=status)"):
+        assert any(bit in p for p in progs), bit
+
+
+def test_evening_briefing_mentions_screen_limits(tmp_path):
+    j = _jarvis(tmp_path)
+    j.config.screen_limits = {"youtube": 60, "instagram": 30}
+    j.wellbeing.used = {__import__("jarvis.wellbeing", fromlist=["x"]).day_key(j.wellbeing.clock()):
+                        {"youtube": 75 * 60, "instagram": 10 * 60}}
+    text = j.briefing_text("evening")
+    assert "Over your limit: youtube (1 hour 15 minutes of 1 hour)" in text or "Over your limit: youtube" in text, text
